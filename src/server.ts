@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { loadConfig } from "./config/env";
+import { patchRuntimeLoopConfig, readRuntimeLoopConfig, resetRuntimeLoopConfig } from "./config/runtime";
 import {
   getLoopStatus,
   instructLoop,
@@ -82,6 +83,25 @@ const server = Bun.serve({
 
     if (url.pathname === "/api/status" && request.method === "GET") {
       return json(await getLoopStatus(config));
+    }
+
+    if (url.pathname === "/api/config" && request.method === "GET") {
+      return json(await readRuntimeLoopConfig(config));
+    }
+
+    if (url.pathname === "/api/config" && request.method === "POST") {
+      const body = await parseBody(request);
+      return json({
+        ok: true,
+        config: await patchRuntimeLoopConfig(config, body)
+      });
+    }
+
+    if (url.pathname === "/api/config/reset" && request.method === "POST") {
+      return json({
+        ok: true,
+        config: await resetRuntimeLoopConfig(config)
+      });
     }
 
     if (url.pathname === "/api/loop/start" && request.method === "POST") {

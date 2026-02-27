@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import type { AppConfig } from "../config/env";
+import { readRuntimeLoopConfig, runtimeLoopConfigToEnv } from "../config/runtime";
 import { listRunRecords, readLastLogTail } from "../reporting/summary";
 import type { LoopStateData } from "../types/contracts";
 import { readJsonFile } from "../utils/fs";
@@ -36,11 +37,16 @@ export async function startBackgroundLoop(config: AppConfig): Promise<{ started:
   }
 
   await clearFlag(paths.stopFlagPath);
+  const runtimeConfig = await readRuntimeLoopConfig(config);
+  const runtimeEnv = runtimeLoopConfigToEnv(runtimeConfig);
   const child = spawn("bun", ["run", "scripts/autoloop.ts", "run"], {
     cwd: process.cwd(),
     detached: true,
     stdio: "ignore",
-    env: process.env
+    env: {
+      ...process.env,
+      ...runtimeEnv
+    }
   });
   child.unref();
 

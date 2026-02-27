@@ -145,6 +145,16 @@ Commands:
 - `watch` : Tail the live loop log.
 - `instruct <message>` : Inject real-time human feedback or guidance into the planner for the next round.
 
+### Operator-friendly startup
+
+To minimize CLI usage in daily operation, provide two startup scripts:
+- `scripts/dev.sh`
+  - Starts API server + Vite UI for development.
+  - Web UI is the primary control surface for loop start/pause/resume/stop.
+- `scripts/prod.sh`
+  - Builds Web UI and starts API server that serves static Web assets.
+  - Web UI is the primary control surface for loop operations and runtime parameter changes.
+
 ## 8. Web Console Requirements
 
 Default bind:
@@ -160,6 +170,9 @@ Pages:
 API endpoints:
 - `GET /api/health`
 - `GET /api/status`
+- `GET /api/config`
+- `POST /api/config`
+- `POST /api/config/reset`
 - `POST /api/loop/start`
 - `POST /api/loop/stop`
 - `POST /api/loop/pause`
