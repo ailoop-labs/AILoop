@@ -1,0 +1,25 @@
+{
+  "name": "autoloop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "autoloop": "bun run scripts/autoloop.ts",
+    "run": "bun run scripts/autoloop.ts run",
+    "start": "bun run scripts/autoloop.ts start",
+    "stop": "bun run scripts/autoloop.ts stop",
+    "pause": "bun run scripts/autoloop.ts pause",
+    "resume": "bun run scripts/autoloop.ts resume",
+    "status": "bun run scripts/autoloop.ts status",
+    "watch": "bun run scripts/autoloop.ts watch",
+    "server": "bun run src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "web:dev": "bun --cwd=web run dev",
+    "web:build": "bun --cwd=web run build",
+    "web:preview": "bun --cwd=web run preview"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "@types/bun": "latest"
+  }
+}
