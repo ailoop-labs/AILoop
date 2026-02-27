@@ -2,7 +2,7 @@
 
 ## 1. System Overview
 
-AutoLoop is designed as a generalized, autonomous task loop framework. It is intended to repeatedly execute tasks (Rounds) towards a defined overarching goal. To achieve "generalized work," the system is strictly decoupled: the core Engine knows nothing about *what* work is being done; it only knows how to schedule, budget, plan, execute, evaluate, and rollback rounds based on abstracted plugins (Tools and Evaluators).
+AutoLoop is designed as a generalized, autonomous task loop framework. It is intended to repeatedly execute tasks (Rounds) towards a defined overarching goal. Goals are domain-agnostic and defined by the user. To achieve "generalized work," the system is strictly decoupled: the core Engine knows nothing about *what* work is being done; it only knows how to schedule, budget, plan, execute, evaluate, and rollback rounds based on abstracted plugins (Tools and Evaluators).
 
 ### Core Philosophy
 - **Extensibility via Interfaces:** Tools, Evaluators, and Workspaces must implement strict, typed interfaces.
@@ -113,7 +113,7 @@ Determines if a round was successful.
 - **Implementations:**
   - `ShellEvaluator`: Runs a command (e.g., `npm test`). Pass if exit code is 0.
   - `LLMJudgeEvaluator`: Prompts an LLM to review the `state_change.txt` against the task description.
-  - `WebhookEvaluator`: Calls an external API to verify business metrics.
+  - `WebhookEvaluator`: Calls an external API to verify goal-defined outcome metrics.
 
 ### 3.7 Guardrails & Budgets (`src/agent/guardrails.ts`)
 The safety net. Tracks consumption during the Executor's run.

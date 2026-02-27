@@ -29,6 +29,7 @@ If conflicts occur, use this precedence order:
 - **Idempotency Preference:** When modifying state, Agents should prefer operations that are safe to run multiple times (e.g., `mkdir -p` instead of `mkdir`, `UPDATE ... WHERE ...` with specific constraints).
 - **Silent Tooling over Narration:** Agents must focus on executing tools and returning structured results. They should not generate conversational filler or narrative explanations unless explicitly requested by the user or required for the `Summary` artifact.
 - **Single-Task Rounds:** Each round should pursue one atomic objective and avoid hidden multi-step scope expansion.
+- **User-Value Orientation:** Progress should optimize the user's intended value as defined by the active goal, using measurable outcomes rather than cosmetic activity.
 
 ---
 

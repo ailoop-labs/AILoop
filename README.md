@@ -9,12 +9,12 @@ Use this document to regenerate the full codebase with AI.
 ## 1. Product Intent
 
 AutoLoop solves this problem:
-- A team has a clear, ongoing objective (for example: "Resolve non-critical user bugs in the backlog", "Monitor competitor pricing daily and update a dashboard", or "Analyze weekly server logs for anomalies and draft optimization proposals").
-- The team wants an autonomous loop that makes useful progress in small, measurable, and safe rounds.
+- A person or team has a clear, ongoing objective.
+- The user wants an autonomous loop that makes useful progress in small, measurable, and safe rounds.
 - Every round must be observable, controllable, and bounded by strict resource budgets.
 
 Design principles:
-- **Outcome First:** Prioritize measurable business or operational impact over cosmetic activity.
+- **Outcome First:** Prioritize measurable user value over cosmetic activity. Value can include business impact, time saved, error reduction, reduced context switching, and reduced cognitive load.
 - **Small, Safe Iterations:** Each round should be bounded by time, cost, and action limits, producing a reviewable result.
 - **Human-in-Control:** Pause, resume, stop, override, or inject real-time feedback (instructions) at any time.
 - **Transparent History:** Every run has structured logs, decisions, state changes, evaluation scores, and a summary.
@@ -56,7 +56,7 @@ Design principles:
 - `executor`
   - An agentic loop that utilizes tools from the registry to complete the planned sub-task, handling intermediate errors and self-correction.
 - `evaluator` (formerly Verifier)
-  - Executes validation logic (e.g., running tests, querying an API metric, or prompting an LLM judge) to determine if the round was successful and safe.
+  - Executes validation logic (e.g., running tests, checking defined outcome indicators, or prompting an LLM judge) to determine if the round was successful and safe.
 - `guardrails`
   - Enforces resource budgets (Cost/Tokens, Time, Actions) and safety policies (e.g., forbidden API calls or shell commands).
 - `reporter`

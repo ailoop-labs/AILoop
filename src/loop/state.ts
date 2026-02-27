@@ -38,7 +38,7 @@ export async function ensureLoopHome(paths: LoopPaths): Promise<void> {
   if (!(await fileExists(paths.goalPath))) {
     await fs.writeFile(
       paths.goalPath,
-      "# AutoLoop Goal\n\nDescribe the top-level goal this autonomous loop should pursue.\n",
+      "# AutoLoop Goal\n\nDescribe the top-level goal this autonomous loop should pursue. Keep it outcome-focused and measurable.\n",
       "utf8"
     );
   }

@@ -24,6 +24,7 @@ function sanitizeInstruction(message: string): string {
 function fallbackPlan(context: PlannerContext): SubTask {
   const goal = context.goal.trim();
   const latestInstruction = context.instructions.at(-1)?.trim();
+  const previousError = context.previous_tool_result?.error?.message?.trim();
 
   if (!goal) {
     return {
@@ -36,24 +37,24 @@ function fallbackPlan(context: PlannerContext): SubTask {
 
   const blockerNote =
     context.previous_tool_result?.status === "failure"
-      ? "Previous round failed; this step prioritizes a deterministic, low-risk update."
-      : "Establishing/refreshing the next atomic action keeps rounds small and verifiable.";
+      ? `Previous round failed${previousError ? ` with blocker: ${sanitizeInstruction(previousError)}.` : "."} This step prioritizes a deterministic, low-risk recovery action.`
+      : "This step keeps the round atomic, verifiable, and aligned with measurable progress.";
 
   if (latestInstruction) {
     const cleanedInstruction = sanitizeInstruction(latestInstruction);
     return {
       rationale: `${blockerNote} Human instruction was supplied and is highest-priority input for this round.`,
-      objective: `Process instruction '${cleanedInstruction}' and record one concrete next step in .autoloop/task.md.`,
-      expected_outcome: ".autoloop/task.md contains a new round entry tied to the latest human instruction.",
+      objective: `Execute one atomic, verifiable step that applies instruction '${cleanedInstruction}' and advances the goal.`,
+      expected_outcome: "A concrete state change or validation result demonstrates measurable progress tied to the instruction.",
       recommended_tools: ["read_file", "write_file", "run_shell", "http_request"]
     };
   }
 
   return {
-    rationale: `${blockerNote} The round should produce a single visible state update without broad scope expansion.`,
-    objective: `Update .autoloop/task.md with one atomic next step for round ${context.round} aligned to goal.md.`,
-    expected_outcome: ".autoloop/task.md contains a round entry with objective and expected outcome.",
-    recommended_tools: ["read_file", "write_file"]
+    rationale: `${blockerNote} The round should produce one clear, outcome-oriented change without broad scope expansion.`,
+    objective: `Complete one atomic, verifiable step for round ${context.round} that advances the goal in goal.md.`,
+    expected_outcome: "Evidence in workspace state or checks shows measurable progress toward the goal.",
+    recommended_tools: ["read_file", "write_file", "run_shell"]
   };
 }
 
@@ -84,9 +85,12 @@ export class PlannerAgent {
       "Rules:",
       "- One task only.",
       "- Respect human instructions as highest priority.",
+      "- Prioritize measurable user-defined value over cosmetic activity.",
       "- If goal is missing, create a clarification request task.",
       "- Consider previous round failure when setting rationale.",
-      "- For this bootstrap phase, the objective must be completable within 1 minute and must include updating .autoloop/task.md.",
+      "- Keep the plan domain-agnostic and derived only from provided goal/instructions; do not inject scenario-specific assumptions.",
+      "- objective and expected_outcome must be observable and verifiable (workspace change, command output, API check, or evaluator evidence).",
+      "- If required context is missing for safe execution, choose a clarification sub-task instead of guessing.",
       "- Keep recommended_tools realistic from: read_file, write_file, run_shell, http_request.",
       "",
       "Planner input:",
