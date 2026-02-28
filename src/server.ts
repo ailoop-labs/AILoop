@@ -15,6 +15,8 @@ import {
 } from "./loop/control";
 
 const config = loadConfig();
+const adminToken = config.consoleAdminToken.trim();
+const tokenAuthEnabled = adminToken.length > 0;
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data, null, 2), {
@@ -31,6 +33,23 @@ async function parseBody(request: Request): Promise<Record<string, unknown>> {
   } catch {
     return {};
   }
+}
+
+function extractRequestToken(request: Request): string {
+  const bearer = request.headers.get("authorization") ?? "";
+  if (bearer.toLowerCase().startsWith("bearer ")) {
+    return bearer.slice(7).trim();
+  }
+
+  return (request.headers.get("x-admin-token") ?? "").trim();
+}
+
+function isPublicApi(pathname: string, method: string): boolean {
+  return (
+    (pathname === "/api/health" && method === "GET") ||
+    (pathname === "/api/auth/status" && method === "GET") ||
+    (pathname === "/api/auth/login" && method === "POST")
+  );
 }
 
 async function serveStaticFromDist(urlPath: string): Promise<Response | null> {
@@ -79,6 +98,31 @@ const server = Bun.serve({
 
     if (url.pathname === "/api/health" && request.method === "GET") {
       return json({ ok: true, service: "autoloop-console" });
+    }
+
+    if (url.pathname === "/api/auth/status" && request.method === "GET") {
+      return json({ tokenRequired: tokenAuthEnabled });
+    }
+
+    if (url.pathname === "/api/auth/login" && request.method === "POST") {
+      if (!tokenAuthEnabled) {
+        return json({ ok: true, tokenRequired: false });
+      }
+
+      const body = await parseBody(request);
+      const token = typeof body.token === "string" ? body.token.trim() : "";
+      if (!token || token !== adminToken) {
+        return json({ ok: false, error: "Unauthorized" }, 401);
+      }
+
+      return json({ ok: true, tokenRequired: true });
+    }
+
+    if (url.pathname.startsWith("/api/") && tokenAuthEnabled && !isPublicApi(url.pathname, request.method)) {
+      const token = extractRequestToken(request);
+      if (!token || token !== adminToken) {
+        return json({ ok: false, error: "Unauthorized" }, 401);
+      }
     }
 
     if (url.pathname === "/api/status" && request.method === "GET") {

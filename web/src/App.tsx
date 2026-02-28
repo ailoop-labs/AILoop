@@ -60,6 +60,15 @@ interface SaveConfigResponse {
   config: RuntimeLoopConfig;
 }
 
+interface AuthStatusResponse {
+  tokenRequired: boolean;
+}
+
+interface AuthLoginResponse {
+  ok: boolean;
+  tokenRequired: boolean;
+}
+
 const stateTone: Record<LoopStateName, string> = {
   idle: "bg-slate text-mist",
   running: "bg-accent/20 text-accent",
@@ -68,13 +77,51 @@ const stateTone: Record<LoopStateName, string> = {
   error: "bg-red-500/20 text-red-300"
 };
 
-async function api<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
+const TOKEN_STORAGE_KEY = "autoloop-console-admin-token";
+
+function readStoredToken(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return window.localStorage.getItem(TOKEN_STORAGE_KEY) ?? "";
+}
+
+function saveStoredToken(token: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+}
+
+function clearStoredToken(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+}
+
+async function api<T>(url: string, init?: RequestInit, token?: string): Promise<T> {
+  const headers = new Headers(init?.headers ?? {});
+  if (token && token.trim()) {
+    headers.set("authorization", `Bearer ${token.trim()}`);
+  }
+
+  const response = await fetch(url, {
+    ...init,
+    headers
+  });
   if (!response.ok) {
+    if (response.status === 401) {
+      throw new Error("Unauthorized");
+    }
     const text = await response.text();
     throw new Error(text || `Request failed: ${response.status}`);
   }
   return (await response.json()) as T;
+}
+
+function isUnauthorizedError(message: string): boolean {
+  return message.includes("Unauthorized");
 }
 
 function formatMs(ms: number): string {
@@ -93,6 +140,11 @@ function extractSummaryLine(summary: string): string {
 }
 
 export default function App() {
+  const [tokenRequired, setTokenRequired] = useState<boolean | null>(null);
+  const [authToken, setAuthToken] = useState<string>(() => readStoredToken());
+  const [loginToken, setLoginToken] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [status, setStatus] = useState<LoopStatus | null>(null);
   const [runs, setRuns] = useState<RunItem[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
@@ -101,41 +153,82 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [configBusy, setConfigBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isAuthenticated = tokenRequired === false || (tokenRequired === true && authToken.trim().length > 0);
+
+  const handleRequestError = (requestError: unknown, unauthorizedMessage: string): void => {
+    const message = requestError instanceof Error ? requestError.message : String(requestError);
+    if (isUnauthorizedError(message)) {
+      clearStoredToken();
+      setAuthToken("");
+      setAuthError(unauthorizedMessage);
+      setError(null);
+      return;
+    }
+    setError(message);
+  };
 
   const refresh = async (): Promise<void> => {
     try {
       const [nextStatus, nextRuns, nextLogs] = await Promise.all([
-        api<LoopStatus>("/api/status"),
-        api<RunItem[]>("/api/runs?limit=20"),
-        api<{ lines: string[] }>("/api/logs/tail?lines=120")
+        api<LoopStatus>("/api/status", undefined, authToken),
+        api<RunItem[]>("/api/runs?limit=20", undefined, authToken),
+        api<{ lines: string[] }>("/api/logs/tail?lines=120", undefined, authToken)
       ]);
       setStatus(nextStatus);
       setRuns(nextRuns);
       setLogs(nextLogs.lines);
       setError(null);
+      setAuthError(null);
     } catch (requestError) {
-      setError((requestError as Error).message);
+      handleRequestError(requestError, "Token 校验失败，请重新登录。");
     }
   };
 
   const refreshRuntimeConfig = async (): Promise<void> => {
     try {
-      const next = await api<RuntimeLoopConfig>("/api/config");
+      const next = await api<RuntimeLoopConfig>("/api/config", undefined, authToken);
       setRuntimeConfig(next);
       setError(null);
+      setAuthError(null);
+    } catch (requestError) {
+      handleRequestError(requestError, "登录状态已失效，请重新登录。");
+    }
+  };
+
+  const bootstrapAuth = async (): Promise<void> => {
+    try {
+      const authStatus = await api<AuthStatusResponse>("/api/auth/status");
+      setTokenRequired(authStatus.tokenRequired);
+      setError(null);
+
+      if (authStatus.tokenRequired && !authToken.trim()) {
+        setStatus(null);
+        setRuns([]);
+        setLogs([]);
+        setRuntimeConfig(null);
+        return;
+      }
+
+      await Promise.all([refresh(), refreshRuntimeConfig()]);
     } catch (requestError) {
       setError((requestError as Error).message);
     }
   };
 
   useEffect(() => {
-    void refresh();
-    void refreshRuntimeConfig();
+    void bootstrapAuth();
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+
     const timer = setInterval(() => {
       void refresh();
     }, 4000);
     return () => clearInterval(timer);
-  }, []);
+  }, [isAuthenticated, authToken]);
 
   const budgetBars = useMemo(() => {
     if (!status?.current_budget) {
@@ -174,13 +267,57 @@ export default function App() {
           "content-type": "application/json"
         },
         body: body ? JSON.stringify(body) : undefined
-      });
+      }, authToken);
       await refresh();
     } catch (requestError) {
-      setError((requestError as Error).message);
+      handleRequestError(requestError, "控制操作失败：请先重新登录。");
     } finally {
       setBusy(false);
     }
+  };
+
+  const submitLogin = async (): Promise<void> => {
+    const trimmed = loginToken.trim();
+    if (!trimmed) {
+      setAuthError("请输入 token。");
+      return;
+    }
+
+    try {
+      setAuthBusy(true);
+      await api<AuthLoginResponse>(
+        "/api/auth/login",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({ token: trimmed })
+        },
+        undefined
+      );
+      saveStoredToken(trimmed);
+      setAuthToken(trimmed);
+      setLoginToken("");
+      setAuthError(null);
+      setError(null);
+      await Promise.all([refresh(), refreshRuntimeConfig()]);
+    } catch {
+      setAuthError("Token 无效，请重试。");
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const logout = (): void => {
+    clearStoredToken();
+    setAuthToken("");
+    setStatus(null);
+    setRuns([]);
+    setLogs([]);
+    setRuntimeConfig(null);
+    setAuthError(null);
+    setError(null);
   };
 
   const submitInstruction = async (): Promise<void> => {
@@ -244,11 +381,11 @@ export default function App() {
           "content-type": "application/json"
         },
         body: JSON.stringify(runtimeConfig)
-      });
+      }, authToken);
       setRuntimeConfig(response.config);
       setError(null);
     } catch (requestError) {
-      setError((requestError as Error).message);
+      handleRequestError(requestError, "配置保存失败：请先重新登录。");
     } finally {
       setConfigBusy(false);
     }
@@ -259,15 +396,55 @@ export default function App() {
       setConfigBusy(true);
       const response = await api<SaveConfigResponse>("/api/config/reset", {
         method: "POST"
-      });
+      }, authToken);
       setRuntimeConfig(response.config);
       setError(null);
     } catch (requestError) {
-      setError((requestError as Error).message);
+      handleRequestError(requestError, "配置重置失败：请先重新登录。");
     } finally {
       setConfigBusy(false);
     }
   };
+
+  if (tokenRequired === null) {
+    return (
+      <main className="mx-auto flex min-h-screen w-full max-w-2xl items-center px-4 py-8">
+        <section className="w-full rounded-3xl border border-white/10 bg-panel/80 p-6 text-mist shadow-lift backdrop-blur">
+          <h1 className="text-2xl font-bold">Autonomy Dashboard</h1>
+          <p className="mt-3 text-sm text-mist/70">Checking authentication status...</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (tokenRequired && !authToken.trim()) {
+    return (
+      <main className="mx-auto flex min-h-screen w-full max-w-2xl items-center px-4 py-8">
+        <section className="w-full rounded-3xl border border-white/10 bg-panel/80 p-6 text-mist shadow-lift backdrop-blur">
+          <p className="text-xs uppercase tracking-[0.32em] text-accent/80">Admin Access</p>
+          <h1 className="mt-1 text-3xl font-bold">Login Required</h1>
+          <p className="mt-3 text-sm text-mist/70">请输入管理后台 Token 进行登录。</p>
+          <div className="mt-5 flex flex-col gap-3 md:flex-row">
+            <input
+              value={loginToken}
+              onChange={(event) => setLoginToken(event.target.value)}
+              type="password"
+              placeholder="Paste admin token"
+              className="w-full rounded-xl border border-white/15 bg-ink/80 px-4 py-3 text-mist outline-none ring-accent/40 transition focus:ring"
+            />
+            <button
+              onClick={() => void submitLogin()}
+              disabled={authBusy}
+              className="rounded-xl bg-accent px-5 py-3 font-semibold text-ink transition hover:bg-accent/80 disabled:cursor-not-allowed disabled:bg-accent/40"
+            >
+              {authBusy ? "Verifying..." : "Login"}
+            </button>
+          </div>
+          {authError ? <p className="mt-4 rounded-lg bg-red-500/20 p-3 text-sm text-red-200">{authError}</p> : null}
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 px-4 py-6 md:px-8 md:py-8">
@@ -277,13 +454,23 @@ export default function App() {
             <p className="text-xs uppercase tracking-[0.32em] text-accent/80">AutoLoop Control Plane</p>
             <h1 className="mt-1 text-3xl font-bold text-mist md:text-4xl">Autonomy Dashboard</h1>
           </div>
-          <span
-            className={`rounded-full px-4 py-2 text-sm font-semibold uppercase tracking-[0.2em] ${
-              status ? stateTone[status.state] : "bg-slate text-mist"
-            }`}
-          >
-            {status?.state ?? "loading"}
-          </span>
+          <div className="flex items-center gap-3">
+            <span
+              className={`rounded-full px-4 py-2 text-sm font-semibold uppercase tracking-[0.2em] ${
+                status ? stateTone[status.state] : "bg-slate text-mist"
+              }`}
+            >
+              {status?.state ?? "loading"}
+            </span>
+            {tokenRequired ? (
+              <button
+                onClick={logout}
+                className="rounded-full border border-white/20 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-mist/80 transition hover:border-ember hover:text-ember"
+              >
+                Logout
+              </button>
+            ) : null}
+          </div>
         </div>
 
         <div className="mt-5 grid gap-3 text-sm text-mist/80 md:grid-cols-4">

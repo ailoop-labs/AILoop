@@ -31,6 +31,7 @@ export interface AppConfig {
   exitOnError: boolean;
   consoleHost: string;
   consolePort: number;
+  consoleAdminToken: string;
   maxRetainRuns: number;
   budget: BudgetLimits;
   evaluatorType: EvaluatorType;
@@ -83,6 +84,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const exitOnError = (env.AUTOLOOP_EXIT_ON_ERROR ?? "0") === "1";
   const consoleHost = env.AUTOLOOP_CONSOLE_HOST ?? "0.0.0.0";
   const consolePort = parseNumber(env.AUTOLOOP_CONSOLE_PORT, 3090);
+  const consoleAdminToken = env.AUTOLOOP_CONSOLE_ADMIN_TOKEN ?? "";
   const maxRetainRuns = parseNumber(env.AUTOLOOP_MAX_RETAIN_RUNS, 50);
 
   const evaluatorTypeRaw = (env.AUTOLOOP_EVALUATOR_TYPE ?? "llm") as EvaluatorType;
@@ -97,6 +99,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     exitOnError,
     consoleHost,
     consolePort,
+    consoleAdminToken,
     maxRetainRuns,
     budget: {
       usdPerRound: parseNumber(env.AUTOLOOP_BUDGET_USD_PER_ROUND, 0.5),

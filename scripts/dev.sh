@@ -13,7 +13,7 @@ if [[ ! -d "node_modules" ]]; then
 fi
 
 if [[ ! -d "web/node_modules" ]]; then
-  bun --cwd web install
+  bun --cwd=web install
 fi
 
 cleanup() {

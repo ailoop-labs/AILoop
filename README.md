@@ -169,6 +169,8 @@ Pages:
 
 API endpoints:
 - `GET /api/health`
+- `GET /api/auth/status` (returns `{ "tokenRequired": boolean }`)
+- `POST /api/auth/login` (body: `{ "token": "..." }`)
 - `GET /api/status`
 - `GET /api/config`
 - `POST /api/config`
@@ -190,6 +192,7 @@ Environment variables:
 - `AUTOLOOP_EXIT_ON_ERROR` (default: `0`)
 - `AUTOLOOP_CONSOLE_HOST` (default: `0.0.0.0`)
 - `AUTOLOOP_CONSOLE_PORT` (default: `3090`)
+- `AUTOLOOP_CONSOLE_ADMIN_TOKEN` (default: empty, when set all non-public `/api/*` routes require matching Bearer token)
 - `AUTOLOOP_MAX_RETAIN_RUNS` (default: `50`, auto-cleans old run artifacts)
 
 **Multi-dimensional Budgets (Guardrails):**
