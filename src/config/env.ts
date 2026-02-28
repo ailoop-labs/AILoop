@@ -1,7 +1,16 @@
 import path from "node:path";
-import type { BudgetLimits, EvaluatorType } from "../types/contracts";
+import type { BudgetLimits, EvaluationDimension, EvaluatorType } from "../types/contracts";
 
 export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
+export const DEFAULT_LLM_EVALUATOR_DIMENSIONS: EvaluationDimension[] = [
+  "goal_alignment",
+  "causal_validity",
+  "constraint_compliance",
+  "risk_externality",
+  "reversibility_resilience",
+  "learning_yield"
+];
+const VALID_EVALUATION_DIMENSIONS = new Set<EvaluationDimension>(DEFAULT_LLM_EVALUATOR_DIMENSIONS);
 
 export interface CodexConfig {
   bin: string;
@@ -11,6 +20,8 @@ export interface CodexConfig {
   executorSandbox: CodexSandboxMode;
   evaluatorSandbox: CodexSandboxMode;
   timeoutMs: number;
+  llmEvaluatorDimensions: EvaluationDimension[];
+  llmEvaluatorMinPassScore: number;
 }
 
 export interface AppConfig {
@@ -46,6 +57,23 @@ function parseSandboxMode(value: string | undefined, fallback: CodexSandboxMode)
     return value;
   }
   return fallback;
+}
+
+function parseLlmEvaluatorDimensions(value: string | undefined): EvaluationDimension[] {
+  if (!value || !value.trim()) {
+    return [...DEFAULT_LLM_EVALUATOR_DIMENSIONS];
+  }
+
+  const parsed = value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item): item is EvaluationDimension => VALID_EVALUATION_DIMENSIONS.has(item as EvaluationDimension));
+
+  if (parsed.length === 0) {
+    return [...DEFAULT_LLM_EVALUATOR_DIMENSIONS];
+  }
+
+  return Array.from(new Set(parsed));
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -85,7 +113,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       plannerSandbox: parseSandboxMode(env.AUTOLOOP_CODEX_PLANNER_SANDBOX, "read-only"),
       executorSandbox: parseSandboxMode(env.AUTOLOOP_CODEX_EXECUTOR_SANDBOX, "danger-full-access"),
       evaluatorSandbox: parseSandboxMode(env.AUTOLOOP_CODEX_EVALUATOR_SANDBOX, "danger-full-access"),
-      timeoutMs: parseNumber(env.AUTOLOOP_CODEX_TIMEOUT_MS, 180_000)
+      timeoutMs: parseNumber(env.AUTOLOOP_CODEX_TIMEOUT_MS, 180_000),
+      llmEvaluatorDimensions: parseLlmEvaluatorDimensions(env.AUTOLOOP_LLM_EVALUATOR_DIMENSIONS),
+      llmEvaluatorMinPassScore: Math.max(0, Math.min(100, parseNumber(env.AUTOLOOP_LLM_EVALUATOR_MIN_PASS_SCORE, 75)))
     }
   };
 }

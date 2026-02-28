@@ -1,6 +1,13 @@
 export type LoopStateName = "idle" | "running" | "paused" | "stopping" | "error";
 
 export type EvaluatorType = "shell" | "llm" | "webhook";
+export type EvaluationDimension =
+  | "goal_alignment"
+  | "causal_validity"
+  | "constraint_compliance"
+  | "risk_externality"
+  | "reversibility_resilience"
+  | "learning_yield";
 
 export interface BudgetLimits {
   usdPerRound: number;
@@ -87,6 +94,19 @@ export interface EvaluationResult {
   justification: string;
   evidence: string[];
   recommended_next_action?: string;
+  dimensions?: DimensionAssessment[];
+  aggregate_score?: number;
+}
+
+export interface DimensionAssessment {
+  dimension: EvaluationDimension;
+  decision: "pass" | "fail" | "unknown";
+  score: number;
+  confidence: number;
+  justification: string;
+  evidence: string[];
+  blocking_issues: string[];
+  recommended_next_action: string;
 }
 
 export interface RoundArtifacts {

@@ -200,6 +200,9 @@ Environment variables:
 **Evaluator Configuration:**
 - `AUTOLOOP_EVALUATOR_TYPE` (default: `shell`, options: `shell`, `llm`, `webhook`)
 - `AUTOLOOP_EVALUATOR_CMD` (used if type is `shell`, e.g., `npm test` or `./check-db.sh`)
+- `AUTOLOOP_LLM_EVALUATOR_DIMENSIONS` (used when type is `llm`; comma-separated dimensions:
+  `goal_alignment,causal_validity,constraint_compliance,risk_externality,reversibility_resilience,learning_yield`)
+- `AUTOLOOP_LLM_EVALUATOR_MIN_PASS_SCORE` (used when type is `llm`; default: `75`)
 
 ## 10. Run Artifacts
 

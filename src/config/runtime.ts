@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AppConfig, CodexSandboxMode } from "./env";
-import type { BudgetLimits, EvaluatorType } from "../types/contracts";
+import { DEFAULT_LLM_EVALUATOR_DIMENSIONS } from "./env";
+import type { BudgetLimits, EvaluationDimension, EvaluatorType } from "../types/contracts";
 import { readJsonFile, writeJsonFile } from "../utils/fs";
 
 const RUNTIME_CONFIG_FILENAME = "runtime-config.json";
@@ -21,6 +22,8 @@ export interface RuntimeLoopConfig {
     executorSandbox: CodexSandboxMode;
     evaluatorSandbox: CodexSandboxMode;
     timeoutMs: number;
+    llmEvaluatorDimensions: EvaluationDimension[];
+    llmEvaluatorMinPassScore: number;
   };
 }
 
@@ -90,6 +93,23 @@ function asSandbox(value: unknown, fallback: CodexSandboxMode): CodexSandboxMode
   return fallback;
 }
 
+function asLlmEvaluatorDimensions(value: unknown, fallback: EvaluationDimension[]): EvaluationDimension[] {
+  if (!Array.isArray(value)) {
+    return fallback;
+  }
+
+  const valid = new Set<EvaluationDimension>(DEFAULT_LLM_EVALUATOR_DIMENSIONS);
+  const parsed = value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item): item is EvaluationDimension => valid.has(item as EvaluationDimension));
+
+  if (parsed.length === 0) {
+    return fallback;
+  }
+
+  return Array.from(new Set(parsed));
+}
+
 export function extractRuntimeLoopConfig(config: AppConfig): RuntimeLoopConfig {
   return {
     intervalSeconds: config.intervalSeconds,
@@ -109,7 +129,9 @@ export function extractRuntimeLoopConfig(config: AppConfig): RuntimeLoopConfig {
       plannerSandbox: config.codex.plannerSandbox,
       executorSandbox: config.codex.executorSandbox,
       evaluatorSandbox: config.codex.evaluatorSandbox,
-      timeoutMs: config.codex.timeoutMs
+      timeoutMs: config.codex.timeoutMs,
+      llmEvaluatorDimensions: [...config.codex.llmEvaluatorDimensions],
+      llmEvaluatorMinPassScore: config.codex.llmEvaluatorMinPassScore
     }
   };
 }
@@ -137,7 +159,9 @@ function normalizeRuntimeLoopConfig(candidate: unknown, fallback: RuntimeLoopCon
       plannerSandbox: asSandbox(codex.plannerSandbox, fallback.codex.plannerSandbox),
       executorSandbox: asSandbox(codex.executorSandbox, fallback.codex.executorSandbox),
       evaluatorSandbox: asSandbox(codex.evaluatorSandbox, fallback.codex.evaluatorSandbox),
-      timeoutMs: asInteger(codex.timeoutMs, fallback.codex.timeoutMs, 10_000, 3_600_000)
+      timeoutMs: asInteger(codex.timeoutMs, fallback.codex.timeoutMs, 10_000, 3_600_000),
+      llmEvaluatorDimensions: asLlmEvaluatorDimensions(codex.llmEvaluatorDimensions, fallback.codex.llmEvaluatorDimensions),
+      llmEvaluatorMinPassScore: asNumber(codex.llmEvaluatorMinPassScore, fallback.codex.llmEvaluatorMinPassScore, 0, 100)
     }
   };
 }
@@ -206,7 +230,9 @@ export function applyRuntimeLoopConfig(baseConfig: AppConfig, runtime: RuntimeLo
       plannerSandbox: runtime.codex.plannerSandbox,
       executorSandbox: runtime.codex.executorSandbox,
       evaluatorSandbox: runtime.codex.evaluatorSandbox,
-      timeoutMs: runtime.codex.timeoutMs
+      timeoutMs: runtime.codex.timeoutMs,
+      llmEvaluatorDimensions: [...runtime.codex.llmEvaluatorDimensions],
+      llmEvaluatorMinPassScore: runtime.codex.llmEvaluatorMinPassScore
     }
   };
 }
@@ -227,6 +253,8 @@ export function runtimeLoopConfigToEnv(runtime: RuntimeLoopConfig): Record<strin
     AUTOLOOP_CODEX_PLANNER_SANDBOX: runtime.codex.plannerSandbox,
     AUTOLOOP_CODEX_EXECUTOR_SANDBOX: runtime.codex.executorSandbox,
     AUTOLOOP_CODEX_EVALUATOR_SANDBOX: runtime.codex.evaluatorSandbox,
-    AUTOLOOP_CODEX_TIMEOUT_MS: String(runtime.codex.timeoutMs)
+    AUTOLOOP_CODEX_TIMEOUT_MS: String(runtime.codex.timeoutMs),
+    AUTOLOOP_LLM_EVALUATOR_DIMENSIONS: runtime.codex.llmEvaluatorDimensions.join(","),
+    AUTOLOOP_LLM_EVALUATOR_MIN_PASS_SCORE: String(runtime.codex.llmEvaluatorMinPassScore)
   };
 }
