@@ -97,6 +97,36 @@ export function resolveNextLastError(currentLastError: string | null, requestedL
   return requestedLastError;
 }
 
+function buildEvaluatorReworkSubTask(
+  originalTask: SubTask,
+  attempt: number,
+  maxAttempts: number
+): SubTask {
+  return {
+    rationale: `Evaluator returned fail. Execute auto-rework attempt ${attempt}/${maxAttempts} with minimal scope to satisfy evaluator blockers.`,
+    objective: `Revise the current round output to resolve evaluator failure for objective '${originalTask.objective}'.`,
+    expected_outcome:
+      "Updated code/tests plus explicit verification evidence address evaluator feedback and produce a pass decision.",
+    recommended_tools: ["read_file", "write_file", "run_shell"]
+  };
+}
+
+function buildEvaluatorReworkInstructions(
+  baseInstructions: string[],
+  evaluation: EvaluationResult,
+  attempt: number,
+  maxAttempts: number
+): string[] {
+  const next = [...baseInstructions, `Evaluator failure: ${evaluation.justification}`];
+  if (evaluation.recommended_next_action?.trim()) {
+    next.push(`Evaluator recommended next action: ${evaluation.recommended_next_action.trim()}`);
+  }
+  next.push(
+    `Auto rework attempt ${attempt}/${maxAttempts}: apply the smallest safe change that resolves blocking issues, then run verification and capture concrete evidence in artifacts.`
+  );
+  return next;
+}
+
 export class LoopEngine {
   private readonly paths;
   private readonly planner: PlannerAgent;
@@ -344,6 +374,68 @@ export class LoopEngine {
               remediation.toolResult.error?.message ?? "unknown remediation error"
             }`
           );
+        }
+      }
+
+      if (evaluation.decision === "fail" && finalToolResult.status === "success") {
+        for (let attempt = 1; attempt <= this.config.evaluatorReworkMaxAttempts; attempt += 1) {
+          await log(
+            `Evaluator failed; triggering auto-rework attempt ${attempt}/${this.config.evaluatorReworkMaxAttempts}.`
+          );
+          const reworkTask = buildEvaluatorReworkSubTask(
+            subTask,
+            attempt,
+            this.config.evaluatorReworkMaxAttempts
+          );
+          const rework = await this.executor.execute({
+            subTask: reworkTask,
+            round,
+            goal,
+            instructions: buildEvaluatorReworkInstructions(
+              instructions,
+              evaluation,
+              attempt,
+              this.config.evaluatorReworkMaxAttempts
+            ),
+            guardrails,
+            paths: this.paths,
+            onLog: log
+          });
+
+          actions.push(...rework.actions);
+          finalToolResult = {
+            ...rework.toolResult,
+            summary: `${finalToolResult.summary} Auto-rework ${attempt}/${this.config.evaluatorReworkMaxAttempts}: ${rework.toolResult.summary}`,
+            artifacts: {
+              log_path: artifacts.logPath,
+              state_change_path: artifacts.stateChangePath
+            }
+          };
+
+          if (rework.toolResult.status === "failure") {
+            await log(
+              `Auto-rework attempt ${attempt}/${this.config.evaluatorReworkMaxAttempts} failed: ${
+                rework.toolResult.error?.message ?? "unknown executor error"
+              }`
+            );
+            break;
+          }
+
+          stateChange = await workspace.buildStateChange(snapshot);
+          evaluation = await this.evaluator.evaluate({
+            subTask,
+            toolResult: finalToolResult,
+            stateChange,
+            logLines,
+            runTimestamp: runId,
+            budgetLimits: guardrails.limitsSnapshot(),
+            budgetUsage: guardrails.usage(),
+            onLog: log
+          });
+          await log(`Post-auto-rework evaluation decision: ${evaluation.decision}.`);
+          if (evaluation.decision === "pass") {
+            break;
+          }
         }
       }
 

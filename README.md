@@ -196,6 +196,7 @@ Environment variables:
 - `AUTOLOOP_INTERVAL_SECONDS` (default: `1200`)
 - `AUTOLOOP_MAX_CYCLES` (default: `0`, unlimited; when >0, each start/run executes at most this many rounds before stopping)
 - `AUTOLOOP_EXIT_ON_ERROR` (default: `0`)
+- `AUTOLOOP_EVAL_REWORK_MAX_ATTEMPTS` (default: `1`, maximum auto rework + re-evaluation attempts after an evaluator `fail` in the same round)
 - `AUTOLOOP_CONSOLE_HOST` (default: `0.0.0.0`)
 - `AUTOLOOP_CONSOLE_PORT` (default: `3090`)
 - `AUTOLOOP_CONSOLE_ADMIN_TOKEN` (default: empty, when set all non-public `/api/*` routes require matching Bearer token)

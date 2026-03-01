@@ -12,6 +12,7 @@ function makeTestConfig(homeDir: string): AppConfig {
     intervalSeconds: 1,
     maxCycles: 0,
     exitOnError: false,
+    evaluatorReworkMaxAttempts: 1,
     consoleHost: "127.0.0.1",
     consolePort: 3090,
     consoleAdminToken: "",

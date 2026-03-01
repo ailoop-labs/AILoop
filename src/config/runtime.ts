@@ -11,6 +11,7 @@ export interface RuntimeLoopConfig {
   intervalSeconds: number;
   maxCycles: number;
   exitOnError: boolean;
+  evaluatorReworkMaxAttempts: number;
   budget: BudgetLimits;
   evaluatorType: EvaluatorType;
   evaluatorCmd: string;
@@ -115,6 +116,7 @@ export function extractRuntimeLoopConfig(config: AppConfig): RuntimeLoopConfig {
     intervalSeconds: config.intervalSeconds,
     maxCycles: config.maxCycles,
     exitOnError: config.exitOnError,
+    evaluatorReworkMaxAttempts: config.evaluatorReworkMaxAttempts,
     budget: {
       usdPerRound: config.budget.usdPerRound,
       timeMinutes: config.budget.timeMinutes,
@@ -145,6 +147,12 @@ function normalizeRuntimeLoopConfig(candidate: unknown, fallback: RuntimeLoopCon
     intervalSeconds: asInteger(root.intervalSeconds, fallback.intervalSeconds, 1, 86_400),
     maxCycles: asInteger(root.maxCycles, fallback.maxCycles, 0, 1_000_000),
     exitOnError: asBoolean(root.exitOnError, fallback.exitOnError),
+    evaluatorReworkMaxAttempts: asInteger(
+      root.evaluatorReworkMaxAttempts,
+      fallback.evaluatorReworkMaxAttempts,
+      0,
+      5
+    ),
     budget: {
       usdPerRound: asNumber(budget.usdPerRound, fallback.budget.usdPerRound, 0, 1_000_000),
       timeMinutes: asNumber(budget.timeMinutes, fallback.budget.timeMinutes, 1, 1_440),
@@ -217,6 +225,7 @@ export function applyRuntimeLoopConfig(baseConfig: AppConfig, runtime: RuntimeLo
     intervalSeconds: runtime.intervalSeconds,
     maxCycles: runtime.maxCycles,
     exitOnError: runtime.exitOnError,
+    evaluatorReworkMaxAttempts: runtime.evaluatorReworkMaxAttempts,
     budget: {
       ...runtime.budget
     },
@@ -242,6 +251,7 @@ export function runtimeLoopConfigToEnv(runtime: RuntimeLoopConfig): Record<strin
     AUTOLOOP_INTERVAL_SECONDS: String(runtime.intervalSeconds),
     AUTOLOOP_MAX_CYCLES: String(runtime.maxCycles),
     AUTOLOOP_EXIT_ON_ERROR: runtime.exitOnError ? "1" : "0",
+    AUTOLOOP_EVAL_REWORK_MAX_ATTEMPTS: String(runtime.evaluatorReworkMaxAttempts),
     AUTOLOOP_BUDGET_USD_PER_ROUND: String(runtime.budget.usdPerRound),
     AUTOLOOP_BUDGET_TIME_MINUTES: String(runtime.budget.timeMinutes),
     AUTOLOOP_BUDGET_ACTIONS: String(runtime.budget.actions),

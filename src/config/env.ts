@@ -29,6 +29,7 @@ export interface AppConfig {
   intervalSeconds: number;
   maxCycles: number;
   exitOnError: boolean;
+  evaluatorReworkMaxAttempts: number;
   consoleHost: string;
   consolePort: number;
   consoleAdminToken: string;
@@ -82,6 +83,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const intervalSeconds = parseNumber(env.AUTOLOOP_INTERVAL_SECONDS, 1200);
   const maxCycles = parseNumber(env.AUTOLOOP_MAX_CYCLES, 0);
   const exitOnError = (env.AUTOLOOP_EXIT_ON_ERROR ?? "0") === "1";
+  const evaluatorReworkMaxAttempts = Math.max(0, Math.min(5, Math.round(parseNumber(env.AUTOLOOP_EVAL_REWORK_MAX_ATTEMPTS, 1))));
   const consoleHost = env.AUTOLOOP_CONSOLE_HOST ?? "0.0.0.0";
   const consolePort = parseNumber(env.AUTOLOOP_CONSOLE_PORT, 3090);
   const consoleAdminToken = env.AUTOLOOP_CONSOLE_ADMIN_TOKEN ?? "";
@@ -97,6 +99,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     intervalSeconds,
     maxCycles,
     exitOnError,
+    evaluatorReworkMaxAttempts,
     consoleHost,
     consolePort,
     consoleAdminToken,

@@ -1,7 +1,42 @@
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
-import type { SubTask } from "../types/contracts";
-import { extractSnapshotTargetsFromSubTask, resolveNextLastError } from "./engine";
+import { loadConfig } from "../config/env";
+import type { ActionRecord, EvaluationResult, SubTask, ToolResult } from "../types/contracts";
+import { ensureLoopHome, type LoopPaths } from "./state";
+import { LoopEngine, extractSnapshotTargetsFromSubTask, resolveNextLastError } from "./engine";
+
+function makeToolResult(summary: string): ToolResult {
+  return {
+    status: "success",
+    summary,
+    artifacts: {
+      log_path: "",
+      state_change_path: ""
+    },
+    error: null,
+    next_state_hint: "continue"
+  };
+}
+
+function makeEvaluation(decision: EvaluationResult["decision"], justification: string): EvaluationResult {
+  return {
+    decision,
+    justification,
+    evidence: ["test-evidence"],
+    recommended_next_action: "add targeted verification"
+  };
+}
+
+function makeAction(tool: string): ActionRecord {
+  return {
+    tool,
+    args: {},
+    ok: true,
+    output: `${tool} ok`
+  };
+}
 
 describe("extractSnapshotTargetsFromSubTask", () => {
   test("extracts backticked file paths from objective and outcome", () => {
@@ -31,5 +66,69 @@ describe("resolveNextLastError", () => {
 
   test("writes explicit next error message when provided", () => {
     expect(resolveNextLastError("blocked", "new-error")).toBe("new-error");
+  });
+});
+
+describe("LoopEngine auto rework", () => {
+  test("retries once after evaluator fail by feeding failure reason back to executor", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-engine-rework-test-"));
+    const config = loadConfig({
+      AUTOLOOP_HOME: homeDir,
+      AUTOLOOP_EVAL_REWORK_MAX_ATTEMPTS: "1"
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const plan: SubTask = {
+      rationale: "test rationale",
+      objective: "Implement one change",
+      expected_outcome: "one verification passes",
+      recommended_tools: ["read_file", "write_file", "run_shell"]
+    };
+
+    const executorInputs: Array<{ subTask: SubTask; instructions: string[] }> = [];
+    const execute = async (input: { subTask: SubTask; instructions: string[] }) => {
+      executorInputs.push(input);
+      if (executorInputs.length === 1) {
+        return {
+          actions: [makeAction("read_file")],
+          toolResult: makeToolResult("initial change")
+        };
+      }
+      return {
+        actions: [makeAction("write_file"), makeAction("run_shell")],
+        toolResult: makeToolResult("rework change")
+      };
+    };
+
+    let evalCall = 0;
+    const evaluate = async (): Promise<EvaluationResult> => {
+      evalCall += 1;
+      if (evalCall === 1) {
+        return makeEvaluation("fail", "Missing negative tests for edge cases.");
+      }
+      return makeEvaluation("pass", "All checks satisfied.");
+    };
+
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      executor: { execute: typeof execute };
+      evaluator: { evaluate: typeof evaluate };
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+    mutable.planner = { plan: async () => plan };
+    mutable.executor = { execute };
+    mutable.evaluator = { evaluate };
+
+    const outcome = await mutable.runRound(1);
+
+    expect(outcome.success).toBe(true);
+    expect(executorInputs.length).toBe(2);
+    expect(evalCall).toBe(2);
+    expect(executorInputs[1]?.instructions.join("\n")).toContain("Evaluator failure");
+    expect(executorInputs[1]?.instructions.join("\n")).toContain("Missing negative tests");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
   });
 });

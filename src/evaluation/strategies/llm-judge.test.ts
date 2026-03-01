@@ -56,6 +56,7 @@ function makeLlmConfig(dimensions: AppConfig["codex"]["llmEvaluatorDimensions"] 
     intervalSeconds: 1,
     maxCycles: 1,
     exitOnError: false,
+    evaluatorReworkMaxAttempts: 1,
     consoleHost: "127.0.0.1",
     consolePort: 3090,
     consoleAdminToken: "",
