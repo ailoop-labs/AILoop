@@ -130,6 +130,14 @@ function summarizeForRetry(errorMessage: string, stderr: string): string {
   return combined.slice(0, 500);
 }
 
+function emitChunkSafely(handler: ((chunk: string) => void) | undefined, message: string): void {
+  try {
+    handler?.(message);
+  } catch {
+    // Stream hooks are best-effort and must not break execution.
+  }
+}
+
 function buildRetryPrompt(basePrompt: string, attempt: number, reason: string): string {
   return [
     basePrompt,
@@ -362,6 +370,12 @@ export class CodexClient {
           continue;
         }
         if (shouldRetryByInterfacePolicy) {
+          const nextRetry = interfaceRetryCount + 1;
+          const reason = summarizeForRetry(errorMessage, runResult.stderr);
+          emitChunkSafely(
+            attemptOptions.onStderrChunk,
+            `AutoLoop interface retry ${nextRetry}/${INTERFACE_ERROR_MAX_RETRIES}: waiting ${INTERFACE_ERROR_RETRY_DELAY_MS}ms before retry. reason=${reason}\n`
+          );
           interfaceRetryCount += 1;
           await this.sleep(INTERFACE_ERROR_RETRY_DELAY_MS);
           continue;

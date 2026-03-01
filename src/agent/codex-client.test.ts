@@ -186,6 +186,7 @@ describe("CodexClient.runJson", () => {
       { code: 0, output: '{"status":"ok"}', stdout: "", stderr: "" }
     ];
     const sleepCalls: number[] = [];
+    const stderrChunks: string[] = [];
 
     const runner: ProcessRunner = async (_cmd, args) => {
       const step = attempts.shift();
@@ -208,12 +209,18 @@ describe("CodexClient.runJson", () => {
       schema: { type: "object" },
       cwd: process.cwd(),
       sandbox: "read-only",
-      maxRetries: 0
+      maxRetries: 0,
+      onStderrChunk: (chunk) => {
+        stderrChunks.push(chunk);
+      }
     });
 
     expect(result.ok).toBe(true);
     expect(result.data?.status).toBe("ok");
     expect(sleepCalls).toEqual([60_000, 60_000]);
+    const retryNotices = stderrChunks.filter((line) => line.includes("AutoLoop interface retry"));
+    expect(retryNotices.length).toBe(2);
+    expect(retryNotices[0]).toContain("waiting 60000ms");
   });
 
   test("fails only after five interface-error retries are exhausted", async () => {
