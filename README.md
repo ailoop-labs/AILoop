@@ -154,6 +154,8 @@ To minimize CLI usage in daily operation, provide two startup scripts:
 - `scripts/prod.sh`
   - Builds Web UI and starts API server that serves static Web assets.
   - Web UI is the primary control surface for loop operations and runtime parameter changes.
+  - Optional: pass `daemon` to run in background (`bash scripts/prod.sh daemon`).
+  - Optional: pass `stop` to stop the daemon (`bash scripts/prod.sh stop`).
 
 ## 8. Web Console Requirements
 
@@ -172,6 +174,7 @@ API endpoints:
 - `GET /api/auth/status` (returns `{ "tokenRequired": boolean }`)
 - `POST /api/auth/login` (body: `{ "token": "..." }`)
 - `GET /api/status`
+- `GET /api/goal`
 - `GET /api/config`
 - `POST /api/config`
 - `POST /api/config/reset`
@@ -188,7 +191,7 @@ API endpoints:
 Environment variables:
 - `AUTOLOOP_HOME` (default: `./.autoloop`)
 - `AUTOLOOP_INTERVAL_SECONDS` (default: `1200`)
-- `AUTOLOOP_MAX_CYCLES` (default: `0`, unlimited)
+- `AUTOLOOP_MAX_CYCLES` (default: `0`, unlimited; when >0, each start/run executes at most this many rounds before stopping)
 - `AUTOLOOP_EXIT_ON_ERROR` (default: `0`)
 - `AUTOLOOP_CONSOLE_HOST` (default: `0.0.0.0`)
 - `AUTOLOOP_CONSOLE_PORT` (default: `3090`)

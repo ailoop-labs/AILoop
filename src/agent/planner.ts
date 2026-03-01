@@ -21,6 +21,32 @@ function sanitizeInstruction(message: string): string {
   return message.replace(/\s+/g, " ").trim().slice(0, 240);
 }
 
+function hasExplicitDocumentationRequest(instructions: string[]): boolean {
+  const merged = instructions.join(" ").toLowerCase();
+  return /(readme|docs?|文档|报告|checklist|audit|baseline|goal\.md|task\.md|plan)/.test(merged);
+}
+
+function hasNoDiffSignal(previousRoundError: string | null): boolean {
+  const error = (previousRoundError ?? "").toLowerCase();
+  return error.includes("no observable file creation or content diff") || error.includes("insufficient evidence");
+}
+
+export function buildAdaptivePlannerDirectives(context: PlannerContext): string[] {
+  const shouldForceImplementation =
+    (context.consecutive_evaluator_failures > 0 || hasNoDiffSignal(context.previous_round_error)) &&
+    !hasExplicitDocumentationRequest(context.instructions);
+
+  if (!shouldForceImplementation) {
+    return [];
+  }
+
+  return [
+    "Do not output documentation-only audit/checklist/report tasks.",
+    "Pick one smallest implementation step that mutates tracked project files under src/, scripts/, or web/src/.",
+    "Expected outcome must name changed file path(s) and one re-runnable verification command."
+  ];
+}
+
 function fallbackPlan(context: PlannerContext): SubTask {
   const goal = context.goal.trim();
   const latestInstruction = context.instructions.at(-1)?.trim();
@@ -47,6 +73,16 @@ function fallbackPlan(context: PlannerContext): SubTask {
       objective: `Execute one atomic, verifiable step that applies instruction '${cleanedInstruction}' and advances the goal.`,
       expected_outcome: "A concrete state change or validation result demonstrates measurable progress tied to the instruction.",
       recommended_tools: ["read_file", "write_file", "run_shell", "http_request"]
+    };
+  }
+
+  if (context.consecutive_evaluator_failures > 0 && !hasExplicitDocumentationRequest(context.instructions)) {
+    return {
+      rationale: `${blockerNote} Prior evaluator failures require an implementation-first recovery task with concrete, verifiable code change.`,
+      objective: "Implement one minimal code or test change in tracked project files that addresses the latest failure signal.",
+      expected_outcome:
+        "At least one file under src/, scripts/, or web/src/ changes and a re-runnable verification command confirms progress.",
+      recommended_tools: ["read_file", "write_file", "run_shell"]
     };
   }
 
@@ -79,6 +115,7 @@ export class PlannerAgent {
   }
 
   async plan(context: PlannerContext): Promise<SubTask> {
+    const adaptiveDirectives = buildAdaptivePlannerDirectives(context);
     const prompt = [
       "You are the AutoLoop Planner agent.",
       "Return one atomic SubTask JSON that strictly matches the output schema.",
@@ -92,6 +129,9 @@ export class PlannerAgent {
       "- objective and expected_outcome must be observable and verifiable (workspace change, command output, API check, or evaluator evidence).",
       "- If required context is missing for safe execution, choose a clarification sub-task instead of guessing.",
       "- Keep recommended_tools realistic from: read_file, write_file, run_shell, http_request.",
+      ...(adaptiveDirectives.length > 0
+        ? ["- Additional adaptive constraints from prior failures:", ...adaptiveDirectives.map((line) => `  - ${line}`)]
+        : []),
       "",
       "Planner input:",
       JSON.stringify(
@@ -100,7 +140,9 @@ export class PlannerAgent {
           instructions: context.instructions,
           round: context.round,
           budget: context.budget,
-          previous_tool_result: context.previous_tool_result
+          previous_tool_result: context.previous_tool_result,
+          previous_round_error: context.previous_round_error,
+          consecutive_evaluator_failures: context.consecutive_evaluator_failures
         },
         null,
         2

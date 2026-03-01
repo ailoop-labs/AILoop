@@ -28,6 +28,7 @@ export interface LoopStateData {
   pid: number | null;
   last_error: string | null;
   consecutive_evaluator_failures: number;
+  previous_tool_result: ToolResult | null;
   current_budget: {
     limits: BudgetLimits;
     usage: BudgetUsage;
@@ -47,6 +48,8 @@ export interface PlannerContext {
   round: number;
   budget: BudgetLimits;
   previous_tool_result: ToolResult | null;
+  previous_round_error: string | null;
+  consecutive_evaluator_failures: number;
 }
 
 export interface ToolCallResult {
@@ -122,4 +125,6 @@ export interface RoundEvaluationContext {
   stateChange: string;
   logLines: string[];
   runTimestamp: string;
+  budgetLimits: BudgetLimits;
+  budgetUsage: BudgetUsage;
 }

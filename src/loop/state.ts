@@ -60,12 +60,28 @@ export function defaultLoopState(pid: number | null = null): LoopStateData {
     pid,
     last_error: null,
     consecutive_evaluator_failures: 0,
+    previous_tool_result: null,
     current_budget: null
   };
 }
 
+function normalizeLoopState(raw: Partial<LoopStateData> | null | undefined): LoopStateData {
+  const fallback = defaultLoopState();
+  if (!raw) {
+    return fallback;
+  }
+
+  return {
+    ...fallback,
+    ...raw,
+    previous_tool_result: raw.previous_tool_result ?? null,
+    current_budget: raw.current_budget ?? null
+  };
+}
+
 export async function readLoopState(paths: LoopPaths): Promise<LoopStateData> {
-  return readJsonFile(paths.statePath, defaultLoopState());
+  const raw = await readJsonFile<Partial<LoopStateData>>(paths.statePath, defaultLoopState());
+  return normalizeLoopState(raw);
 }
 
 export async function writeLoopState(paths: LoopPaths, state: LoopStateData): Promise<void> {

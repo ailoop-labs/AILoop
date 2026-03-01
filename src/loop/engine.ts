@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import type { FileHandle } from "node:fs/promises";
 import type { AppConfig } from "../config/env";
 import { ExecutorAgent } from "../agent/executor";
@@ -9,13 +10,14 @@ import { WorkspaceManager } from "../environment/workspace";
 import { createEvaluator } from "../evaluation/evaluator";
 import { writeMetricsFile, type RoundMetrics } from "../reporting/metrics";
 import {
+  appendLogLine,
   buildRoundArtifactPaths,
   trimOldRuns,
   writeLogFile,
   writeStateChangeFile,
   writeSummaryFile
 } from "../reporting/summary";
-import type { LoopStateName, SubTask, ToolResult } from "../types/contracts";
+import type { EvaluationResult, LoopStateName, SubTask, ToolResult } from "../types/contracts";
 import { SecretRedactor } from "../utils/redaction";
 import { runTimestamp } from "../utils/time";
 import { cooldownWithControlChecks, waitWhilePaused } from "./scheduler";
@@ -33,6 +35,67 @@ import {
   writeLoopState,
   writePid
 } from "./state";
+
+const INSUFFICIENT_EVIDENCE_PREFIX = "Insufficient evidence for key dimensions:";
+
+function extractMissingKeyDimensions(justification: string): string[] {
+  const trimmed = justification.trim();
+  if (!trimmed.startsWith(INSUFFICIENT_EVIDENCE_PREFIX)) {
+    return [];
+  }
+
+  return trimmed
+    .slice(INSUFFICIENT_EVIDENCE_PREFIX.length)
+    .split(",")
+    .map((item) => item.trim().replace(/\.$/, ""))
+    .filter(Boolean);
+}
+
+function isPathInside(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function normalizePathToken(token: string): string {
+  return token.trim().replace(/[),.;:]+$/g, "");
+}
+
+function extractPathTokens(text: string): string[] {
+  const tokens: string[] = [];
+  const backtickRegex = /`([^`\n]+)`/g;
+  for (const match of text.matchAll(backtickRegex)) {
+    const value = normalizePathToken(match[1] ?? "");
+    if (value) {
+      tokens.push(value);
+    }
+  }
+
+  const plainRegex = /\b(?:\.\/)?(?:src|scripts|web\/src|\.autoloop)\/[A-Za-z0-9._/-]+/g;
+  for (const match of text.matchAll(plainRegex)) {
+    const value = normalizePathToken(match[0] ?? "");
+    if (value) {
+      tokens.push(value);
+    }
+  }
+
+  return tokens;
+}
+
+export function extractSnapshotTargetsFromSubTask(subTask: SubTask, workspaceRoot: string): string[] {
+  const tokens = [...extractPathTokens(subTask.objective), ...extractPathTokens(subTask.expected_outcome)];
+  const normalized = tokens
+    .filter((token) => !token.includes("://"))
+    .map((token) => (path.isAbsolute(token) ? token : path.resolve(workspaceRoot, token)))
+    .filter((candidate) => isPathInside(workspaceRoot, candidate));
+  return Array.from(new Set(normalized));
+}
+
+export function resolveNextLastError(currentLastError: string | null, requestedLastError?: string | null): string | null {
+  if (requestedLastError === undefined) {
+    return currentLastError;
+  }
+  return requestedLastError;
+}
 
 export class LoopEngine {
   private readonly paths;
@@ -62,6 +125,7 @@ export class LoopEngine {
     try {
       let currentState = await readLoopState(this.paths);
       let round = currentState.round;
+      const stopAtRound = this.config.maxCycles > 0 ? round + this.config.maxCycles : null;
 
       while (true) {
         if (await hasFlag(this.paths.stopFlagPath)) {
@@ -79,7 +143,7 @@ export class LoopEngine {
           await this.setState("running");
         }
 
-        if (this.config.maxCycles > 0 && round >= this.config.maxCycles) {
+        if (stopAtRound !== null && round >= stopAtRound) {
           await this.setState("stopping");
           break;
         }
@@ -126,12 +190,16 @@ export class LoopEngine {
     const runId = runTimestamp();
     const artifacts = buildRoundArtifactPaths(this.paths.runsDir, runId);
     const logLines: string[] = [];
-    const log = (message: string): void => {
-      logLines.push(`[${new Date().toISOString()}] ${this.redactor.redact(message)}`);
+    const log = async (message: string): Promise<void> => {
+      const line = `[${new Date().toISOString()}] ${this.redactor.redact(message)}`;
+      logLines.push(line);
+      await appendLogLine(artifacts.logPath, line);
     };
+    await writeLogFile(artifacts.logPath, []);
+    await log(`Round ${round} started.`);
 
     const workspace = new WorkspaceManager(this.paths);
-    const snapshot = await workspace.createSnapshot();
+    let snapshot = await workspace.createSnapshot();
     const guardrails = new Guardrails(this.config.budget);
 
     let subTask: SubTask = {
@@ -146,16 +214,21 @@ export class LoopEngine {
       const goal = await fs.readFile(this.paths.goalPath, "utf8");
       const instructions = await drainInstructions(this.paths);
       const priorState = await readLoopState(this.paths);
+      const plannerPreviousToolResult = this.previousToolResult ?? priorState.previous_tool_result;
 
       subTask = await this.planner.plan({
         goal,
         instructions,
         round,
         budget: this.config.budget,
-        previous_tool_result: this.previousToolResult
+        previous_tool_result: plannerPreviousToolResult,
+        previous_round_error: priorState.last_error,
+        consecutive_evaluator_failures: priorState.consecutive_evaluator_failures
       });
+      const snapshotTargets = extractSnapshotTargetsFromSubTask(subTask, process.cwd());
+      snapshot = await workspace.createSnapshot(snapshotTargets);
 
-      log(`Planner objective: ${subTask.objective}`);
+      await log(`Planner objective: ${subTask.objective}`);
       const execution = await this.executor.execute({
         subTask,
         round,
@@ -164,20 +237,104 @@ export class LoopEngine {
         guardrails,
         paths: this.paths
       });
+      const actions = [...execution.actions];
+      let finalToolResult: ToolResult = {
+        ...execution.toolResult
+      };
 
       stateChange = await workspace.buildStateChange(snapshot);
-      execution.toolResult.artifacts.log_path = artifacts.logPath;
-      execution.toolResult.artifacts.state_change_path = artifacts.stateChangePath;
+      finalToolResult.artifacts.log_path = artifacts.logPath;
+      finalToolResult.artifacts.state_change_path = artifacts.stateChangePath;
 
-      const evaluation = await this.evaluator.evaluate({
+      let evaluation: EvaluationResult = await this.evaluator.evaluate({
         subTask,
-        toolResult: execution.toolResult,
+        toolResult: finalToolResult,
         stateChange,
         logLines,
-        runTimestamp: runId
+        runTimestamp: runId,
+        budgetLimits: guardrails.limitsSnapshot(),
+        budgetUsage: guardrails.usage()
       });
 
-      if (evaluation.decision === "fail" || execution.toolResult.status === "failure") {
+      const missingKeyDimensions = extractMissingKeyDimensions(evaluation.justification);
+      if (
+        evaluation.decision === "fail" &&
+        finalToolResult.status === "success" &&
+        missingKeyDimensions.length > 0
+      ) {
+        await log(
+          `Evaluator reported insufficient evidence for key dimensions (${missingKeyDimensions.join(
+            ", "
+          )}). Triggering one evidence-remediation pass.`
+        );
+
+        const remediationTask: SubTask = {
+          rationale:
+            "Evaluator failed due to insufficient key-dimension evidence. Collect explicit, verifiable proof from workspace state and run outputs.",
+          objective: `Collect and persist explicit evidence for these missing key dimensions: ${missingKeyDimensions.join(
+            ", "
+          )}.`,
+          expected_outcome:
+            "Round artifacts include concrete, machine-verifiable evidence that directly addresses each missing key dimension.",
+          recommended_tools: ["read_file", "run_shell", "write_file"]
+        };
+
+        const remediationInstructions = [
+          ...instructions,
+          `Evaluator failure: ${evaluation.justification}`,
+          "Collect concrete evidence from commands/files and persist it in workspace artifacts so evaluator can verify compliance."
+        ];
+
+        const remediation = await this.executor.execute({
+          subTask: remediationTask,
+          round,
+          goal,
+          instructions: remediationInstructions,
+          guardrails,
+          paths: this.paths
+        });
+
+        actions.push(...remediation.actions);
+        if (remediation.toolResult.status === "success") {
+          finalToolResult = {
+            ...finalToolResult,
+            summary: `${finalToolResult.summary} Evidence remediation: ${remediation.toolResult.summary}`,
+            next_state_hint:
+              remediation.toolResult.next_state_hint === "stop"
+                ? "stop"
+                : finalToolResult.next_state_hint
+          };
+          stateChange = await workspace.buildStateChange(snapshot);
+          finalToolResult.artifacts.log_path = artifacts.logPath;
+          finalToolResult.artifacts.state_change_path = artifacts.stateChangePath;
+        evaluation = await this.evaluator.evaluate({
+          subTask,
+          toolResult: finalToolResult,
+          stateChange,
+          logLines,
+            runTimestamp: runId,
+            budgetLimits: guardrails.limitsSnapshot(),
+            budgetUsage: guardrails.usage()
+          });
+          await log(`Post-remediation evaluation decision: ${evaluation.decision}.`);
+        } else {
+          finalToolResult = {
+            ...remediation.toolResult,
+            summary: `${finalToolResult.summary} Evidence remediation failed: ${remediation.toolResult.summary}`,
+            artifacts: {
+              log_path: artifacts.logPath,
+              state_change_path: artifacts.stateChangePath
+            }
+          };
+          await log(
+            `Evidence remediation failed: ${
+              remediation.toolResult.error?.message ?? "unknown remediation error"
+            }`
+          );
+        }
+      }
+
+      if (evaluation.decision === "fail" || finalToolResult.status === "failure") {
         await workspace.rollback(snapshot);
         stateChange = `${stateChange}\nRollback: workspace snapshot restored due to failed round.\n`;
       }
@@ -190,12 +347,12 @@ export class LoopEngine {
         budget_limits: guardrails.limitsSnapshot(),
         budget_usage: usage,
         evaluator_decision: evaluation.decision,
-        tool_status: execution.toolResult.status
+        tool_status: finalToolResult.status
       };
 
       const risks: string[] = [];
-      if (execution.toolResult.status === "failure") {
-        risks.push(execution.toolResult.error?.message ?? "Executor returned failure");
+      if (finalToolResult.status === "failure") {
+        risks.push(finalToolResult.error?.message ?? "Executor returned failure");
       }
       if (evaluation.decision === "fail") {
         risks.push(evaluation.justification);
@@ -207,8 +364,8 @@ export class LoopEngine {
       await writeSummaryFile(artifacts.summaryPath, {
         goal,
         subTask,
-        actions: execution.actions,
-        toolResult: execution.toolResult,
+        actions,
+        toolResult: finalToolResult,
         evaluation,
         metrics,
         risks,
@@ -218,25 +375,26 @@ export class LoopEngine {
       await trimOldRuns(this.paths.runsDir, this.config.maxRetainRuns);
 
       const nextFailureCount = evaluation.decision === "fail" ? priorState.consecutive_evaluator_failures + 1 : 0;
-      this.previousToolResult = execution.toolResult;
+      this.previousToolResult = finalToolResult;
 
       await writeLoopState(this.paths, {
         ...priorState,
         round,
         state: nextFailureCount >= 3 ? "paused" : priorState.state,
         pid: process.pid,
-        last_error: execution.toolResult.error?.message ?? (evaluation.decision === "fail" ? evaluation.justification : null),
+        last_error: finalToolResult.error?.message ?? (evaluation.decision === "fail" ? evaluation.justification : null),
         consecutive_evaluator_failures: nextFailureCount,
+        previous_tool_result: finalToolResult,
         current_budget: {
           limits: guardrails.limitsSnapshot(),
           usage
         }
       });
 
-      if (nextFailureCount >= 3 || evaluation.decision === "fail" || execution.toolResult.status === "failure") {
+      if (nextFailureCount >= 3 || evaluation.decision === "fail" || finalToolResult.status === "failure") {
         return {
           success: false,
-          errorMessage: execution.toolResult.error?.message ?? evaluation.justification
+          errorMessage: finalToolResult.error?.message ?? evaluation.justification
         };
       }
 
@@ -273,7 +431,7 @@ export class LoopEngine {
       };
 
       await writeStateChangeFile(artifacts.stateChangePath, stateChange);
-      log(`Round error: ${message}`);
+      await log(`Round error: ${message}`);
       await writeLogFile(artifacts.logPath, logLines);
       await writeMetricsFile(artifacts.metricsPath, metrics);
       await writeSummaryFile(artifacts.summaryPath, {
@@ -299,6 +457,7 @@ export class LoopEngine {
         pid: process.pid,
         last_error: message,
         consecutive_evaluator_failures: current.consecutive_evaluator_failures + 1,
+        previous_tool_result: failureToolResult,
         current_budget: {
           limits: guardrails.limitsSnapshot(),
           usage
@@ -309,12 +468,12 @@ export class LoopEngine {
     }
   }
 
-  private async setState(state: LoopStateName, lastError: string | null = null): Promise<void> {
+  private async setState(state: LoopStateName, lastError?: string | null): Promise<void> {
     await updateLoopState(this.paths, (current) => ({
       ...current,
       state,
       pid: process.pid,
-      last_error: lastError
+      last_error: resolveNextLastError(current.last_error, lastError)
     }));
   }
 

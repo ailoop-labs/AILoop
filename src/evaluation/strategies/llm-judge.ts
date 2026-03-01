@@ -271,6 +271,8 @@ function buildDimensionPrompt(dimension: EvaluationDimension, context: RoundEval
         objective: context.subTask.objective,
         expected_outcome: context.subTask.expected_outcome,
         tool_result: context.toolResult,
+        budget_limits: context.budgetLimits,
+        budget_usage: context.budgetUsage,
         state_change: context.stateChange,
         recent_logs: context.logLines.slice(-40)
       },

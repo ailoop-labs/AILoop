@@ -5,7 +5,7 @@ import type { AppConfig } from "../config/env";
 import { readRuntimeLoopConfig, runtimeLoopConfigToEnv } from "../config/runtime";
 import { listRunRecords, readLastLogTail } from "../reporting/summary";
 import type { LoopStateData } from "../types/contracts";
-import { readJsonFile } from "../utils/fs";
+import { readJsonFile, readTextFile } from "../utils/fs";
 import {
   appendInstruction,
   buildLoopPaths,
@@ -17,6 +17,7 @@ import {
   setFlag,
   writeLoopState
 } from "./state";
+import type { LoopPaths } from "./state";
 
 function isPidAlive(pid: number): boolean {
   try {
@@ -36,7 +37,7 @@ export async function startBackgroundLoop(config: AppConfig): Promise<{ started:
     return { started: false, message: `Loop already running with pid ${existingPid}` };
   }
 
-  await clearFlag(paths.stopFlagPath);
+  await prepareStartFlags(paths);
   const runtimeConfig = await readRuntimeLoopConfig(config);
   const runtimeEnv = runtimeLoopConfigToEnv(runtimeConfig);
   const child = spawn("bun", ["run", "scripts/autoloop.ts", "run"], {
@@ -51,6 +52,11 @@ export async function startBackgroundLoop(config: AppConfig): Promise<{ started:
   child.unref();
 
   return { started: true, message: `Loop started with pid ${child.pid}` };
+}
+
+export async function prepareStartFlags(paths: LoopPaths): Promise<void> {
+  await clearFlag(paths.stopFlagPath);
+  await clearFlag(paths.pauseFlagPath);
 }
 
 export async function stopLoop(config: AppConfig): Promise<void> {
@@ -144,12 +150,21 @@ export async function listRuns(config: AppConfig, limit = 20): Promise<
 export async function tailLatestLog(config: AppConfig, lines = 200): Promise<string[]> {
   const paths = buildLoopPaths(config.homeDir);
   await ensureLoopHome(paths);
-  const records = await listRunRecords(paths.runsDir, 1);
-  if (records.length === 0) {
+  const entries = await fs.readdir(paths.runsDir);
+  const latestLog = entries
+    .filter((entry) => entry.endsWith(".round.log"))
+    .sort((a, b) => b.localeCompare(a))[0];
+  if (!latestLog) {
     return [];
   }
 
-  return readLastLogTail(records[0].logPath, lines);
+  return readLastLogTail(path.join(paths.runsDir, latestLog), lines);
+}
+
+export async function readGoal(config: AppConfig): Promise<string> {
+  const paths = buildLoopPaths(config.homeDir);
+  await ensureLoopHome(paths);
+  return readTextFile(paths.goalPath, "");
 }
 
 export function resolveWebDistPath(): string {

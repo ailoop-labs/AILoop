@@ -69,6 +69,10 @@ interface AuthLoginResponse {
   tokenRequired: boolean;
 }
 
+interface GoalResponse {
+  goal: string;
+}
+
 const stateTone: Record<LoopStateName, string> = {
   idle: "bg-slate text-mist",
   running: "bg-accent/20 text-accent",
@@ -131,12 +135,48 @@ function formatMs(ms: number): string {
   return `${Math.round(ms / 1000)}s`;
 }
 
-function extractSummaryLine(summary: string): string {
+interface RoundReport {
+  objective: string;
+  toolStatus: string;
+  workSummary: string;
+  decision: string;
+  justification: string;
+  nextRecommendation: string;
+}
+
+function extractBulletValue(summary: string, label: string): string | null {
+  const prefix = `- ${label}:`;
   const line = summary
     .split("\n")
     .map((item) => item.trim())
-    .find((item) => item.startsWith("- Objective:"));
-  return line ? line.replace("- Objective:", "").trim() : "No objective captured";
+    .find((item) => item.startsWith(prefix));
+  if (!line) {
+    return null;
+  }
+  return line.slice(prefix.length).trim();
+}
+
+function extractMarkdownSection(summary: string, heading: string): string {
+  const marker = `## ${heading}`;
+  const start = summary.indexOf(marker);
+  if (start === -1) {
+    return "";
+  }
+
+  const rest = summary.slice(start + marker.length).replace(/^\s*\n/, "");
+  const nextHeadingIndex = rest.search(/\n##\s+/);
+  return (nextHeadingIndex === -1 ? rest : rest.slice(0, nextHeadingIndex)).trim();
+}
+
+function parseRoundReport(summary: string): RoundReport {
+  return {
+    objective: extractBulletValue(summary, "Objective") ?? "No objective captured",
+    toolStatus: extractBulletValue(summary, "Tool Status") ?? "unknown",
+    workSummary: extractBulletValue(summary, "Work Summary") ?? "No work summary captured",
+    decision: extractBulletValue(summary, "Decision") ?? "unknown",
+    justification: extractBulletValue(summary, "Justification") ?? "No evaluator justification captured",
+    nextRecommendation: extractMarkdownSection(summary, "Next Round Recommendation") || "No recommendation captured"
+  };
 }
 
 export default function App() {
@@ -146,6 +186,7 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [status, setStatus] = useState<LoopStatus | null>(null);
+  const [goal, setGoal] = useState("");
   const [runs, setRuns] = useState<RunItem[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeLoopConfig | null>(null);
@@ -167,14 +208,17 @@ export default function App() {
     setError(message);
   };
 
-  const refresh = async (): Promise<void> => {
+  const refresh = async (tokenOverride?: string): Promise<void> => {
+    const activeToken = tokenOverride ?? authToken;
     try {
-      const [nextStatus, nextRuns, nextLogs] = await Promise.all([
-        api<LoopStatus>("/api/status", undefined, authToken),
-        api<RunItem[]>("/api/runs?limit=20", undefined, authToken),
-        api<{ lines: string[] }>("/api/logs/tail?lines=120", undefined, authToken)
+      const [nextStatus, nextGoal, nextRuns, nextLogs] = await Promise.all([
+        api<LoopStatus>("/api/status", undefined, activeToken),
+        api<GoalResponse>("/api/goal", undefined, activeToken),
+        api<RunItem[]>("/api/runs?limit=20", undefined, activeToken),
+        api<{ lines: string[] }>("/api/logs/tail?lines=120", undefined, activeToken)
       ]);
       setStatus(nextStatus);
+      setGoal(nextGoal.goal ?? "");
       setRuns(nextRuns);
       setLogs(nextLogs.lines);
       setError(null);
@@ -184,9 +228,10 @@ export default function App() {
     }
   };
 
-  const refreshRuntimeConfig = async (): Promise<void> => {
+  const refreshRuntimeConfig = async (tokenOverride?: string): Promise<void> => {
+    const activeToken = tokenOverride ?? authToken;
     try {
-      const next = await api<RuntimeLoopConfig>("/api/config", undefined, authToken);
+      const next = await api<RuntimeLoopConfig>("/api/config", undefined, activeToken);
       setRuntimeConfig(next);
       setError(null);
       setAuthError(null);
@@ -203,6 +248,7 @@ export default function App() {
 
       if (authStatus.tokenRequired && !authToken.trim()) {
         setStatus(null);
+        setGoal("");
         setRuns([]);
         setLogs([]);
         setRuntimeConfig(null);
@@ -258,6 +304,25 @@ export default function App() {
     ];
   }, [status]);
 
+  const controlAvailability = useMemo(() => {
+    const state = status?.state;
+    if (!state) {
+      return {
+        canStart: false,
+        canPause: false,
+        canResume: false,
+        canStop: false
+      };
+    }
+
+    return {
+      canStart: state === "idle" || state === "error",
+      canPause: state === "running",
+      canResume: state === "paused",
+      canStop: state === "running" || state === "paused"
+    };
+  }, [status?.state]);
+
   const sendControl = async (path: string, body?: Record<string, unknown>): Promise<void> => {
     try {
       setBusy(true);
@@ -301,7 +366,7 @@ export default function App() {
       setLoginToken("");
       setAuthError(null);
       setError(null);
-      await Promise.all([refresh(), refreshRuntimeConfig()]);
+      await Promise.all([refresh(trimmed), refreshRuntimeConfig(trimmed)]);
     } catch {
       setAuthError("Token 无效，请重试。");
     } finally {
@@ -313,6 +378,7 @@ export default function App() {
     clearStoredToken();
     setAuthToken("");
     setStatus(null);
+    setGoal("");
     setRuns([]);
     setLogs([]);
     setRuntimeConfig(null);
@@ -484,32 +550,39 @@ export default function App() {
           </div>
         </div>
 
+        <div className="mt-4 rounded-xl border border-white/10 bg-ink/60 p-4">
+          <p className="text-xs uppercase tracking-[0.2em] text-mist/70">Ultimate Goal</p>
+          <pre className="mt-2 whitespace-pre-wrap text-sm leading-6 text-mist/90">
+            {goal.trim() || "No goal configured in .autoloop/goal.md"}
+          </pre>
+        </div>
+
         <div className="mt-6 grid gap-2 md:grid-cols-4">
           <button
             className="rounded-xl bg-accent px-4 py-2 font-semibold text-ink transition hover:bg-accent/80 disabled:cursor-not-allowed disabled:bg-accent/40"
             onClick={() => void sendControl("/api/loop/start")}
-            disabled={busy || configBusy}
+            disabled={busy || configBusy || !controlAvailability.canStart}
           >
             Start
           </button>
           <button
             className="rounded-xl bg-warning px-4 py-2 font-semibold text-ink transition hover:bg-warning/80 disabled:cursor-not-allowed disabled:bg-warning/40"
             onClick={() => void sendControl("/api/loop/pause")}
-            disabled={busy || configBusy}
+            disabled={busy || configBusy || !controlAvailability.canPause}
           >
             Pause
           </button>
           <button
             className="rounded-xl bg-sky-300 px-4 py-2 font-semibold text-ink transition hover:bg-sky-200 disabled:cursor-not-allowed disabled:bg-sky-200/50"
             onClick={() => void sendControl("/api/loop/resume")}
-            disabled={busy || configBusy}
+            disabled={busy || configBusy || !controlAvailability.canResume}
           >
             Resume
           </button>
           <button
             className="rounded-xl bg-ember px-4 py-2 font-semibold text-ink transition hover:bg-ember/80 disabled:cursor-not-allowed disabled:bg-ember/40"
             onClick={() => void sendControl("/api/loop/stop")}
-            disabled={busy || configBusy}
+            disabled={busy || configBusy || !controlAvailability.canStop}
           >
             Stop
           </button>
@@ -553,7 +626,7 @@ export default function App() {
               />
             </label>
             <label className="text-sm text-mist/80">
-              Max Cycles (0 = unlimited)
+              Stop After Rounds (0 = unlimited)
               <input
                 type="number"
                 min={0}
@@ -830,13 +903,36 @@ export default function App() {
           {runs.length === 0 ? (
             <p className="text-sm text-mist/70">No run artifacts yet.</p>
           ) : (
-            runs.map((run) => (
-              <article key={run.timestamp} className="rounded-2xl border border-white/10 bg-ink/60 p-4">
-                <p className="text-xs uppercase tracking-[0.2em] text-accent/80">{run.timestamp}</p>
-                <p className="mt-2 text-sm text-mist/85">{extractSummaryLine(run.summary)}</p>
-                <p className="mt-2 text-xs text-mist/55">{run.metrics ? JSON.stringify(run.metrics) : "No metrics"}</p>
-              </article>
-            ))
+            runs.map((run) => {
+              const report = parseRoundReport(run.summary);
+              return (
+                <article key={run.timestamp} className="rounded-2xl border border-white/10 bg-ink/60 p-4">
+                  <p className="text-xs uppercase tracking-[0.2em] text-accent/80">{run.timestamp}</p>
+                  <p className="mt-2 text-sm text-mist/90">
+                    <span className="text-mist/60">Objective: </span>
+                    {report.objective}
+                  </p>
+                  <p className="mt-2 text-sm text-mist/90">
+                    <span className="text-mist/60">AI Summary: </span>
+                    {report.workSummary}
+                  </p>
+                  <p className="mt-2 text-xs text-mist/75">
+                    Tool: {report.toolStatus} | Evaluator: {report.decision}
+                  </p>
+                  <p className="mt-2 text-xs text-mist/65">Why: {report.justification}</p>
+                  <p className="mt-2 text-xs text-mist/65">Next: {report.nextRecommendation}</p>
+                  <p className="mt-2 text-xs text-mist/55">{run.metrics ? JSON.stringify(run.metrics) : "No metrics"}</p>
+                  <details className="mt-3">
+                    <summary className="cursor-pointer text-xs uppercase tracking-[0.2em] text-mist/60 hover:text-accent">
+                      Full Round Report
+                    </summary>
+                    <pre className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap rounded-xl border border-white/10 bg-ink/75 p-3 text-xs leading-5 text-mist/80">
+                      {run.summary}
+                    </pre>
+                  </details>
+                </article>
+              );
+            })
           )}
         </div>
       </section>

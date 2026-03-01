@@ -7,6 +7,7 @@ import {
   instructLoop,
   listRuns,
   pauseLoop,
+  readGoal,
   resolveWebDistPath,
   resumeLoop,
   startBackgroundLoop,
@@ -131,6 +132,10 @@ const server = Bun.serve({
 
     if (url.pathname === "/api/config" && request.method === "GET") {
       return json(await readRuntimeLoopConfig(config));
+    }
+
+    if (url.pathname === "/api/goal" && request.method === "GET") {
+      return json({ goal: await readGoal(config) });
     }
 
     if (url.pathname === "/api/config" && request.method === "POST") {

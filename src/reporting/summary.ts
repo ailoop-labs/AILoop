@@ -28,6 +28,11 @@ export async function writeLogFile(logPath: string, logLines: string[]): Promise
   await fs.writeFile(logPath, `${logLines.join("\n")}\n`, "utf8");
 }
 
+export async function appendLogLine(logPath: string, line: string): Promise<void> {
+  await ensureDir(path.dirname(logPath));
+  await fs.appendFile(logPath, `${line}\n`, "utf8");
+}
+
 export async function writeStateChangeFile(stateChangePath: string, content: string): Promise<void> {
   await ensureDir(path.dirname(stateChangePath));
   await fs.writeFile(stateChangePath, content, "utf8");
@@ -52,6 +57,11 @@ export async function writeSummaryFile(summaryPath: string, input: SummaryInput)
     "",
     "## Actions Taken (Tools Used)",
     uniqueTools.length > 0 ? uniqueTools.map((tool) => `- ${tool}`).join("\n") : "- No tools were used.",
+    "",
+    "## Execution Result",
+    `- Tool Status: ${input.toolResult.status}`,
+    `- Work Summary: ${input.toolResult.summary}`,
+    `- Error: ${input.toolResult.error?.message ?? "none"}`,
     "",
     "## Evaluation Result",
     `- Decision: ${input.evaluation.decision}`,
