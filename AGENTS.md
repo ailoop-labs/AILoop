@@ -109,6 +109,7 @@ While Evaluators (like `ShellEvaluator` or `WebhookEvaluator`) are often determi
 - **Skeptical by Default:** The Judge must actively look for side effects or incomplete work. "Did the Agent claim success but actually leave syntax errors?"
 - **Budget Agnostic:** The Judge evaluates *correctness*, not efficiency. The Engine handles budget enforcement.
 - **Clear Justification:** A failure must be accompanied by a specific reason that the Planner can understand and act upon in the next round (e.g., "The endpoint was created, but it returns 500 instead of 200 on invalid input.").
+- **Scope Is a Weak Signal:** File-range expansion beyond the declared objective is a warning signal, not a standalone hard-fail condition; hard-fail requires concrete evidence of policy/budget/safety breach or severe unresolved behavior risk.
 
 ### 4.2 Evaluator Result Schema (`EvaluationResult`)
 Evaluators should return structured output:
@@ -248,6 +249,24 @@ A round is considered complete only if all criteria are true:
 
 To stay consistent with the loop state machine:
 - Budget breach or repeated evaluator failures should transition to `paused`.
-- User `stop` should transition `running -> stopping -> idle` after safe checkpoint.
+- Successful rounds may transition `running -> cooldown -> running` between rounds.
+- User `stop` should transition `running|cooldown -> stopping -> idle` after safe checkpoint.
 - Unhandled exceptions should transition to `error` and require explicit reset/resume policy.
 - Human `instruct` messages must be injected into Planner context at the next round boundary.
+
+---
+
+## 11. Operator Workflow Defaults
+
+For this repository, unless a live human instruction explicitly overrides it in the current turn:
+
+1. After implementing a requested code change, run relevant verification commands first (tests/typecheck or task-specific checks).
+2. If verification is acceptable, create a git commit for the change set with a concise factual message.
+3. Push the commit to `origin` on the current branch.
+4. Restart the production service to apply new code with:
+   - `bash scripts/prod.sh restart`
+5. In the round/report summary, include:
+   - verification commands and outcomes,
+   - commit hash/message,
+   - push result (remote/branch),
+   - restart result (PID/log path if available).
