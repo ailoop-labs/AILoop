@@ -44,6 +44,11 @@ export type ProcessRunner = (
   }
 ) => Promise<ProcessRunResult>;
 
+type SleepFn = (ms: number) => Promise<void>;
+
+const INTERFACE_ERROR_RETRY_DELAY_MS = 60_000;
+const INTERFACE_ERROR_MAX_RETRIES = 5;
+
 function parseJsonSafely<T>(payload: string): T | null {
   try {
     return JSON.parse(payload) as T;
@@ -150,6 +155,31 @@ function isRetryableFailure(errorMessage: string, timedOut: boolean): boolean {
   );
 }
 
+function isTransientInterfaceFailure(errorMessage: string, stderr: string): boolean {
+  const combined = `${errorMessage}\n${stderr}`.toLowerCase();
+  const markers = [
+    " 429 ",
+    "429 too many requests",
+    "502 bad gateway",
+    "503 service unavailable",
+    "504 gateway timeout",
+    "unexpected status 429",
+    "unexpected status 502",
+    "unexpected status 503",
+    "unexpected status 504",
+    "bad gateway",
+    "gateway timeout",
+    "too many requests",
+    "service unavailable",
+    "network error",
+    "econnreset",
+    "etimedout",
+    "eai_again",
+    "enotfound"
+  ];
+  return markers.some((marker) => combined.includes(marker));
+}
+
 function buildArgs(config: CodexConfig, options: CodexJsonCallOptions, schemaPath: string, outputPath: string): string[] {
   const args = [
     "exec",
@@ -249,7 +279,11 @@ async function runProcess(
 export class CodexClient {
   constructor(
     private readonly config: CodexConfig,
-    private readonly processRunner: ProcessRunner = runProcess
+    private readonly processRunner: ProcessRunner = runProcess,
+    private readonly sleep: SleepFn = (ms) =>
+      new Promise((resolve) => {
+        setTimeout(resolve, ms);
+      })
   ) {}
 
   async runJson<T>(options: CodexJsonCallOptions): Promise<CodexJsonCallResult<T>> {
@@ -265,8 +299,9 @@ export class CodexClient {
       let lastFailure: CodexJsonCallResult<T> | null = null;
       let combinedStdout = "";
       let combinedStderr = "";
+      let interfaceRetryCount = 0;
 
-      for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      for (let attempt = 0; ; attempt += 1) {
         const prompt =
           attempt > 0 && lastFailure
             ? buildRetryPrompt(basePrompt, attempt, summarizeForRetry(lastFailure.error ?? "unknown error", lastFailure.stderr))
@@ -319,11 +354,19 @@ export class CodexClient {
           error: errorMessage
         };
 
-        const shouldRetry = attempt < maxRetries && isRetryableFailure(errorMessage, Boolean(runResult.timedOut));
+        const shouldRetryByCodexPolicy = attempt < maxRetries && isRetryableFailure(errorMessage, Boolean(runResult.timedOut));
+        const shouldRetryByInterfacePolicy =
+          interfaceRetryCount < INTERFACE_ERROR_MAX_RETRIES && isTransientInterfaceFailure(errorMessage, runResult.stderr);
         lastFailure = failure;
-        if (!shouldRetry) {
-          return failure;
+        if (shouldRetryByCodexPolicy) {
+          continue;
         }
+        if (shouldRetryByInterfacePolicy) {
+          interfaceRetryCount += 1;
+          await this.sleep(INTERFACE_ERROR_RETRY_DELAY_MS);
+          continue;
+        }
+        return failure;
       }
 
       return (

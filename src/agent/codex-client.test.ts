@@ -93,6 +93,36 @@ describe("CodexClient.runJson", () => {
     });
   });
 
+  test("uses the first complete JSON object when multiple objects are present in payload", async () => {
+    const runner: ProcessRunner = async (_cmd, args) => {
+      await fs.writeFile(
+        outputPathFromArgs(args),
+        `prefix\n{"status":"success","attempt":1}\n{"status":"success","attempt":2}\nsuffix`,
+        "utf8"
+      );
+      return {
+        code: 0,
+        stdout: "",
+        stderr: ""
+      };
+    };
+
+    const client = new CodexClient(createCodexConfig(), runner);
+    const result = await client.runJson<{ status: string; attempt: number }>({
+      prompt: "Return JSON",
+      schema: { type: "object" },
+      cwd: process.cwd(),
+      sandbox: "read-only",
+      maxRetries: 0
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.data).toEqual({
+      status: "success",
+      attempt: 1
+    });
+  });
+
   test("returns failure after retry budget is exhausted", async () => {
     const runner: ProcessRunner = async (_cmd, args) => {
       await fs.writeFile(outputPathFromArgs(args), "{still invalid", "utf8");
@@ -147,5 +177,72 @@ describe("CodexClient.runJson", () => {
 
     expect(result.ok).toBe(true);
     expect(result.data?.status).toBe("ok");
+  });
+
+  test("waits one minute and retries transient interface errors before succeeding", async () => {
+    const attempts = [
+      { code: 1, output: "", stdout: "", stderr: "ERROR: unexpected status 502 Bad Gateway: upstream" },
+      { code: 1, output: "", stdout: "", stderr: "ERROR: unexpected status 502 Bad Gateway: upstream" },
+      { code: 0, output: '{"status":"ok"}', stdout: "", stderr: "" }
+    ];
+    const sleepCalls: number[] = [];
+
+    const runner: ProcessRunner = async (_cmd, args) => {
+      const step = attempts.shift();
+      if (!step) {
+        throw new Error("unexpected additional attempt");
+      }
+      await fs.writeFile(outputPathFromArgs(args), step.output, "utf8");
+      return {
+        code: step.code,
+        stdout: step.stdout,
+        stderr: step.stderr
+      };
+    };
+
+    const client = new CodexClient(createCodexConfig(), runner, async (ms) => {
+      sleepCalls.push(ms);
+    });
+    const result = await client.runJson<{ status: string }>({
+      prompt: "Return JSON",
+      schema: { type: "object" },
+      cwd: process.cwd(),
+      sandbox: "read-only",
+      maxRetries: 0
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.data?.status).toBe("ok");
+    expect(sleepCalls).toEqual([60_000, 60_000]);
+  });
+
+  test("fails only after five interface-error retries are exhausted", async () => {
+    let callCount = 0;
+    const sleepCalls: number[] = [];
+
+    const runner: ProcessRunner = async (_cmd, args) => {
+      callCount += 1;
+      await fs.writeFile(outputPathFromArgs(args), "", "utf8");
+      return {
+        code: 1,
+        stdout: "",
+        stderr: "ERROR: unexpected status 502 Bad Gateway: upstream"
+      };
+    };
+
+    const client = new CodexClient(createCodexConfig(), runner, async (ms) => {
+      sleepCalls.push(ms);
+    });
+    const result = await client.runJson({
+      prompt: "Return JSON",
+      schema: { type: "object" },
+      cwd: process.cwd(),
+      sandbox: "read-only",
+      maxRetries: 0
+    });
+
+    expect(result.ok).toBe(false);
+    expect(callCount).toBe(6);
+    expect(sleepCalls).toEqual([60_000, 60_000, 60_000, 60_000, 60_000]);
   });
 });
