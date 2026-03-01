@@ -114,7 +114,26 @@ export class PlannerAgent {
     this.sandbox = config.codex.plannerSandbox;
   }
 
-  async plan(context: PlannerContext): Promise<SubTask> {
+  async plan(
+    context: PlannerContext,
+    options?: {
+      onLog?: (message: string) => void | Promise<void>;
+    }
+  ): Promise<SubTask> {
+    const emitLog = (message: string): void => {
+      if (!options?.onLog) {
+        return;
+      }
+      void Promise.resolve(options.onLog(message)).catch(() => {
+        // Planner logging is best-effort and must not block planning.
+      });
+    };
+    const toLogLines = (source: "stdout" | "stderr", chunk: string): string[] =>
+      chunk
+        .split(/\r?\n/)
+        .filter((line) => line.length > 0)
+        .map((line) => `[planner codex ${source}] ${line}`);
+
     const adaptiveDirectives = buildAdaptivePlannerDirectives(context);
     const prompt = [
       "You are the AutoLoop Planner agent.",
@@ -149,12 +168,34 @@ export class PlannerAgent {
       )
     ].join("\n");
 
-    const result = await this.codex.runJson<SubTask>({
-      prompt,
-      schema: SUBTASK_SCHEMA,
-      cwd: process.cwd(),
-      sandbox: this.sandbox
-    });
+    emitLog("Planner started Codex planning.");
+    const heartbeatStartedAt = Date.now();
+    const heartbeat = setInterval(() => {
+      const elapsedSeconds = Math.floor((Date.now() - heartbeatStartedAt) / 1000);
+      emitLog(`Planner running... ${elapsedSeconds}s elapsed.`);
+    }, 15_000);
+
+    const result = await this.codex
+      .runJson<SubTask>({
+        prompt,
+        schema: SUBTASK_SCHEMA,
+        cwd: process.cwd(),
+        sandbox: this.sandbox,
+        onStdoutChunk: (chunk) => {
+          for (const line of toLogLines("stdout", chunk)) {
+            emitLog(line);
+          }
+        },
+        onStderrChunk: (chunk) => {
+          for (const line of toLogLines("stderr", chunk)) {
+            emitLog(line);
+          }
+        }
+      })
+      .finally(() => {
+        clearInterval(heartbeat);
+      });
+    emitLog(`Planner Codex planning finished (ok=${result.ok}).`);
 
     if (!result.ok || !result.data) {
       return fallbackPlan(context);

@@ -91,7 +91,7 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStateData & 
   const pid = state.pid ?? (await readPid(paths));
   const pidAlive = pid ? isPidAlive(pid) : false;
 
-  if (state.state === "running" && !pidAlive) {
+  if ((state.state === "running" || state.state === "cooldown") && !pidAlive) {
     const recovered = defaultLoopState(null);
     recovered.last_error = "Process was not alive during status check";
     await writeLoopState(paths, recovered);

@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
-type LoopStateName = "idle" | "running" | "paused" | "stopping" | "error";
+type LoopStateName = "idle" | "running" | "cooldown" | "paused" | "stopping" | "error";
 
 interface LoopStatus {
   state: LoopStateName;
@@ -76,9 +78,19 @@ interface GoalResponse {
 const stateTone: Record<LoopStateName, string> = {
   idle: "bg-slate text-mist",
   running: "bg-accent/20 text-accent",
+  cooldown: "bg-sky-300/20 text-sky-200",
   paused: "bg-warning/20 text-warning",
   stopping: "bg-ember/20 text-ember",
   error: "bg-red-500/20 text-red-300"
+};
+
+const stateLabel: Record<LoopStateName, string> = {
+  idle: "idle",
+  running: "running",
+  cooldown: "resting",
+  paused: "paused",
+  stopping: "stopping",
+  error: "error"
 };
 
 const TOKEN_STORAGE_KEY = "autoloop-console-admin-token";
@@ -137,12 +149,20 @@ function formatMs(ms: number): string {
 
 interface RoundReport {
   objective: string;
+  expectedOutcome: string;
   toolStatus: string;
   workSummary: string;
+  error: string;
   decision: string;
   justification: string;
+  evidence: string;
+  budgetCost: string;
+  budgetTime: string;
+  budgetActions: string;
   nextRecommendation: string;
 }
+
+const compactRunTimestampPattern = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/;
 
 function extractBulletValue(summary: string, label: string): string | null {
   const prefix = `- ${label}:`;
@@ -168,13 +188,44 @@ function extractMarkdownSection(summary: string, heading: string): string {
   return (nextHeadingIndex === -1 ? rest : rest.slice(0, nextHeadingIndex)).trim();
 }
 
+function parseRunTimestamp(timestamp: string): Date | null {
+  const normalizedTimestamp = compactRunTimestampPattern.test(timestamp)
+    ? timestamp.replace(compactRunTimestampPattern, "$1T$2:$3:$4.$5Z")
+    : timestamp;
+  const parsed = new Date(normalizedTimestamp);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatRunTimestamp(timestamp: string): string {
+  const parsed = parseRunTimestamp(timestamp);
+  if (!parsed) {
+    return timestamp;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short"
+  }).format(parsed);
+}
+
 function parseRoundReport(summary: string): RoundReport {
   return {
     objective: extractBulletValue(summary, "Objective") ?? "No objective captured",
+    expectedOutcome: extractBulletValue(summary, "Expected Outcome") ?? "No expected outcome captured",
     toolStatus: extractBulletValue(summary, "Tool Status") ?? "unknown",
     workSummary: extractBulletValue(summary, "Work Summary") ?? "No work summary captured",
+    error: extractBulletValue(summary, "Error") ?? "none",
     decision: extractBulletValue(summary, "Decision") ?? "unknown",
     justification: extractBulletValue(summary, "Justification") ?? "No evaluator justification captured",
+    evidence: extractBulletValue(summary, "Evidence") ?? "No evaluator evidence captured",
+    budgetCost: extractBulletValue(summary, "Cost USD") ?? "N/A",
+    budgetTime: extractBulletValue(summary, "Time ms") ?? "N/A",
+    budgetActions: extractBulletValue(summary, "Actions") ?? "N/A",
     nextRecommendation: extractMarkdownSection(summary, "Next Round Recommendation") || "No recommendation captured"
   };
 }
@@ -189,11 +240,13 @@ export default function App() {
   const [goal, setGoal] = useState("");
   const [runs, setRuns] = useState<RunItem[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
+  const [selectedRun, setSelectedRun] = useState<RunItem | null>(null);
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeLoopConfig | null>(null);
   const [instruction, setInstruction] = useState("");
   const [busy, setBusy] = useState(false);
   const [configBusy, setConfigBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const logTailRef = useRef<HTMLPreElement | null>(null);
   const isAuthenticated = tokenRequired === false || (tokenRequired === true && authToken.trim().length > 0);
 
   const handleRequestError = (requestError: unknown, unauthorizedMessage: string): void => {
@@ -276,6 +329,14 @@ export default function App() {
     return () => clearInterval(timer);
   }, [isAuthenticated, authToken]);
 
+  useEffect(() => {
+    const container = logTailRef.current;
+    if (!container) {
+      return;
+    }
+    container.scrollTop = container.scrollHeight;
+  }, [logs]);
+
   const budgetBars = useMemo(() => {
     if (!status?.current_budget) {
       return [];
@@ -317,11 +378,13 @@ export default function App() {
 
     return {
       canStart: state === "idle" || state === "error",
-      canPause: state === "running",
+      canPause: state === "running" || state === "cooldown",
       canResume: state === "paused",
-      canStop: state === "running" || state === "paused"
+      canStop: state === "running" || state === "cooldown" || state === "paused"
     };
   }, [status?.state]);
+
+  const browserTimeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "Local", []);
 
   const sendControl = async (path: string, body?: Record<string, unknown>): Promise<void> => {
     try {
@@ -472,6 +535,21 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    if (!selectedRun) {
+      return;
+    }
+
+    const handleEscape = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        setSelectedRun(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [selectedRun]);
+
   if (tokenRequired === null) {
     return (
       <main className="mx-auto flex min-h-screen w-full max-w-2xl items-center px-4 py-8">
@@ -526,7 +604,7 @@ export default function App() {
                 status ? stateTone[status.state] : "bg-slate text-mist"
               }`}
             >
-              {status?.state ?? "loading"}
+              {status ? stateLabel[status.state] : "loading"}
             </span>
             {tokenRequired ? (
               <button
@@ -831,7 +909,7 @@ export default function App() {
         )}
       </section>
 
-      <section className="reveal grid gap-6 md:grid-cols-[1.1fr_0.9fr]" style={{ animationDelay: "120ms" }}>
+      <section className="reveal grid gap-6" style={{ animationDelay: "120ms" }}>
         <article className="rounded-3xl border border-white/10 bg-panel/70 p-5 backdrop-blur">
           <h2 className="text-lg font-semibold text-mist">Budgets</h2>
           <div className="mt-4 space-y-4">
@@ -883,7 +961,10 @@ export default function App() {
 
         <article className="rounded-3xl border border-white/10 bg-panel/70 p-5 backdrop-blur">
           <h2 className="text-lg font-semibold text-mist">Live Log Tail</h2>
-          <pre className="mt-4 max-h-[22rem] overflow-auto rounded-xl border border-white/10 bg-ink/75 p-4 text-xs leading-6 text-mist/80">
+          <pre
+            ref={logTailRef}
+            className="mt-4 max-h-[22rem] overflow-auto whitespace-pre-wrap break-words rounded-xl border border-white/10 bg-ink/75 p-4 text-xs leading-6 text-mist/80"
+          >
             {logs.length > 0 ? logs.join("\n") : "No logs yet."}
           </pre>
         </article>
@@ -891,7 +972,10 @@ export default function App() {
 
       <section className="reveal rounded-3xl border border-white/10 bg-panel/70 p-5 backdrop-blur" style={{ animationDelay: "200ms" }}>
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-mist">Run History</h2>
+          <div>
+            <h2 className="text-lg font-semibold text-mist">Run History</h2>
+            <p className="mt-1 text-xs text-mist/60">Times shown in your browser timezone: {browserTimeZone}</p>
+          </div>
           <button
             onClick={() => void refresh()}
             className="rounded-lg border border-white/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-mist/70 transition hover:border-accent hover:text-accent"
@@ -899,43 +983,103 @@ export default function App() {
             Refresh
           </button>
         </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="mt-4 grid gap-3 grid-cols-1">
           {runs.length === 0 ? (
             <p className="text-sm text-mist/70">No run artifacts yet.</p>
           ) : (
-            runs.map((run) => {
+            runs.map((run, index) => {
               const report = parseRoundReport(run.summary);
+              const parsedTimestamp = parseRunTimestamp(run.timestamp);
+              const displayTimestamp = formatRunTimestamp(run.timestamp);
               return (
                 <article key={run.timestamp} className="rounded-2xl border border-white/10 bg-ink/60 p-4">
-                  <p className="text-xs uppercase tracking-[0.2em] text-accent/80">{run.timestamp}</p>
-                  <p className="mt-2 text-sm text-mist/90">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-mist/55">Run #{index + 1}</p>
+                      <p className="text-xs uppercase tracking-[0.2em] text-accent/80">
+                        {parsedTimestamp ? displayTimestamp : run.timestamp}
+                      </p>
+                      <p className="mt-1 text-xs text-mist/55">Raw ID: {run.timestamp}</p>
+                    </div>
+                    <span
+                      className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] ${
+                        report.decision === "pass"
+                          ? "bg-accent/20 text-accent"
+                          : report.decision === "fail"
+                            ? "bg-ember/20 text-ember"
+                            : "bg-slate/70 text-mist/80"
+                      }`}
+                    >
+                      Evaluator {report.decision}
+                    </span>
+                  </div>
+
+                  <p className="mt-3 text-sm text-mist/90">
                     <span className="text-mist/60">Objective: </span>
                     {report.objective}
                   </p>
                   <p className="mt-2 text-sm text-mist/90">
-                    <span className="text-mist/60">AI Summary: </span>
+                    <span className="text-mist/60">Expected: </span>
+                    {report.expectedOutcome}
+                  </p>
+                  <p className="mt-2 text-sm text-mist/90">
+                    <span className="text-mist/60">Summary: </span>
                     {report.workSummary}
                   </p>
-                  <p className="mt-2 text-xs text-mist/75">
-                    Tool: {report.toolStatus} | Evaluator: {report.decision}
+                  <p className="mt-3 text-xs text-mist/75">
+                    Tool: {report.toolStatus} | Error: {report.error}
                   </p>
                   <p className="mt-2 text-xs text-mist/65">Why: {report.justification}</p>
+                  <p className="mt-2 text-xs text-mist/65">Evidence: {report.evidence}</p>
                   <p className="mt-2 text-xs text-mist/65">Next: {report.nextRecommendation}</p>
-                  <p className="mt-2 text-xs text-mist/55">{run.metrics ? JSON.stringify(run.metrics) : "No metrics"}</p>
-                  <details className="mt-3">
-                    <summary className="cursor-pointer text-xs uppercase tracking-[0.2em] text-mist/60 hover:text-accent">
-                      Full Round Report
-                    </summary>
-                    <pre className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap rounded-xl border border-white/10 bg-ink/75 p-3 text-xs leading-5 text-mist/80">
-                      {run.summary}
-                    </pre>
-                  </details>
+                  <div className="mt-3 grid gap-2 text-xs text-mist/70 sm:grid-cols-3">
+                    <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">Cost: {report.budgetCost}</p>
+                    <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">Time: {report.budgetTime}</p>
+                    <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">Actions: {report.budgetActions}</p>
+                  </div>
+                  <button
+                    onClick={() => setSelectedRun(run)}
+                    className="mt-4 rounded-lg border border-white/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-mist/70 transition hover:border-accent hover:text-accent"
+                  >
+                    Full Report
+                  </button>
                 </article>
               );
             })
           )}
         </div>
       </section>
+
+      {selectedRun ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/80 p-4"
+          onClick={() => setSelectedRun(null)}
+          role="presentation"
+        >
+          <article
+            className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-3xl border border-white/15 bg-panel/95 shadow-lift backdrop-blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-mist">Full Report</h3>
+                <p className="mt-1 text-xs text-mist/60">{formatRunTimestamp(selectedRun.timestamp)}</p>
+              </div>
+              <button
+                onClick={() => setSelectedRun(null)}
+                className="rounded-lg border border-white/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-mist/70 transition hover:border-ember hover:text-ember"
+              >
+                Close
+              </button>
+            </div>
+            <div className="max-h-[75vh] overflow-auto px-5 py-4 text-sm text-mist/85">
+              <div className="markdown-body">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedRun.summary}</ReactMarkdown>
+              </div>
+            </div>
+          </article>
+        </div>
+      ) : null}
     </main>
   );
 }

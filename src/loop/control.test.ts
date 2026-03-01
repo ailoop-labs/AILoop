@@ -2,8 +2,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
-import { buildLoopPaths, hasFlag, setFlag } from "./state";
-import { prepareStartFlags, tailLatestLog } from "./control";
+import { buildLoopPaths, defaultLoopState, hasFlag, setFlag, writeLoopState } from "./state";
+import { getLoopStatus, prepareStartFlags, tailLatestLog } from "./control";
 import type { AppConfig } from "../config/env";
 
 function makeTestConfig(homeDir: string): AppConfig {
@@ -79,6 +79,29 @@ describe("tailLatestLog", () => {
 
     const lines = await tailLatestLog(makeTestConfig(homeDir), 2);
     expect(lines).toEqual(["newer-2", "newer-3"]);
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+});
+
+describe("getLoopStatus", () => {
+  test("recovers cooldown state to idle when process is not alive", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-status-cooldown-test-"));
+    const paths = buildLoopPaths(homeDir);
+    await fs.mkdir(homeDir, { recursive: true });
+
+    const staleState = {
+      ...defaultLoopState(),
+      state: "cooldown" as const,
+      pid: 999999
+    };
+    await writeLoopState(paths, staleState);
+
+    const status = await getLoopStatus(makeTestConfig(homeDir));
+    expect(status.state).toBe("idle");
+    expect(status.pid).toBeNull();
+    expect(status.pid_alive).toBe(false);
+    expect(status.last_error).toContain("Process was not alive");
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });

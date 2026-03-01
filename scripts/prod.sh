@@ -7,36 +7,64 @@ cd "$ROOT_DIR"
 RUN_DIR=".autoloop"
 PID_FILE="$RUN_DIR/prod.server.pid"
 LOG_FILE="$RUN_DIR/prod.server.log"
+DAILY_TOKEN_FILE="$RUN_DIR/console.admin.token.daily"
+STOP_TIMEOUT_SECONDS="${AUTOLOOP_PROD_STOP_TIMEOUT_SECONDS:-20}"
 
-MODE="${1:-foreground}"
-if [[ "$MODE" != "foreground" && "$MODE" != "daemon" && "$MODE" != "stop" ]]; then
-  echo "Usage: $0 [daemon|stop]"
+if ! [[ "$STOP_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
+  echo "AUTOLOOP_PROD_STOP_TIMEOUT_SECONDS must be a non-negative integer."
   exit 1
 fi
 
-if [[ "$MODE" == "stop" ]]; then
+graceful_stop_server() {
   if [[ ! -f "$PID_FILE" ]]; then
     echo "AutoLoop Production server is not running (PID file not found)."
-    exit 0
+    return 0
   fi
 
+  local existing_pid
   existing_pid="$(cat "$PID_FILE")"
   if [[ -z "$existing_pid" ]]; then
     rm -f "$PID_FILE"
     echo "PID file was empty and has been cleaned up."
-    exit 0
+    return 0
   fi
 
   if ! kill -0 "$existing_pid" >/dev/null 2>&1; then
     rm -f "$PID_FILE"
     echo "AutoLoop Production server is not running (stale PID file cleaned)."
-    exit 0
+    return 0
   fi
 
   kill "$existing_pid"
+  local deadline=$((SECONDS + STOP_TIMEOUT_SECONDS))
+  while kill -0 "$existing_pid" >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      echo "Graceful stop timed out after ${STOP_TIMEOUT_SECONDS}s; forcing termination (PID: $existing_pid)."
+      kill -KILL "$existing_pid" >/dev/null 2>&1 || true
+      break
+    fi
+    sleep 0.2
+  done
+
   rm -f "$PID_FILE"
   echo "Stopped AutoLoop Production server (PID: $existing_pid)."
+}
+
+MODE="${1:-foreground}"
+if [[ "$MODE" != "foreground" && "$MODE" != "daemon" && "$MODE" != "stop" && "$MODE" != "restart" ]]; then
+  echo "Usage: $0 [daemon|stop|restart]"
+  exit 1
+fi
+
+if [[ "$MODE" == "stop" ]]; then
+  graceful_stop_server
   exit 0
+fi
+
+if [[ "$MODE" == "restart" ]]; then
+  echo "Restart requested: stopping current server gracefully."
+  graceful_stop_server
+  MODE="daemon"
 fi
 
 if [[ "$MODE" == "daemon" ]]; then
@@ -70,14 +98,32 @@ if [[ -z "${AUTOLOOP_CONSOLE_ADMIN_TOKEN:-}" ]]; then
   if [[ -n "$configured_admin_token" ]]; then
     export AUTOLOOP_CONSOLE_ADMIN_TOKEN="$configured_admin_token"
   else
-    if command -v openssl >/dev/null 2>&1; then
-      generated_admin_token="$(openssl rand -hex 24)"
+    today_utc="$(date -u +%Y-%m-%d)"
+    cached_day=""
+    cached_token=""
+
+    if [[ -f "$DAILY_TOKEN_FILE" ]]; then
+      read -r cached_day cached_token <"$DAILY_TOKEN_FILE" || true
+    fi
+
+    if [[ -n "$cached_day" && -n "$cached_token" && "$cached_day" == "$today_utc" ]]; then
+      generated_admin_token="$cached_token"
+      echo "AUTOLOOP_CONSOLE_ADMIN_TOKEN is empty in .env; reusing today's token (${today_utc})."
     else
-      generated_admin_token="$(bun -e 'const bytes = crypto.getRandomValues(new Uint8Array(24)); console.log(Array.from(bytes, (n) => n.toString(16).padStart(2, "0")).join(""));')"
+      if command -v openssl >/dev/null 2>&1; then
+        generated_admin_token="$(openssl rand -hex 24)"
+      else
+        generated_admin_token="$(bun -e 'const bytes = crypto.getRandomValues(new Uint8Array(24)); console.log(Array.from(bytes, (n) => n.toString(16).padStart(2, "0")).join(""));')"
+      fi
+      mkdir -p "$RUN_DIR"
+      printf "%s %s\n" "$today_utc" "$generated_admin_token" >"$DAILY_TOKEN_FILE"
+      chmod 600 "$DAILY_TOKEN_FILE" || true
+      echo "AUTOLOOP_CONSOLE_ADMIN_TOKEN is empty in .env; generated today's token (${today_utc})."
     fi
 
     export AUTOLOOP_CONSOLE_ADMIN_TOKEN="$generated_admin_token"
-    echo "AUTOLOOP_CONSOLE_ADMIN_TOKEN is empty in .env; generated a temporary token for this run:"
+    export AUTOLOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE="$today_utc"
+    echo "This token is valid until UTC date changes."
     echo "${AUTOLOOP_CONSOLE_ADMIN_TOKEN}"
     echo "(Tip: copy this token and paste it into the web login page.)"
   fi

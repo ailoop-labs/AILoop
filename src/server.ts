@@ -18,6 +18,16 @@ import {
 const config = loadConfig();
 const adminToken = config.consoleAdminToken.trim();
 const tokenAuthEnabled = adminToken.length > 0;
+const adminTokenIssuedDate = (process.env.AUTOLOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE ?? "").trim();
+
+function isDateBasedAdminTokenExpired(now = new Date()): boolean {
+  if (!tokenAuthEnabled || !adminTokenIssuedDate) {
+    return false;
+  }
+
+  const todayUtc = now.toISOString().slice(0, 10);
+  return todayUtc !== adminTokenIssuedDate;
+}
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data, null, 2), {
@@ -102,12 +112,15 @@ const server = Bun.serve({
     }
 
     if (url.pathname === "/api/auth/status" && request.method === "GET") {
-      return json({ tokenRequired: tokenAuthEnabled });
+      return json({ tokenRequired: tokenAuthEnabled, tokenExpired: isDateBasedAdminTokenExpired() });
     }
 
     if (url.pathname === "/api/auth/login" && request.method === "POST") {
       if (!tokenAuthEnabled) {
         return json({ ok: true, tokenRequired: false });
+      }
+      if (isDateBasedAdminTokenExpired()) {
+        return json({ ok: false, error: "Token expired. Restart production server for today's token." }, 401);
       }
 
       const body = await parseBody(request);
@@ -120,6 +133,10 @@ const server = Bun.serve({
     }
 
     if (url.pathname.startsWith("/api/") && tokenAuthEnabled && !isPublicApi(url.pathname, request.method)) {
+      if (isDateBasedAdminTokenExpired()) {
+        return json({ ok: false, error: "Token expired. Restart production server for today's token." }, 401);
+      }
+
       const token = extractRequestToken(request);
       if (!token || token !== adminToken) {
         return json({ ok: false, error: "Unauthorized" }, 401);

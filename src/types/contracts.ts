@@ -1,4 +1,4 @@
-export type LoopStateName = "idle" | "running" | "paused" | "stopping" | "error";
+export type LoopStateName = "idle" | "running" | "cooldown" | "paused" | "stopping" | "error";
 
 export type EvaluatorType = "shell" | "llm" | "webhook";
 export type EvaluationDimension =
@@ -127,4 +127,5 @@ export interface RoundEvaluationContext {
   runTimestamp: string;
   budgetLimits: BudgetLimits;
   budgetUsage: BudgetUsage;
+  onLog?: (message: string) => void | Promise<void>;
 }

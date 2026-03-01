@@ -133,6 +133,10 @@ The safety net. Tracks consumption during the Executor's run.
 stateDiagram-v2
     [*] --> idle
     idle --> running: Start Command
+    running --> cooldown: Round Completed
+    cooldown --> running: Cooldown Elapsed
+    cooldown --> paused: Pause Cmd (next round gate)
+    cooldown --> stopping: Stop Cmd
     running --> paused: Pause Cmd / Budget Breach / Eval Fail / Human Approval Needed
     running --> stopping: Stop Cmd
     paused --> running: Resume Cmd

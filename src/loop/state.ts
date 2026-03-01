@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { LoopStateData } from "../types/contracts";
-import { ensureDir, fileExists, readJsonFile, readTextFile, writeJsonFile } from "../utils/fs";
+import { ensureDir, ensureRegularFile, fileExists, readJsonFile, readTextFile, writeJsonFile } from "../utils/fs";
 
 export interface LoopPaths {
   homeDir: string;
@@ -35,21 +35,12 @@ export async function ensureLoopHome(paths: LoopPaths): Promise<void> {
   await ensureDir(paths.homeDir);
   await ensureDir(paths.runsDir);
 
-  if (!(await fileExists(paths.goalPath))) {
-    await fs.writeFile(
-      paths.goalPath,
-      "# AutoLoop Goal\n\nDescribe the top-level goal this autonomous loop should pursue. Keep it outcome-focused and measurable.\n",
-      "utf8"
-    );
-  }
-
-  if (!(await fileExists(paths.taskPath))) {
-    await fs.writeFile(paths.taskPath, "# AutoLoop Task Log\n", "utf8");
-  }
-
-  if (!(await fileExists(paths.instructionsPath))) {
-    await writeJsonFile(paths.instructionsPath, []);
-  }
+  await ensureRegularFile(
+    paths.goalPath,
+    "# AutoLoop Goal\n\nDescribe the top-level goal this autonomous loop should pursue. Keep it outcome-focused and measurable.\n"
+  );
+  await ensureRegularFile(paths.taskPath, "# AutoLoop Task Log\n");
+  await ensureRegularFile(paths.instructionsPath, "[]\n");
 }
 
 export function defaultLoopState(pid: number | null = null): LoopStateData {

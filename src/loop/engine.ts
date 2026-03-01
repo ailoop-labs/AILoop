@@ -162,11 +162,13 @@ export class LoopEngine {
           continue;
         }
 
+        await this.setState("cooldown");
         const cooldownResult = await cooldownWithControlChecks(this.paths, this.config.intervalSeconds);
         if (cooldownResult === "stop") {
           await this.setState("stopping");
           break;
         }
+        await this.setState("running");
       }
 
       await clearFlag(this.paths.stopFlagPath);
@@ -216,15 +218,20 @@ export class LoopEngine {
       const priorState = await readLoopState(this.paths);
       const plannerPreviousToolResult = this.previousToolResult ?? priorState.previous_tool_result;
 
-      subTask = await this.planner.plan({
-        goal,
-        instructions,
-        round,
-        budget: this.config.budget,
-        previous_tool_result: plannerPreviousToolResult,
-        previous_round_error: priorState.last_error,
-        consecutive_evaluator_failures: priorState.consecutive_evaluator_failures
-      });
+      subTask = await this.planner.plan(
+        {
+          goal,
+          instructions,
+          round,
+          budget: this.config.budget,
+          previous_tool_result: plannerPreviousToolResult,
+          previous_round_error: priorState.last_error,
+          consecutive_evaluator_failures: priorState.consecutive_evaluator_failures
+        },
+        {
+          onLog: log
+        }
+      );
       const snapshotTargets = extractSnapshotTargetsFromSubTask(subTask, process.cwd());
       snapshot = await workspace.createSnapshot(snapshotTargets);
 
@@ -235,12 +242,14 @@ export class LoopEngine {
         goal,
         instructions,
         guardrails,
-        paths: this.paths
+        paths: this.paths,
+        onLog: log
       });
       const actions = [...execution.actions];
       let finalToolResult: ToolResult = {
         ...execution.toolResult
       };
+      await log(`Executor finished with status: ${finalToolResult.status}.`);
 
       stateChange = await workspace.buildStateChange(snapshot);
       finalToolResult.artifacts.log_path = artifacts.logPath;
@@ -253,8 +262,10 @@ export class LoopEngine {
         logLines,
         runTimestamp: runId,
         budgetLimits: guardrails.limitsSnapshot(),
-        budgetUsage: guardrails.usage()
+        budgetUsage: guardrails.usage(),
+        onLog: log
       });
+      await log(`Evaluator decision: ${evaluation.decision}.`);
 
       const missingKeyDimensions = extractMissingKeyDimensions(evaluation.justification);
       if (
@@ -291,7 +302,8 @@ export class LoopEngine {
           goal,
           instructions: remediationInstructions,
           guardrails,
-          paths: this.paths
+          paths: this.paths,
+          onLog: log
         });
 
         actions.push(...remediation.actions);
@@ -312,10 +324,11 @@ export class LoopEngine {
           toolResult: finalToolResult,
           stateChange,
           logLines,
-            runTimestamp: runId,
-            budgetLimits: guardrails.limitsSnapshot(),
-            budgetUsage: guardrails.usage()
-          });
+          runTimestamp: runId,
+          budgetLimits: guardrails.limitsSnapshot(),
+          budgetUsage: guardrails.usage(),
+          onLog: log
+        });
           await log(`Post-remediation evaluation decision: ${evaluation.decision}.`);
         } else {
           finalToolResult = {

@@ -12,6 +12,7 @@ interface ExecuteOptions {
   instructions: string[];
   guardrails: Guardrails;
   paths: LoopPaths;
+  onLog?: (message: string) => void | Promise<void>;
 }
 
 export interface ExecuteResult {
@@ -65,6 +66,23 @@ function normalizeActions(rawActions: string[], status: "success" | "failure", e
           error: status === "success" ? undefined : errorMessage
         }
       ];
+}
+
+function toLogLines(source: "stdout" | "stderr", chunk: string): string[] {
+  return chunk
+    .split(/\r?\n/)
+    .filter((line) => line.length > 0)
+    .map((line) => `[codex ${source}] ${line}`);
+}
+
+function emitLog(options: ExecuteOptions, message: string): void {
+  if (!options.onLog) {
+    return;
+  }
+
+  void Promise.resolve(options.onLog(message)).catch(() => {
+    // Logging must never block executor flow.
+  });
 }
 
 export class ExecutorAgent {
@@ -124,12 +142,34 @@ export class ExecutorAgent {
       "- actions: ordered list of concise action strings"
     ].join("\n");
 
-    const codexResult = await this.codex.runJson<CodexExecutorResponse>({
-      prompt,
-      schema: EXECUTOR_RESPONSE_SCHEMA,
-      cwd: process.cwd(),
-      sandbox: this.sandbox
-    });
+    emitLog(options, "Executor started Codex execution.");
+    const heartbeatStartedAt = Date.now();
+    const heartbeat = setInterval(() => {
+      const elapsedSeconds = Math.floor((Date.now() - heartbeatStartedAt) / 1000);
+      emitLog(options, `Executor running... ${elapsedSeconds}s elapsed.`);
+    }, 15_000);
+
+    const codexResult = await this.codex
+      .runJson<CodexExecutorResponse>({
+        prompt,
+        schema: EXECUTOR_RESPONSE_SCHEMA,
+        cwd: process.cwd(),
+        sandbox: this.sandbox,
+        onStdoutChunk: (chunk) => {
+          for (const line of toLogLines("stdout", chunk)) {
+            emitLog(options, line);
+          }
+        },
+        onStderrChunk: (chunk) => {
+          for (const line of toLogLines("stderr", chunk)) {
+            emitLog(options, line);
+          }
+        }
+      })
+      .finally(() => {
+        clearInterval(heartbeat);
+      });
+    emitLog(options, `Executor Codex execution finished (ok=${codexResult.ok}).`);
 
     if (!codexResult.ok || !codexResult.data) {
       options.guardrails.recordAction(0);
