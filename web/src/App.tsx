@@ -331,11 +331,11 @@ export default function App() {
 
   useEffect(() => {
     const container = logTailRef.current;
-    if (!container) {
+    if (!container || status?.state !== "running") {
       return;
     }
     container.scrollTop = container.scrollHeight;
-  }, [logs]);
+  }, [logs, status?.state]);
 
   const budgetBars = useMemo(() => {
     if (!status?.current_budget) {
