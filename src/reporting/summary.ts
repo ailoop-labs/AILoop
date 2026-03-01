@@ -12,6 +12,7 @@ export interface SummaryInput {
   evaluation: EvaluationResult;
   metrics: RoundMetrics;
   risks: string[];
+  autoReworkAttempts: string[];
   nextRecommendation: string;
 }
 
@@ -67,6 +68,11 @@ export async function writeSummaryFile(summaryPath: string, input: SummaryInput)
     `- Decision: ${input.evaluation.decision}`,
     `- Justification: ${input.evaluation.justification}`,
     `- Evidence: ${input.evaluation.evidence.join(" | ") || "none"}`,
+    "",
+    "## Auto Rework Attempts",
+    input.autoReworkAttempts.length > 0
+      ? input.autoReworkAttempts.map((attempt) => `- ${attempt}`).join("\n")
+      : "- No auto rework attempts were executed.",
     "",
     "## Budget Consumed vs Limit",
     `- Cost USD: ${input.metrics.budget_usage.usdUsed} / ${input.metrics.budget_limits.usdPerRound}`,

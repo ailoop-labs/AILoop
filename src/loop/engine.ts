@@ -127,6 +127,11 @@ function buildEvaluatorReworkInstructions(
   return next;
 }
 
+function sanitizeReworkNote(value: string | undefined | null): string {
+  const normalized = (value ?? "").replace(/\s+/g, " ").trim();
+  return normalized.length > 200 ? `${normalized.slice(0, 197)}...` : normalized;
+}
+
 export class LoopEngine {
   private readonly paths;
   private readonly planner: PlannerAgent;
@@ -241,6 +246,7 @@ export class LoopEngine {
       recommended_tools: []
     };
     let stateChange = "No state changes detected.\n";
+    const autoReworkAttempts: string[] = [];
 
     try {
       const goal = await fs.readFile(this.paths.goalPath, "utf8");
@@ -379,6 +385,7 @@ export class LoopEngine {
 
       if (evaluation.decision === "fail" && finalToolResult.status === "success") {
         for (let attempt = 1; attempt <= this.config.evaluatorReworkMaxAttempts; attempt += 1) {
+          const triggerReason = sanitizeReworkNote(evaluation.justification);
           await log(
             `Evaluator failed; triggering auto-rework attempt ${attempt}/${this.config.evaluatorReworkMaxAttempts}.`
           );
@@ -413,6 +420,11 @@ export class LoopEngine {
           };
 
           if (rework.toolResult.status === "failure") {
+            autoReworkAttempts.push(
+              `Attempt ${attempt}/${this.config.evaluatorReworkMaxAttempts}: trigger='${triggerReason}', executor_status=failure, error='${
+                sanitizeReworkNote(rework.toolResult.error?.message) || "unknown"
+              }'`
+            );
             await log(
               `Auto-rework attempt ${attempt}/${this.config.evaluatorReworkMaxAttempts} failed: ${
                 rework.toolResult.error?.message ?? "unknown executor error"
@@ -433,6 +445,11 @@ export class LoopEngine {
             onLog: log
           });
           await log(`Post-auto-rework evaluation decision: ${evaluation.decision}.`);
+          autoReworkAttempts.push(
+            `Attempt ${attempt}/${this.config.evaluatorReworkMaxAttempts}: trigger='${triggerReason}', executor_status=success, evaluation=${evaluation.decision}, justification='${sanitizeReworkNote(
+              evaluation.justification
+            )}'`
+          );
           if (evaluation.decision === "pass") {
             break;
           }
@@ -474,6 +491,7 @@ export class LoopEngine {
         evaluation,
         metrics,
         risks,
+        autoReworkAttempts,
         nextRecommendation: evaluation.recommended_next_action ?? "continue"
       });
 
@@ -552,6 +570,7 @@ export class LoopEngine {
         },
         metrics,
         risks: [message],
+        autoReworkAttempts: [],
         nextRecommendation: "pause"
       });
 

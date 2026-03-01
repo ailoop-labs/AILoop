@@ -128,6 +128,14 @@ describe("LoopEngine auto rework", () => {
     expect(evalCall).toBe(2);
     expect(executorInputs[1]?.instructions.join("\n")).toContain("Evaluator failure");
     expect(executorInputs[1]?.instructions.join("\n")).toContain("Missing negative tests");
+    const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+    const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
+    expect(summaryFile).toBeDefined();
+    const summaryText = await fs.readFile(path.join(homeDir, "runs", summaryFile as string), "utf8");
+    expect(summaryText).toContain("## Auto Rework Attempts");
+    expect(summaryText).toContain("Attempt 1/1:");
+    expect(summaryText).toContain("trigger='Missing negative tests for edge cases.'");
+    expect(summaryText).toContain("evaluation=pass");
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
