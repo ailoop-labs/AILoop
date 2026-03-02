@@ -243,6 +243,7 @@ export default function App() {
   const [goal, setGoal] = useState("");
   const [runs, setRuns] = useState<RunItem[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
+  const [isGoalDialogOpen, setIsGoalDialogOpen] = useState(false);
   const [selectedRun, setSelectedRun] = useState<RunItem | null>(null);
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeLoopConfig | null>(null);
   const [instruction, setInstruction] = useState("");
@@ -624,7 +625,15 @@ export default function App() {
         </div>
 
         <div className="mt-4 rounded-xl border border-white/10 bg-ink/60 p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-mist/70">Ultimate Goal</p>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs uppercase tracking-[0.2em] text-mist/70">Ultimate Goal</p>
+            <button
+              onClick={() => setIsGoalDialogOpen(true)}
+              className="rounded-lg border border-white/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-mist/70 transition hover:border-accent hover:text-accent"
+            >
+              弹窗查看
+            </button>
+          </div>
           <GoalMarkdown goal={goal} />
         </div>
 
@@ -1069,6 +1078,38 @@ export default function App() {
           )}
         </div>
       </section>
+
+      {isGoalDialogOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/80 p-4"
+          onClick={() => setIsGoalDialogOpen(false)}
+          role="presentation"
+        >
+          <article
+            className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-3xl border border-white/15 bg-panel/95 shadow-lift backdrop-blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-mist">Ultimate Goal</h3>
+                <p className="mt-1 text-xs text-mist/60">Markdown 弹窗视图</p>
+              </div>
+              <button
+                onClick={() => setIsGoalDialogOpen(false)}
+                className="rounded-lg border border-white/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-mist/70 transition hover:border-ember hover:text-ember"
+              >
+                Close
+              </button>
+            </div>
+            <div className="px-5 py-4">
+              <GoalMarkdown
+                goal={goal}
+                containerClassName="max-h-[70vh] overflow-auto rounded-xl border border-white/10 bg-ink/60 p-4"
+              />
+            </div>
+          </article>
+        </div>
+      ) : null}
 
       {selectedRun ? (
         <div

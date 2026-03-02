@@ -23,4 +23,13 @@ describe("GoalMarkdown", () => {
     expect(html).toContain("max-h-64");
     expect(html).toContain("overflow-auto");
   });
+
+  test("supports custom container classes for modal display", () => {
+    const html = renderToStaticMarkup(
+      <GoalMarkdown goal={"Line 1"} containerClassName="max-h-[70vh] overflow-auto p-0" />
+    );
+
+    expect(html).toContain("max-h-[70vh]");
+    expect(html).toContain("p-0");
+  });
 });
