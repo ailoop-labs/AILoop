@@ -3,7 +3,7 @@ import { LazyLog, ScrollFollow } from "@melloware/react-logviewer";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { buildLogViewerText } from "./log-lines";
-import { shouldForceLogTailFollow } from "./log-follow";
+import { resolveLogTailFollowBehavior } from "./log-follow";
 import { GoalMarkdown } from "./goal-markdown";
 import { deriveRoundProgress } from "./round-progress";
 import { paginateRunHistory, RUN_HISTORY_PAGE_SIZE } from "./run-history-pagination";
@@ -298,7 +298,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const isAuthenticated = tokenRequired === false || (tokenRequired === true && authToken.trim().length > 0);
   const displayLogText = useMemo(() => buildLogViewerText(logs), [logs]);
-  const forceFollowLogTail = shouldForceLogTailFollow(status?.state);
+  const logTailFollowBehavior = useMemo(() => resolveLogTailFollowBehavior(status?.state), [status?.state]);
   const roundProgress = useMemo(
     () =>
       deriveRoundProgress({
@@ -1130,12 +1130,12 @@ export default function App() {
           <div className="mt-4 h-[22rem] overflow-hidden rounded-xl border border-white/10 bg-ink/75">
             {displayLogText ? (
               <ScrollFollow
-                startFollowing={forceFollowLogTail}
+                startFollowing={logTailFollowBehavior.startFollowing}
                 render={({ follow, onScroll }) => (
                   <LazyLog
                     text={displayLogText}
-                    follow={forceFollowLogTail || follow}
-                    onScroll={forceFollowLogTail ? undefined : onScroll}
+                    follow={logTailFollowBehavior.forceFollowing || follow}
+                    onScroll={logTailFollowBehavior.forceFollowing ? undefined : onScroll}
                     enableSearch={false}
                     enableHotKeys={false}
                     enableLineNumbers={false}

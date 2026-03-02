@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { shouldForceLogTailFollow } from "./log-follow";
+import { resolveLogTailFollowBehavior, shouldForceLogTailFollow } from "./log-follow";
 
 describe("shouldForceLogTailFollow", () => {
   test("returns true only for running state", () => {
@@ -11,5 +11,22 @@ describe("shouldForceLogTailFollow", () => {
     expect(shouldForceLogTailFollow("error")).toBe(false);
     expect(shouldForceLogTailFollow(undefined)).toBe(false);
     expect(shouldForceLogTailFollow(null)).toBe(false);
+  });
+});
+
+describe("resolveLogTailFollowBehavior", () => {
+  test("starts at latest line even when loop is not running", () => {
+    expect(resolveLogTailFollowBehavior("idle")).toEqual({
+      startFollowing: true,
+      forceFollowing: false
+    });
+    expect(resolveLogTailFollowBehavior("paused")).toEqual({
+      startFollowing: true,
+      forceFollowing: false
+    });
+    expect(resolveLogTailFollowBehavior(null)).toEqual({
+      startFollowing: true,
+      forceFollowing: false
+    });
   });
 });
