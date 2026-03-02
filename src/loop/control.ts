@@ -1,12 +1,17 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { ensureProjectRoleDefinitions, type EnsureProjectRoleDefinitionsOptions } from "../agent/role-definitions";
+import {
+  ensureProjectRoleDefinitions,
+  loadProjectRoleDefinition,
+  type EnsureProjectRoleDefinitionsOptions,
+  type ProjectRole
+} from "../agent/role-definitions";
 import type { AppConfig } from "../config/env";
 import { readRuntimeLoopConfig, runtimeLoopConfigToEnv } from "../config/runtime";
 import { listRunRecords, readLastLogTail } from "../reporting/summary";
 import type { LoopStateData } from "../types/contracts";
-import { readJsonFile, readTextFile } from "../utils/fs";
+import { fileExists, readJsonFile, readTextFile } from "../utils/fs";
 import {
   appendInstruction,
   buildLoopPaths,
@@ -38,6 +43,56 @@ export async function ensureProjectRoles(
     regen: options.regen ?? false,
     codexClient: options.codexClient
   });
+}
+
+export interface ProjectRoleView {
+  role: ProjectRole;
+  title: string;
+  path: string;
+  exists: boolean;
+  definition: string;
+}
+
+function roleTitle(role: ProjectRole): string {
+  if (role === "planner") {
+    return "Planner";
+  }
+  if (role === "executor") {
+    return "Executor";
+  }
+  return "Evaluator";
+}
+
+function rolePath(paths: LoopPaths, role: ProjectRole): string {
+  if (role === "planner") {
+    return paths.plannerRolePath;
+  }
+  if (role === "executor") {
+    return paths.executorRolePath;
+  }
+  return paths.evaluatorRolePath;
+}
+
+export async function listProjectRoles(config: AppConfig): Promise<ProjectRoleView[]> {
+  const paths = buildLoopPaths(config.homeDir);
+  await ensureLoopHome(paths);
+
+  const roles: ProjectRole[] = ["planner", "executor", "evaluator"];
+  const output: ProjectRoleView[] = [];
+
+  for (const role of roles) {
+    const targetPath = rolePath(paths, role);
+    const exists = await fileExists(targetPath);
+    output.push({
+      role,
+      title: roleTitle(role),
+      path: targetPath,
+      exists,
+      definition: await loadProjectRoleDefinition(config.homeDir, role)
+    });
+  }
+
+  return output;
 }
 
 export async function startBackgroundLoop(config: AppConfig): Promise<{ started: boolean; message: string }> {

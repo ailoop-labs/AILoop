@@ -6,6 +6,7 @@ import { isDateBasedAdminTokenExpired } from "./auth/admin-token";
 import {
   getLoopStatus,
   instructLoop,
+  listProjectRoles,
   listRuns,
   pauseLoop,
   readGoal,
@@ -198,6 +199,14 @@ const server = Bun.serve({
       const limitRaw = Number(url.searchParams.get("limit") ?? "20");
       const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, limitRaw)) : 20;
       return json(await listRuns(config, limit));
+    }
+
+    if (url.pathname === "/api/roles" && request.method === "GET") {
+      const roles = await listProjectRoles(config);
+      return json({
+        count: roles.length,
+        roles
+      });
     }
 
     if (url.pathname === "/api/logs/tail" && request.method === "GET") {

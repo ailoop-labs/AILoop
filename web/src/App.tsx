@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { buildLogViewerText } from "./log-lines";
 import { GoalMarkdown } from "./goal-markdown";
+import { deriveRoundProgress } from "./round-progress";
 
 type LoopStateName = "idle" | "running" | "cooldown" | "paused" | "stopping" | "error";
 
@@ -76,6 +77,21 @@ interface AuthLoginResponse {
 
 interface GoalResponse {
   goal: string;
+}
+
+interface ProjectRoleResponse {
+  count: number;
+  roles: ProjectRoleItem[];
+}
+
+type ProjectRoleName = "planner" | "executor" | "evaluator";
+
+interface ProjectRoleItem {
+  role: ProjectRoleName;
+  title: string;
+  path: string;
+  exists: boolean;
+  definition: string;
 }
 
 const stateTone: Record<LoopStateName, string> = {
@@ -241,9 +257,11 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [status, setStatus] = useState<LoopStatus | null>(null);
   const [goal, setGoal] = useState("");
+  const [roles, setRoles] = useState<ProjectRoleItem[]>([]);
   const [runs, setRuns] = useState<RunItem[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [isGoalDialogOpen, setIsGoalDialogOpen] = useState(false);
+  const [selectedRole, setSelectedRole] = useState<ProjectRoleItem | null>(null);
   const [selectedRun, setSelectedRun] = useState<RunItem | null>(null);
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeLoopConfig | null>(null);
   const [instruction, setInstruction] = useState("");
@@ -252,6 +270,15 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const isAuthenticated = tokenRequired === false || (tokenRequired === true && authToken.trim().length > 0);
   const displayLogText = useMemo(() => buildLogViewerText(logs), [logs]);
+  const roundProgress = useMemo(
+    () =>
+      deriveRoundProgress({
+        state: status?.state,
+        round: status?.round,
+        logs
+      }),
+    [status?.state, status?.round, logs]
+  );
 
   const handleRequestError = (requestError: unknown, unauthorizedMessage: string): void => {
     const message = requestError instanceof Error ? requestError.message : String(requestError);
@@ -259,6 +286,8 @@ export default function App() {
       clearStoredToken();
       setAuthToken("");
       setAuthError(unauthorizedMessage);
+      setRoles([]);
+      setSelectedRole(null);
       setError(null);
       return;
     }
@@ -268,16 +297,18 @@ export default function App() {
   const refresh = async (tokenOverride?: string): Promise<void> => {
     const activeToken = tokenOverride ?? authToken;
     try {
-      const [nextStatus, nextGoal, nextRuns, nextLogs] = await Promise.all([
+      const [nextStatus, nextGoal, nextRuns, nextLogs, nextRoles] = await Promise.all([
         api<LoopStatus>("/api/status", undefined, activeToken),
         api<GoalResponse>("/api/goal", undefined, activeToken),
         api<RunItem[]>("/api/runs?limit=20", undefined, activeToken),
-        api<{ lines: string[] }>("/api/logs/tail?lines=120", undefined, activeToken)
+        api<{ lines: string[] }>("/api/logs/tail?lines=120", undefined, activeToken),
+        api<ProjectRoleResponse>("/api/roles", undefined, activeToken)
       ]);
       setStatus(nextStatus);
       setGoal(nextGoal.goal ?? "");
       setRuns(nextRuns);
       setLogs(nextLogs.lines);
+      setRoles(nextRoles.roles ?? []);
       setError(null);
       setAuthError(null);
     } catch (requestError) {
@@ -306,6 +337,7 @@ export default function App() {
       if (authStatus.tokenRequired && !authToken.trim()) {
         setStatus(null);
         setGoal("");
+        setRoles([]);
         setRuns([]);
         setLogs([]);
         setRuntimeConfig(null);
@@ -438,8 +470,10 @@ export default function App() {
     setAuthToken("");
     setStatus(null);
     setGoal("");
+    setRoles([]);
     setRuns([]);
     setLogs([]);
+    setSelectedRole(null);
     setRuntimeConfig(null);
     setAuthError(null);
     setError(null);
@@ -913,7 +947,25 @@ export default function App() {
 
       <section className="reveal grid gap-6" style={{ animationDelay: "120ms" }}>
         <article className="rounded-3xl border border-white/10 bg-panel/70 p-5 backdrop-blur">
-          <h2 className="text-lg font-semibold text-mist">Budgets</h2>
+          <h2 className="text-lg font-semibold text-mist">Round Progress</h2>
+          <div className="mt-4 rounded-xl border border-white/10 bg-ink/60 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs uppercase tracking-[0.2em] text-mist/70">
+              <span>{roundProgress.roundLabel}</span>
+              <span>{roundProgress.percent}%</span>
+            </div>
+            <div className="mt-2 h-3 rounded-full bg-ink/70">
+              <div
+                className="h-3 rounded-full bg-gradient-to-r from-sky-300 via-accent to-warning transition-all duration-300"
+                style={{ width: `${roundProgress.percent}%` }}
+              />
+            </div>
+            <div className="mt-3 grid gap-2 text-sm text-mist/85 md:grid-cols-2">
+              <p className="rounded-lg border border-white/10 bg-ink/70 px-3 py-2">Role: {roundProgress.role}</p>
+              <p className="rounded-lg border border-white/10 bg-ink/70 px-3 py-2">Step: {roundProgress.step}</p>
+            </div>
+          </div>
+
+          <h2 className="mt-7 text-lg font-semibold text-mist">Budgets</h2>
           <div className="mt-4 space-y-4">
             {budgetBars.length === 0 ? (
               <p className="text-sm text-mist/70">No budget usage yet.</p>
@@ -935,6 +987,25 @@ export default function App() {
                   </div>
                 );
               })
+            )}
+          </div>
+
+          <h2 className="mt-7 text-lg font-semibold text-mist">Project Roles ({roles.length})</h2>
+          <p className="mt-2 text-xs text-mist/60">点击角色可查看当前项目角色定义。</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            {roles.length === 0 ? (
+              <p className="text-sm text-mist/70">No role definitions loaded.</p>
+            ) : (
+              roles.map((role) => (
+                <button
+                  key={role.role}
+                  onClick={() => setSelectedRole(role)}
+                  className="rounded-xl border border-white/15 bg-ink/70 px-3 py-3 text-left text-sm text-mist/85 transition hover:border-accent hover:text-accent"
+                >
+                  <p className="font-semibold">{role.title}</p>
+                  <p className="mt-1 text-xs text-mist/65">{role.exists ? "defined" : "default fallback"}</p>
+                </button>
+              ))
             )}
           </div>
 
@@ -1106,6 +1177,37 @@ export default function App() {
                 goal={goal}
                 containerClassName="max-h-[70vh] overflow-auto rounded-xl border border-white/10 bg-ink/60 p-4"
               />
+            </div>
+          </article>
+        </div>
+      ) : null}
+
+      {selectedRole ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/80 p-4"
+          onClick={() => setSelectedRole(null)}
+          role="presentation"
+        >
+          <article
+            className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-3xl border border-white/15 bg-panel/95 shadow-lift backdrop-blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-mist">{selectedRole.title} Role Definition</h3>
+                <p className="mt-1 text-xs text-mist/60">{selectedRole.path}</p>
+              </div>
+              <button
+                onClick={() => setSelectedRole(null)}
+                className="rounded-lg border border-white/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-mist/70 transition hover:border-ember hover:text-ember"
+              >
+                Close
+              </button>
+            </div>
+            <div className="max-h-[75vh] overflow-auto px-5 py-4 text-sm text-mist/85">
+              <div className="markdown-body">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedRole.definition}</ReactMarkdown>
+              </div>
             </div>
           </article>
         </div>
