@@ -947,7 +947,7 @@ export default function App() {
 
       <section className="reveal grid gap-6" style={{ animationDelay: "120ms" }}>
         <article className="rounded-3xl border border-white/10 bg-panel/70 p-5 backdrop-blur">
-          <h2 className="text-lg font-semibold text-mist">Round Progress</h2>
+          <h2 className="text-lg font-semibold text-mist">Role Runtime</h2>
           <div className="mt-4 rounded-xl border border-white/10 bg-ink/60 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs uppercase tracking-[0.2em] text-mist/70">
               <span>{roundProgress.roundLabel}</span>
@@ -965,7 +965,28 @@ export default function App() {
             </div>
           </div>
 
-          <h2 className="mt-7 text-lg font-semibold text-mist">Budgets</h2>
+          <h2 className="mt-7 text-lg font-semibold text-mist">Project Roles ({roles.length})</h2>
+          <p className="mt-2 text-xs text-mist/60">点击角色可查看当前项目角色定义。</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            {roles.length === 0 ? (
+              <p className="text-sm text-mist/70">No role definitions loaded.</p>
+            ) : (
+              roles.map((role) => (
+                <button
+                  key={role.role}
+                  onClick={() => setSelectedRole(role)}
+                  className="rounded-xl border border-white/15 bg-ink/70 px-3 py-3 text-left text-sm text-mist/85 transition hover:border-accent hover:text-accent"
+                >
+                  <p className="font-semibold">{role.title}</p>
+                  <p className="mt-1 text-xs text-mist/65">{role.exists ? "defined" : "default fallback"}</p>
+                </button>
+              ))
+            )}
+          </div>
+        </article>
+
+        <article className="rounded-3xl border border-white/10 bg-panel/70 p-5 backdrop-blur">
+          <h2 className="text-lg font-semibold text-mist">Budgets</h2>
           <div className="mt-4 space-y-4">
             {budgetBars.length === 0 ? (
               <p className="text-sm text-mist/70">No budget usage yet.</p>
@@ -987,25 +1008,6 @@ export default function App() {
                   </div>
                 );
               })
-            )}
-          </div>
-
-          <h2 className="mt-7 text-lg font-semibold text-mist">Project Roles ({roles.length})</h2>
-          <p className="mt-2 text-xs text-mist/60">点击角色可查看当前项目角色定义。</p>
-          <div className="mt-3 grid gap-2 sm:grid-cols-3">
-            {roles.length === 0 ? (
-              <p className="text-sm text-mist/70">No role definitions loaded.</p>
-            ) : (
-              roles.map((role) => (
-                <button
-                  key={role.role}
-                  onClick={() => setSelectedRole(role)}
-                  className="rounded-xl border border-white/15 bg-ink/70 px-3 py-3 text-left text-sm text-mist/85 transition hover:border-accent hover:text-accent"
-                >
-                  <p className="font-semibold">{role.title}</p>
-                  <p className="mt-1 text-xs text-mist/65">{role.exists ? "defined" : "default fallback"}</p>
-                </button>
-              ))
             )}
           </div>
 
