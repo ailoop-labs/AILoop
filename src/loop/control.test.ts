@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { buildLoopPaths, defaultLoopState, hasFlag, setFlag, writeLoopState } from "./state";
-import { getLoopStatus, prepareStartFlags, tailLatestLog } from "./control";
+import { ensureProjectRoles, getLoopStatus, prepareStartFlags, tailLatestLog } from "./control";
 import type { AppConfig } from "../config/env";
 
 function makeTestConfig(homeDir: string): AppConfig {
@@ -105,5 +105,41 @@ describe("getLoopStatus", () => {
     expect(status.last_error).toContain("Process was not alive");
 
     await fs.rm(homeDir, { recursive: true, force: true });
+  });
+});
+
+describe("ensureProjectRoles", () => {
+  test("creates project role files when they are missing", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-control-roles-test-"));
+    const homeDir = path.join(workspaceRoot, ".autoloop");
+    await fs.writeFile(path.join(workspaceRoot, "README.md"), "# Example\n\nService project", "utf8");
+
+    const mockCodex = {
+      async runJson<T>() {
+        return {
+          ok: true,
+          data: {
+            planner_role_md: "# Planner Role\n\nGenerated",
+            executor_role_md: "# Executor Role\n\nGenerated",
+            evaluator_role_md: "# Evaluator Role\n\nGenerated"
+          } as T,
+          rawMessage: "{}",
+          stdout: "",
+          stderr: ""
+        };
+      }
+    };
+
+    await ensureProjectRoles(makeTestConfig(homeDir), {
+      workspaceRoot,
+      regen: false,
+      codexClient: mockCodex as never
+    });
+
+    expect(await fs.readFile(path.join(homeDir, "PLANNER_ROLE.md"), "utf8")).toContain("Generated");
+    expect(await fs.readFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "utf8")).toContain("Generated");
+    expect(await fs.readFile(path.join(homeDir, "EVALUATOR_ROLE.md"), "utf8")).toContain("Generated");
+
+    await fs.rm(workspaceRoot, { recursive: true, force: true });
   });
 });

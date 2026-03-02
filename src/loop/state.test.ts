@@ -5,6 +5,13 @@ import { describe, expect, test } from "bun:test";
 import { buildLoopPaths, defaultLoopState, ensureLoopHome, readLoopState, writeLoopState } from "./state";
 
 describe("loop state persistence", () => {
+  test("buildLoopPaths includes project role definition paths", () => {
+    const paths = buildLoopPaths("/tmp/autoloop-home");
+    expect(paths.plannerRolePath).toBe("/tmp/autoloop-home/PLANNER_ROLE.md");
+    expect(paths.executorRolePath).toBe("/tmp/autoloop-home/EXECUTOR_ROLE.md");
+    expect(paths.evaluatorRolePath).toBe("/tmp/autoloop-home/EVALUATOR_ROLE.md");
+  });
+
   test("defaultLoopState initializes previous_tool_result", () => {
     const state = defaultLoopState();
     expect(state.previous_tool_result).toBeNull();

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { PlannerContext } from "../types/contracts";
-import { buildAdaptivePlannerDirectives } from "./planner";
+import { buildAdaptivePlannerDirectives, buildPlannerPrompt } from "./planner";
 
 function createContext(overrides: Partial<PlannerContext> = {}): PlannerContext {
   return {
@@ -37,5 +37,13 @@ describe("buildAdaptivePlannerDirectives", () => {
   test("keeps base directives when no failure signal exists", () => {
     const directives = buildAdaptivePlannerDirectives(createContext());
     expect(directives.length).toBe(0);
+  });
+});
+
+describe("buildPlannerPrompt", () => {
+  test("injects project-specific planner role definition block", () => {
+    const prompt = buildPlannerPrompt(createContext(), [], "# Planner Role\n\nProject-specific planner instructions.");
+    expect(prompt).toContain("Project-specific Planner Role Definition");
+    expect(prompt).toContain("Project-specific planner instructions.");
   });
 });

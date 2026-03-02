@@ -20,6 +20,18 @@ If conflicts occur, use this precedence order:
 3. `README.md` + `ARCHITECTURE.md`.
 4. This `AGENTS.md` behavior guidance.
 
+### 0.1 Project-Scoped Role Definitions
+
+Role behavior is project-scoped via editable files in `.autoloop/`:
+- `PLANNER_ROLE.md`
+- `EXECUTOR_ROLE.md`
+- `EVALUATOR_ROLE.md`
+
+Defaults:
+- Missing role files are generated automatically during `run`/`start`.
+- Existing role files are preserved unless the operator explicitly regenerates (`roles generate --regen`).
+- Runtime safety constraints and schema contracts remain higher priority than role-file instructions.
+
 ---
 
 ## 1. Core Principles for All Agents

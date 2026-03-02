@@ -190,6 +190,18 @@ describe("buildDimensionPrompt", () => {
     expect(prompt).toContain("behavioral verification");
     expect(prompt).toContain("structural scope signal");
   });
+
+  test("injects project-specific evaluator role definition block", () => {
+    const context = makeRoundContext();
+    const prompt = buildDimensionPrompt(
+      "goal_alignment",
+      context,
+      "# Evaluator Role\n\nProject-specific evaluator instructions."
+    );
+
+    expect(prompt).toContain("Project-specific Evaluator Role Definition");
+    expect(prompt).toContain("Project-specific evaluator instructions.");
+  });
 });
 
 describe("LLMJudgeEvaluator logging", () => {

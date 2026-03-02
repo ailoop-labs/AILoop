@@ -3,6 +3,7 @@ import type { LoopPaths } from "../loop/state";
 import type { ActionRecord, SubTask, ToolResult } from "../types/contracts";
 import type { Guardrails } from "./guardrails";
 import { CodexClient, type JsonSchema } from "./codex-client";
+import { loadProjectRoleDefinition } from "./role-definitions";
 import { ToolRegistry } from "./tool-registry";
 
 interface ExecuteOptions {
@@ -27,6 +28,16 @@ interface CodexExecutorResponse {
   error_message: string;
   next_state_hint: "continue" | "pause" | "stop";
   actions: string[];
+}
+
+interface ExecutorPromptInput {
+  round: number;
+  goal: string;
+  instructions: string[];
+  subTask: SubTask;
+  autoloopHome: string;
+  workspaceRoot: string;
+  availableTools: Array<{ name: string; description: string }>;
 }
 
 const EXECUTOR_RESPONSE_SCHEMA: JsonSchema = {
@@ -85,9 +96,54 @@ function emitLog(options: ExecuteOptions, message: string): void {
   });
 }
 
+export function buildExecutorPrompt(input: ExecutorPromptInput, executorRoleDefinition: string): string {
+  return [
+    "You are the AutoLoop Executor agent.",
+    "Project-specific Executor Role Definition:",
+    executorRoleDefinition.trim(),
+    "",
+    "Complete exactly one atomic sub-task in this workspace.",
+    "",
+    "Hard requirements:",
+    "- Use observe -> reason -> act loop internally.",
+    "- Verify target state before any mutation (read before write).",
+    "- Retry at most 3 times for the same error before failing.",
+    "- Keep actions minimal and deterministic.",
+    "- Prioritize concrete progress toward subTask.expected_outcome; avoid cosmetic-only edits.",
+    "- If blocked by missing context or unavailable prerequisites, fail explicitly instead of guessing.",
+    "- Return final JSON strictly matching schema.",
+    "",
+    "Available tool semantics for action log naming:",
+    JSON.stringify(input.availableTools, null, 2),
+    "",
+    "Round input:",
+    JSON.stringify(
+      {
+        round: input.round,
+        goal: input.goal,
+        instructions: input.instructions,
+        subTask: input.subTask,
+        autoloopHome: input.autoloopHome,
+        workspaceRoot: input.workspaceRoot
+      },
+      null,
+      2
+    ),
+    "",
+    "After performing actions in the workspace, output:",
+    "- status: success or failure",
+    "- summary: short factual sentence",
+    "- error_type: empty string on success, otherwise a short machine-friendly type",
+    "- error_message: empty string on success, otherwise a concrete failure reason",
+    "- next_state_hint: continue/pause/stop",
+    "- actions: ordered list of concise action strings"
+  ].join("\n");
+}
+
 export class ExecutorAgent {
   private readonly codex: CodexClient;
   private readonly sandbox: AppConfig["codex"]["executorSandbox"];
+  private readonly homeDir: string;
 
   constructor(
     private readonly tools: ToolRegistry,
@@ -95,6 +151,7 @@ export class ExecutorAgent {
   ) {
     this.codex = new CodexClient(config.codex);
     this.sandbox = config.codex.executorSandbox;
+    this.homeDir = config.homeDir;
   }
 
   async execute(options: ExecuteOptions): Promise<ExecuteResult> {
@@ -102,45 +159,19 @@ export class ExecutorAgent {
       name: tool.name,
       description: tool.description
     }));
-
-    const prompt = [
-      "You are the AutoLoop Executor agent.",
-      "Complete exactly one atomic sub-task in this workspace.",
-      "",
-      "Hard requirements:",
-      "- Use observe -> reason -> act loop internally.",
-      "- Verify target state before any mutation (read before write).",
-      "- Retry at most 3 times for the same error before failing.",
-      "- Keep actions minimal and deterministic.",
-      "- Prioritize concrete progress toward subTask.expected_outcome; avoid cosmetic-only edits.",
-      "- If blocked by missing context or unavailable prerequisites, fail explicitly instead of guessing.",
-      "- Return final JSON strictly matching schema.",
-      "",
-      "Available tool semantics for action log naming:",
-      JSON.stringify(availableTools, null, 2),
-      "",
-      "Round input:",
-      JSON.stringify(
-        {
-          round: options.round,
-          goal: options.goal,
-          instructions: options.instructions,
-          subTask: options.subTask,
-          autoloopHome: options.paths.homeDir,
-          workspaceRoot: process.cwd()
-        },
-        null,
-        2
-      ),
-      "",
-      "After performing actions in the workspace, output:",
-      "- status: success or failure",
-      "- summary: short factual sentence",
-      "- error_type: empty string on success, otherwise a short machine-friendly type",
-      "- error_message: empty string on success, otherwise a concrete failure reason",
-      "- next_state_hint: continue/pause/stop",
-      "- actions: ordered list of concise action strings"
-    ].join("\n");
+    const executorRoleDefinition = await loadProjectRoleDefinition(this.homeDir, "executor");
+    const prompt = buildExecutorPrompt(
+      {
+        round: options.round,
+        goal: options.goal,
+        instructions: options.instructions,
+        subTask: options.subTask,
+        autoloopHome: options.paths.homeDir,
+        workspaceRoot: process.cwd(),
+        availableTools
+      },
+      executorRoleDefinition
+    );
 
     emitLog(options, "Executor started Codex execution.");
     const heartbeatStartedAt = Date.now();

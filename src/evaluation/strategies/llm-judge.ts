@@ -6,6 +6,7 @@ import type {
   RoundEvaluationContext
 } from "../../types/contracts";
 import { CodexClient, type JsonSchema } from "../../agent/codex-client";
+import { loadProjectRoleDefinition } from "../../agent/role-definitions";
 import type { Evaluator } from "../evaluator";
 
 const DIMENSION_SCHEMA: JsonSchema = {
@@ -350,10 +351,17 @@ export function aggregateDimensionAssessments(
   };
 }
 
-export function buildDimensionPrompt(dimension: EvaluationDimension, context: RoundEvaluationContext): string {
+export function buildDimensionPrompt(
+  dimension: EvaluationDimension,
+  context: RoundEvaluationContext,
+  evaluatorRoleDefinition = ""
+): string {
   const decisionExamples = DIMENSION_DECISION_EXAMPLES[dimension] ?? [];
   return [
     `You are an AutoLoop evaluator for dimension: ${dimension}.`,
+    ...(evaluatorRoleDefinition.trim()
+      ? ["Project-specific Evaluator Role Definition:", evaluatorRoleDefinition.trim(), ""]
+      : []),
     "Return JSON matching schema only.",
     "",
     "Rules:",
@@ -397,16 +405,19 @@ export class LLMJudgeEvaluator implements Evaluator {
   private readonly sandbox: AppConfig["codex"]["evaluatorSandbox"];
   private readonly dimensions: EvaluationDimension[];
   private readonly minPassScore: number;
+  private readonly homeDir: string;
 
   constructor(config: AppConfig, codexClient?: CodexClient) {
     this.codex = codexClient ?? new CodexClient(config.codex);
     this.sandbox = config.codex.evaluatorSandbox;
     this.dimensions = [...config.codex.llmEvaluatorDimensions];
     this.minPassScore = config.codex.llmEvaluatorMinPassScore;
+    this.homeDir = config.homeDir;
   }
 
   async evaluate(context: RoundEvaluationContext): Promise<EvaluationResult> {
     const assessments: DimensionAssessment[] = [];
+    const evaluatorRoleDefinition = await loadProjectRoleDefinition(this.homeDir, "evaluator");
     emitEvaluationLog(context, "Evaluator started LLM dimension checks.");
     const heartbeatStartedAt = Date.now();
     const heartbeat = setInterval(() => {
@@ -418,7 +429,7 @@ export class LLMJudgeEvaluator implements Evaluator {
       for (const dimension of this.dimensions) {
         emitEvaluationLog(context, `Evaluator checking dimension: ${dimension}.`);
         const codexResult = await this.codex.runJson<DimensionAssessment>({
-          prompt: buildDimensionPrompt(dimension, context),
+          prompt: buildDimensionPrompt(dimension, context, evaluatorRoleDefinition),
           schema: DIMENSION_SCHEMA,
           cwd: process.cwd(),
           sandbox: this.sandbox,

@@ -8,6 +8,9 @@ export interface LoopPaths {
   runsDir: string;
   goalPath: string;
   taskPath: string;
+  plannerRolePath: string;
+  executorRolePath: string;
+  evaluatorRolePath: string;
   instructionsPath: string;
   statePath: string;
   pidPath: string;
@@ -22,6 +25,9 @@ export function buildLoopPaths(homeDir: string): LoopPaths {
     runsDir: path.join(homeDir, "runs"),
     goalPath: path.join(homeDir, "goal.md"),
     taskPath: path.join(homeDir, "task.md"),
+    plannerRolePath: path.join(homeDir, "PLANNER_ROLE.md"),
+    executorRolePath: path.join(homeDir, "EXECUTOR_ROLE.md"),
+    evaluatorRolePath: path.join(homeDir, "EVALUATOR_ROLE.md"),
     instructionsPath: path.join(homeDir, "instructions.json"),
     statePath: path.join(homeDir, "loop.state"),
     pidPath: path.join(homeDir, "loop.pid"),

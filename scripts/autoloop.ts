@@ -2,6 +2,7 @@
 import { loadConfig } from "../src/config/env";
 import { LoopEngine } from "../src/loop/engine";
 import {
+  ensureProjectRoles,
   getLoopStatus,
   instructLoop,
   listRuns,
@@ -16,6 +17,7 @@ import { sleep } from "../src/utils/time";
 const config = loadConfig();
 
 async function runForeground(): Promise<void> {
+  await ensureProjectRoles(config, { workspaceRoot: process.cwd(), regen: false });
   const engine = new LoopEngine(config);
   await engine.run();
 }
@@ -109,6 +111,18 @@ async function main(): Promise<void> {
       await printRecentRuns();
       break;
     }
+    case "roles": {
+      const subCommand = rest[0];
+      if (subCommand !== "generate") {
+        console.error("Usage: bun run autoloop roles generate [--regen]");
+        process.exitCode = 1;
+        return;
+      }
+      const regen = rest.includes("--regen");
+      await ensureProjectRoles(config, { workspaceRoot: process.cwd(), regen });
+      console.log(regen ? "Project role definitions regenerated." : "Project role definitions ensured.");
+      break;
+    }
     case undefined: {
       console.log([
         "Usage: bun run autoloop <command>",
@@ -122,7 +136,8 @@ async function main(): Promise<void> {
         "  status",
         "  watch",
         "  instruct <message>",
-        "  history"
+        "  history",
+        "  roles generate [--regen]"
       ].join("\n"));
       break;
     }

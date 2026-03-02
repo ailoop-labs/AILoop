@@ -1,6 +1,7 @@
 import type { AppConfig } from "../config/env";
 import type { PlannerContext, SubTask } from "../types/contracts";
 import { CodexClient, type JsonSchema } from "./codex-client";
+import { loadProjectRoleDefinition } from "./role-definitions";
 
 const SUBTASK_SCHEMA: JsonSchema = {
   type: "object",
@@ -45,6 +46,48 @@ export function buildAdaptivePlannerDirectives(context: PlannerContext): string[
     "Pick one smallest implementation step that mutates tracked project files under src/, scripts/, or web/src/.",
     "Expected outcome must name changed file path(s) and one re-runnable verification command."
   ];
+}
+
+export function buildPlannerPrompt(
+  context: PlannerContext,
+  adaptiveDirectives: string[],
+  plannerRoleDefinition: string
+): string {
+  return [
+    "You are the AutoLoop Planner agent.",
+    "Project-specific Planner Role Definition:",
+    plannerRoleDefinition.trim(),
+    "",
+    "Return one atomic SubTask JSON that strictly matches the output schema.",
+    "Rules:",
+    "- One task only.",
+    "- Respect human instructions as highest priority.",
+    "- Prioritize measurable user-defined value over cosmetic activity.",
+    "- If goal is missing, create a clarification request task.",
+    "- Consider previous round failure when setting rationale.",
+    "- Keep the plan domain-agnostic and derived only from provided goal/instructions; do not inject scenario-specific assumptions.",
+    "- objective and expected_outcome must be observable and verifiable (workspace change, command output, API check, or evaluator evidence).",
+    "- If required context is missing for safe execution, choose a clarification sub-task instead of guessing.",
+    "- Keep recommended_tools realistic from: read_file, write_file, run_shell, http_request.",
+    ...(adaptiveDirectives.length > 0
+      ? ["- Additional adaptive constraints from prior failures:", ...adaptiveDirectives.map((line) => `  - ${line}`)]
+      : []),
+    "",
+    "Planner input:",
+    JSON.stringify(
+      {
+        goal: context.goal,
+        instructions: context.instructions,
+        round: context.round,
+        budget: context.budget,
+        previous_tool_result: context.previous_tool_result,
+        previous_round_error: context.previous_round_error,
+        consecutive_evaluator_failures: context.consecutive_evaluator_failures
+      },
+      null,
+      2
+    )
+  ].join("\n");
 }
 
 function fallbackPlan(context: PlannerContext): SubTask {
@@ -108,10 +151,12 @@ function normalizeSubTask(candidate: SubTask): SubTask {
 export class PlannerAgent {
   private readonly codex: CodexClient;
   private readonly sandbox: AppConfig["codex"]["plannerSandbox"];
+  private readonly homeDir: string;
 
   constructor(config: AppConfig) {
     this.codex = new CodexClient(config.codex);
     this.sandbox = config.codex.plannerSandbox;
+    this.homeDir = config.homeDir;
   }
 
   async plan(
@@ -135,38 +180,8 @@ export class PlannerAgent {
         .map((line) => `[planner codex ${source}] ${line}`);
 
     const adaptiveDirectives = buildAdaptivePlannerDirectives(context);
-    const prompt = [
-      "You are the AutoLoop Planner agent.",
-      "Return one atomic SubTask JSON that strictly matches the output schema.",
-      "Rules:",
-      "- One task only.",
-      "- Respect human instructions as highest priority.",
-      "- Prioritize measurable user-defined value over cosmetic activity.",
-      "- If goal is missing, create a clarification request task.",
-      "- Consider previous round failure when setting rationale.",
-      "- Keep the plan domain-agnostic and derived only from provided goal/instructions; do not inject scenario-specific assumptions.",
-      "- objective and expected_outcome must be observable and verifiable (workspace change, command output, API check, or evaluator evidence).",
-      "- If required context is missing for safe execution, choose a clarification sub-task instead of guessing.",
-      "- Keep recommended_tools realistic from: read_file, write_file, run_shell, http_request.",
-      ...(adaptiveDirectives.length > 0
-        ? ["- Additional adaptive constraints from prior failures:", ...adaptiveDirectives.map((line) => `  - ${line}`)]
-        : []),
-      "",
-      "Planner input:",
-      JSON.stringify(
-        {
-          goal: context.goal,
-          instructions: context.instructions,
-          round: context.round,
-          budget: context.budget,
-          previous_tool_result: context.previous_tool_result,
-          previous_round_error: context.previous_round_error,
-          consecutive_evaluator_failures: context.consecutive_evaluator_failures
-        },
-        null,
-        2
-      )
-    ].join("\n");
+    const plannerRoleDefinition = await loadProjectRoleDefinition(this.homeDir, "planner");
+    const prompt = buildPlannerPrompt(context, adaptiveDirectives, plannerRoleDefinition);
 
     emitLog("Planner started Codex planning.");
     const heartbeatStartedAt = Date.now();

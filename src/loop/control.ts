@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { ensureProjectRoleDefinitions, type EnsureProjectRoleDefinitionsOptions } from "../agent/role-definitions";
 import type { AppConfig } from "../config/env";
 import { readRuntimeLoopConfig, runtimeLoopConfigToEnv } from "../config/runtime";
 import { listRunRecords, readLastLogTail } from "../reporting/summary";
@@ -28,9 +29,21 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
+export async function ensureProjectRoles(
+  config: AppConfig,
+  options: EnsureProjectRoleDefinitionsOptions = {}
+): Promise<void> {
+  await ensureProjectRoleDefinitions(config, {
+    workspaceRoot: options.workspaceRoot ?? process.cwd(),
+    regen: options.regen ?? false,
+    codexClient: options.codexClient
+  });
+}
+
 export async function startBackgroundLoop(config: AppConfig): Promise<{ started: boolean; message: string }> {
   const paths = buildLoopPaths(config.homeDir);
   await ensureLoopHome(paths);
+  await ensureProjectRoles(config, { workspaceRoot: process.cwd(), regen: false });
 
   const existingPid = await readPid(paths);
   if (existingPid && isPidAlive(existingPid)) {
