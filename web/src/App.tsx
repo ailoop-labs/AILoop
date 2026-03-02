@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { LazyLog, ScrollFollow } from "@melloware/react-logviewer";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { normalizeLogLinesForDisplay } from "./log-lines";
+import { buildLogViewerText } from "./log-lines";
 
 type LoopStateName = "idle" | "running" | "cooldown" | "paused" | "stopping" | "error";
 
@@ -247,9 +248,8 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [configBusy, setConfigBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const logTailRef = useRef<HTMLPreElement | null>(null);
   const isAuthenticated = tokenRequired === false || (tokenRequired === true && authToken.trim().length > 0);
-  const displayLogLines = useMemo(() => normalizeLogLinesForDisplay(logs), [logs]);
+  const displayLogText = useMemo(() => buildLogViewerText(logs), [logs]);
 
   const handleRequestError = (requestError: unknown, unauthorizedMessage: string): void => {
     const message = requestError instanceof Error ? requestError.message : String(requestError);
@@ -330,14 +330,6 @@ export default function App() {
     }, 4000);
     return () => clearInterval(timer);
   }, [isAuthenticated, authToken]);
-
-  useEffect(() => {
-    const container = logTailRef.current;
-    if (!container || status?.state !== "running") {
-      return;
-    }
-    container.scrollTop = container.scrollHeight;
-  }, [logs, status?.state]);
 
   const budgetBars = useMemo(() => {
     if (!status?.current_budget) {
@@ -963,12 +955,39 @@ export default function App() {
 
         <article className="rounded-3xl border border-white/10 bg-panel/70 p-5 backdrop-blur">
           <h2 className="text-lg font-semibold text-mist">Live Log Tail</h2>
-          <pre
-            ref={logTailRef}
-            className="mt-4 max-h-[22rem] overflow-auto whitespace-pre-wrap break-words rounded-xl border border-white/10 bg-ink/75 p-4 text-xs leading-6 text-mist/80"
-          >
-            {displayLogLines.length > 0 ? displayLogLines.join("\n") : "No logs yet."}
-          </pre>
+          <div className="mt-4 h-[22rem] overflow-hidden rounded-xl border border-white/10 bg-ink/75">
+            {displayLogText ? (
+              <ScrollFollow
+                startFollowing={status?.state === "running"}
+                render={({ follow, onScroll }) => (
+                  <LazyLog
+                    text={displayLogText}
+                    follow={status?.state === "running" ? follow : false}
+                    onScroll={onScroll}
+                    enableSearch={false}
+                    enableHotKeys={false}
+                    enableLineNumbers={false}
+                    selectableLines
+                    wrapLines
+                    extraLines={1}
+                    rowHeight={24}
+                    style={{
+                      backgroundColor: "transparent",
+                      color: "rgba(234,245,255,0.85)",
+                      fontSize: "12px",
+                      lineHeight: 1.45
+                    }}
+                    containerStyle={{
+                      backgroundColor: "transparent",
+                      padding: "0.75rem 1rem"
+                    }}
+                  />
+                )}
+              />
+            ) : (
+              <p className="p-4 text-xs leading-6 text-mist/70">No logs yet.</p>
+            )}
+          </div>
         </article>
       </section>
 
