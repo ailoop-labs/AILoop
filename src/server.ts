@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { loadConfig } from "./config/env";
 import { patchRuntimeLoopConfig, readRuntimeLoopConfig, resetRuntimeLoopConfig } from "./config/runtime";
+import { isDateBasedAdminTokenExpired } from "./auth/admin-token";
 import {
   getLoopStatus,
   instructLoop,
@@ -19,15 +20,6 @@ const config = loadConfig();
 const adminToken = config.consoleAdminToken.trim();
 const tokenAuthEnabled = adminToken.length > 0;
 const adminTokenIssuedDate = (process.env.AUTOLOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE ?? "").trim();
-
-function isDateBasedAdminTokenExpired(now = new Date()): boolean {
-  if (!tokenAuthEnabled || !adminTokenIssuedDate) {
-    return false;
-  }
-
-  const todayUtc = now.toISOString().slice(0, 10);
-  return todayUtc !== adminTokenIssuedDate;
-}
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data, null, 2), {
@@ -112,15 +104,18 @@ const server = Bun.serve({
     }
 
     if (url.pathname === "/api/auth/status" && request.method === "GET") {
-      return json({ tokenRequired: tokenAuthEnabled, tokenExpired: isDateBasedAdminTokenExpired() });
+      return json({
+        tokenRequired: tokenAuthEnabled,
+        tokenExpired: isDateBasedAdminTokenExpired({ tokenAuthEnabled, adminTokenIssuedDate })
+      });
     }
 
     if (url.pathname === "/api/auth/login" && request.method === "POST") {
       if (!tokenAuthEnabled) {
         return json({ ok: true, tokenRequired: false });
       }
-      if (isDateBasedAdminTokenExpired()) {
-        return json({ ok: false, error: "Token expired. Restart production server for today's token." }, 401);
+      if (isDateBasedAdminTokenExpired({ tokenAuthEnabled, adminTokenIssuedDate })) {
+        return json({ ok: false, error: "Token expired. Restart production server to generate a new token." }, 401);
       }
 
       const body = await parseBody(request);
@@ -133,8 +128,8 @@ const server = Bun.serve({
     }
 
     if (url.pathname.startsWith("/api/") && tokenAuthEnabled && !isPublicApi(url.pathname, request.method)) {
-      if (isDateBasedAdminTokenExpired()) {
-        return json({ ok: false, error: "Token expired. Restart production server for today's token." }, 401);
+      if (isDateBasedAdminTokenExpired({ tokenAuthEnabled, adminTokenIssuedDate })) {
+        return json({ ok: false, error: "Token expired. Restart production server to generate a new token." }, 401);
       }
 
       const token = extractRequestToken(request);

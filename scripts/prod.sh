@@ -7,7 +7,7 @@ cd "$ROOT_DIR"
 RUN_DIR=".autoloop"
 PID_FILE="$RUN_DIR/prod.server.pid"
 LOG_FILE="$RUN_DIR/prod.server.log"
-DAILY_TOKEN_FILE="$RUN_DIR/console.admin.token.daily"
+TOKEN_CACHE_FILE="$RUN_DIR/console.admin.token.cache"
 STOP_TIMEOUT_SECONDS="${AUTOLOOP_PROD_STOP_TIMEOUT_SECONDS:-20}"
 
 if ! [[ "$STOP_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
@@ -99,16 +99,31 @@ if [[ -z "${AUTOLOOP_CONSOLE_ADMIN_TOKEN:-}" ]]; then
     export AUTOLOOP_CONSOLE_ADMIN_TOKEN="$configured_admin_token"
   else
     today_utc="$(date -u +%Y-%m-%d)"
-    cached_day=""
+    today_epoch="$(date -u -d "$today_utc" +%s)"
+    cached_issued_date=""
     cached_token=""
+    issued_date="$today_utc"
+    generated_admin_token=""
 
-    if [[ -f "$DAILY_TOKEN_FILE" ]]; then
-      read -r cached_day cached_token <"$DAILY_TOKEN_FILE" || true
+    if [[ -f "$TOKEN_CACHE_FILE" ]]; then
+      read -r cached_issued_date cached_token <"$TOKEN_CACHE_FILE" || true
     fi
 
-    if [[ -n "$cached_day" && -n "$cached_token" && "$cached_day" == "$today_utc" ]]; then
+    if [[ -n "$cached_issued_date" && -n "$cached_token" ]]; then
+      cached_epoch="$(date -u -d "$cached_issued_date" +%s 2>/dev/null || true)"
+      if [[ -n "$cached_epoch" ]]; then
+        token_age_days=$(( (today_epoch - cached_epoch) / 86400 ))
+      else
+        token_age_days=999999
+      fi
+    else
+      token_age_days=999999
+    fi
+
+    if [[ "$token_age_days" -ge 0 && "$token_age_days" -lt 7 ]]; then
       generated_admin_token="$cached_token"
-      echo "AUTOLOOP_CONSOLE_ADMIN_TOKEN is empty in .env; reusing today's token (${today_utc})."
+      issued_date="$cached_issued_date"
+      echo "AUTOLOOP_CONSOLE_ADMIN_TOKEN is empty in .env; reusing token issued on ${cached_issued_date} (age: ${token_age_days} days)."
     else
       if command -v openssl >/dev/null 2>&1; then
         generated_admin_token="$(openssl rand -hex 24)"
@@ -116,14 +131,19 @@ if [[ -z "${AUTOLOOP_CONSOLE_ADMIN_TOKEN:-}" ]]; then
         generated_admin_token="$(bun -e 'const bytes = crypto.getRandomValues(new Uint8Array(24)); console.log(Array.from(bytes, (n) => n.toString(16).padStart(2, "0")).join(""));')"
       fi
       mkdir -p "$RUN_DIR"
-      printf "%s %s\n" "$today_utc" "$generated_admin_token" >"$DAILY_TOKEN_FILE"
-      chmod 600 "$DAILY_TOKEN_FILE" || true
-      echo "AUTOLOOP_CONSOLE_ADMIN_TOKEN is empty in .env; generated today's token (${today_utc})."
+      printf "%s %s\n" "$today_utc" "$generated_admin_token" >"$TOKEN_CACHE_FILE"
+      chmod 600 "$TOKEN_CACHE_FILE" || true
+      echo "AUTOLOOP_CONSOLE_ADMIN_TOKEN is empty in .env; generated new token (issued on ${today_utc})."
     fi
 
     export AUTOLOOP_CONSOLE_ADMIN_TOKEN="$generated_admin_token"
-    export AUTOLOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE="$today_utc"
-    echo "This token is valid until UTC date changes."
+    export AUTOLOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE="$issued_date"
+    token_expiry_date="$(date -u -d "$issued_date +7 days" +%Y-%m-%d 2>/dev/null || true)"
+    if [[ -n "$token_expiry_date" ]]; then
+      echo "This token is valid for 7 UTC days (expires on ${token_expiry_date} UTC)."
+    else
+      echo "This token is valid for 7 UTC days from issuance."
+    fi
     echo "${AUTOLOOP_CONSOLE_ADMIN_TOKEN}"
     echo "(Tip: copy this token and paste it into the web login page.)"
   fi

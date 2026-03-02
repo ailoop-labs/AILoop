@@ -155,7 +155,7 @@ To minimize CLI usage in daily operation, provide two startup scripts:
 - `scripts/prod.sh`
   - Builds Web UI and starts API server that serves static Web assets.
   - Web UI is the primary control surface for loop operations and runtime parameter changes.
-  - If `.env` leaves `AUTOLOOP_CONSOLE_ADMIN_TOKEN` empty, `prod.sh` auto-generates one daily token, reuses it on same UTC date, and rotates it after UTC date changes.
+  - If `.env` leaves `AUTOLOOP_CONSOLE_ADMIN_TOKEN` empty, `prod.sh` auto-generates one token, reuses it for up to 7 UTC days, then rotates it.
   - Optional: pass `daemon` to run in background (`bash scripts/prod.sh daemon`).
   - Optional: pass `stop` to stop the daemon (`bash scripts/prod.sh stop`).
   - Optional: pass `restart` to gracefully restart the daemon (`bash scripts/prod.sh restart`).
