@@ -14,6 +14,7 @@ describe("deriveRoundProgress", () => {
 
     expect(result.percent).toBe(20);
     expect(result.role).toBe("Planner");
+    expect(result.phase).toBe("planner");
     expect(result.step).toContain("planning");
   });
 
@@ -27,6 +28,7 @@ describe("deriveRoundProgress", () => {
     expect(result.percent).toBeGreaterThanOrEqual(80);
     expect(result.percent).toBeLessThan(100);
     expect(result.role).toBe("Evaluator");
+    expect(result.phase).toBe("evaluator");
     expect(result.step).toContain("goal_alignment");
   });
 
@@ -39,6 +41,7 @@ describe("deriveRoundProgress", () => {
 
     expect(result.percent).toBe(100);
     expect(result.role).toBe("System");
+    expect(result.phase).toBe("cooldown");
     expect(result.step).toContain("cooldown");
   });
 

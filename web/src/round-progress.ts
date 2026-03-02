@@ -10,6 +10,7 @@ export interface RoundProgressView {
   roundLabel: string;
   percent: number;
   role: "Planner" | "Executor" | "Evaluator" | "System";
+  phase: "idle" | "planner" | "executor" | "evaluator" | "cooldown" | "paused" | "stopping" | "error";
   step: string;
 }
 
@@ -43,16 +44,28 @@ export function deriveRoundProgress(input: RoundProgressInput): RoundProgressVie
       roundLabel,
       percent: 100,
       role: "System",
+      phase: "cooldown",
       step: "Round completed, cooldown in progress"
     };
   }
 
-  if (input.state && input.state !== "running" && input.state !== "cooldown") {
+  if (input.state === "paused" || input.state === "stopping" || input.state === "error") {
     return {
       roundLabel,
       percent: 0,
       role: "System",
+      phase: input.state,
       step: `Loop state: ${input.state}`
+    };
+  }
+
+  if (input.state === "idle") {
+    return {
+      roundLabel,
+      percent: 0,
+      role: "System",
+      phase: "idle",
+      step: "Waiting for next round"
     };
   }
 
@@ -66,6 +79,7 @@ export function deriveRoundProgress(input: RoundProgressInput): RoundProgressVie
       roundLabel,
       percent: 100,
       role: "Evaluator",
+      phase: "evaluator",
       step: "Evaluator completed checks"
     };
   }
@@ -83,6 +97,7 @@ export function deriveRoundProgress(input: RoundProgressInput): RoundProgressVie
       roundLabel,
       percent: clampPercent(progress),
       role: "Evaluator",
+      phase: "evaluator",
       step: `Evaluator checking dimension: ${dimension}`
     };
   }
@@ -95,6 +110,7 @@ export function deriveRoundProgress(input: RoundProgressInput): RoundProgressVie
       roundLabel,
       percent: 80,
       role: "Evaluator",
+      phase: "evaluator",
       step: "Evaluator running dimension checks"
     };
   }
@@ -107,6 +123,7 @@ export function deriveRoundProgress(input: RoundProgressInput): RoundProgressVie
       roundLabel,
       percent: 72,
       role: "Executor",
+      phase: "executor",
       step: "Executor finished task execution"
     };
   }
@@ -120,6 +137,7 @@ export function deriveRoundProgress(input: RoundProgressInput): RoundProgressVie
       roundLabel,
       percent: 55,
       role: "Executor",
+      phase: "executor",
       step: "Executor is executing sub-task"
     };
   }
@@ -129,6 +147,7 @@ export function deriveRoundProgress(input: RoundProgressInput): RoundProgressVie
       roundLabel,
       percent: 35,
       role: "Planner",
+      phase: "planner",
       step: "Planner produced next sub-task"
     };
   }
@@ -141,6 +160,7 @@ export function deriveRoundProgress(input: RoundProgressInput): RoundProgressVie
       roundLabel,
       percent: 20,
       role: "Planner",
+      phase: "planner",
       step: "Planner is planning next sub-task"
     };
   }
@@ -150,6 +170,7 @@ export function deriveRoundProgress(input: RoundProgressInput): RoundProgressVie
       roundLabel,
       percent: 8,
       role: "System",
+      phase: "planner",
       step: "Round started"
     };
   }
@@ -158,6 +179,7 @@ export function deriveRoundProgress(input: RoundProgressInput): RoundProgressVie
     roundLabel,
     percent: 0,
     role: "System",
+    phase: "idle",
     step: lastLine ? `Waiting (${lastLine})` : "Waiting for next round"
   };
 }

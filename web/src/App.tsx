@@ -181,6 +181,15 @@ interface RoundReport {
   nextRecommendation: string;
 }
 
+type StepStatus = "done" | "current" | "pending";
+
+interface RoleRuntimeStep {
+  key: "planner" | "executor" | "evaluator" | "cooldown";
+  title: string;
+  description: string;
+  status: StepStatus;
+}
+
 const compactRunTimestampPattern = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/;
 
 function extractBulletValue(summary: string, label: string): string | null {
@@ -249,6 +258,22 @@ function parseRoundReport(summary: string): RoundReport {
   };
 }
 
+function resolveRoleRuntimeCurrentIndex(phase: ReturnType<typeof deriveRoundProgress>["phase"]): number {
+  if (phase === "planner") {
+    return 0;
+  }
+  if (phase === "executor") {
+    return 1;
+  }
+  if (phase === "evaluator") {
+    return 2;
+  }
+  if (phase === "cooldown") {
+    return 3;
+  }
+  return -1;
+}
+
 export default function App() {
   const [tokenRequired, setTokenRequired] = useState<boolean | null>(null);
   const [authToken, setAuthToken] = useState<string>(() => readStoredToken());
@@ -279,6 +304,30 @@ export default function App() {
       }),
     [status?.state, status?.round, logs]
   );
+  const roleRuntimeSteps = useMemo<RoleRuntimeStep[]>(() => {
+    const currentIndex = resolveRoleRuntimeCurrentIndex(roundProgress.phase);
+    const baseSteps: Array<Omit<RoleRuntimeStep, "status">> = [
+      { key: "planner", title: "Planner", description: "生成本轮子任务" },
+      { key: "executor", title: "Executor", description: "执行任务并落地变更" },
+      { key: "evaluator", title: "Evaluator", description: "核验结果并给出结论" },
+      { key: "cooldown", title: "Cooldown", description: "收尾并等待下一轮" }
+    ];
+
+    return baseSteps.map((step, index) => {
+      let status: StepStatus = "pending";
+      if (currentIndex >= 0 && index < currentIndex) {
+        status = "done";
+      } else if (currentIndex === index) {
+        status = "current";
+      }
+
+      return {
+        ...step,
+        status,
+        description: currentIndex === index ? roundProgress.step : step.description
+      };
+    });
+  }, [roundProgress.phase, roundProgress.step]);
 
   const handleRequestError = (requestError: unknown, unauthorizedMessage: string): void => {
     const message = requestError instanceof Error ? requestError.message : String(requestError);
@@ -953,16 +1002,44 @@ export default function App() {
               <span>{roundProgress.roundLabel}</span>
               <span>{roundProgress.percent}%</span>
             </div>
-            <div className="mt-2 h-3 rounded-full bg-ink/70">
-              <div
-                className="h-3 rounded-full bg-gradient-to-r from-sky-300 via-accent to-warning transition-all duration-300"
-                style={{ width: `${roundProgress.percent}%` }}
-              />
+            <div className="mt-3 grid gap-3 md:grid-cols-4">
+              {roleRuntimeSteps.map((step, index) => (
+                <div
+                  key={step.key}
+                  className={`relative rounded-xl border px-3 py-3 ${
+                    step.status === "done"
+                      ? "border-accent/40 bg-accent/10"
+                      : step.status === "current"
+                        ? "border-sky-300/50 bg-sky-300/10"
+                        : "border-white/10 bg-ink/70"
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <span
+                      className={`mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
+                        step.status === "done"
+                          ? "bg-accent text-ink"
+                          : step.status === "current"
+                            ? "bg-sky-300 text-ink"
+                            : "bg-slate text-mist/80"
+                      }`}
+                    >
+                      {step.status === "done" ? "✓" : index + 1}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-mist">{step.title}</p>
+                      <p className="mt-1 text-xs text-mist/70">{step.description}</p>
+                    </div>
+                  </div>
+                  {index < roleRuntimeSteps.length - 1 ? (
+                    <div className="hidden md:block absolute -right-2 top-1/2 h-[2px] w-4 -translate-y-1/2 bg-white/20" />
+                  ) : null}
+                </div>
+              ))}
             </div>
-            <div className="mt-3 grid gap-2 text-sm text-mist/85 md:grid-cols-2">
-              <p className="rounded-lg border border-white/10 bg-ink/70 px-3 py-2">Role: {roundProgress.role}</p>
-              <p className="rounded-lg border border-white/10 bg-ink/70 px-3 py-2">Step: {roundProgress.step}</p>
-            </div>
+            <p className="mt-3 rounded-lg border border-white/10 bg-ink/70 px-3 py-2 text-sm text-mist/85">
+              Current: {roundProgress.role} - {roundProgress.step}
+            </p>
           </div>
 
           <h2 className="mt-7 text-lg font-semibold text-mist">Project Roles ({roles.length})</h2>
