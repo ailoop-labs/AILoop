@@ -123,6 +123,114 @@ describe("CodexClient.runJson", () => {
     });
   });
 
+  test("falls back to parsing JSON from stderr when output payload is invalid", async () => {
+    const runner: ProcessRunner = async (_cmd, args) => {
+      await fs.writeFile(outputPathFromArgs(args), "", "utf8");
+      return {
+        code: 0,
+        stdout: "",
+        stderr: `preface log\n{"status":"success","source":"stderr"}\nsuffix log`
+      };
+    };
+
+    const client = new CodexClient(createCodexConfig(), runner);
+    const result = await client.runJson<{ status: string; source: string }>({
+      prompt: "Return JSON",
+      schema: {
+        type: "object",
+        properties: {
+          status: { type: "string" },
+          source: { type: "string" }
+        },
+        required: ["status", "source"],
+        additionalProperties: false
+      },
+      cwd: process.cwd(),
+      sandbox: "read-only",
+      maxRetries: 0
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.data).toEqual({
+      status: "success",
+      source: "stderr"
+    });
+  });
+
+  test("falls back to parsing JSON from stdout when output payload is invalid", async () => {
+    const runner: ProcessRunner = async (_cmd, args) => {
+      await fs.writeFile(outputPathFromArgs(args), "", "utf8");
+      return {
+        code: 0,
+        stdout: `preface log\n{"status":"success","source":"stdout"}\nsuffix log`,
+        stderr: ""
+      };
+    };
+
+    const client = new CodexClient(createCodexConfig(), runner);
+    const result = await client.runJson<{ status: string; source: string }>({
+      prompt: "Return JSON",
+      schema: {
+        type: "object",
+        properties: {
+          status: { type: "string" },
+          source: { type: "string" }
+        },
+        required: ["status", "source"],
+        additionalProperties: false
+      },
+      cwd: process.cwd(),
+      sandbox: "read-only",
+      maxRetries: 0
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.data).toEqual({
+      status: "success",
+      source: "stdout"
+    });
+  });
+
+  test("selects a schema-valid later JSON object from stderr fallback", async () => {
+    const runner: ProcessRunner = async (_cmd, args) => {
+      await fs.writeFile(outputPathFromArgs(args), "{invalid", "utf8");
+      return {
+        code: 0,
+        stdout: "",
+        stderr:
+          'noise {"status":"progress"} still running {"status":"done","next_state_hint":"continue","actions":["patched"]}'
+      };
+    };
+
+    const client = new CodexClient(createCodexConfig(), runner);
+    const result = await client.runJson<{ status: string; next_state_hint: string; actions: string[] }>({
+      prompt: "Return JSON",
+      schema: {
+        type: "object",
+        properties: {
+          status: { type: "string" },
+          next_state_hint: { type: "string" },
+          actions: {
+            type: "array",
+            items: { type: "string" }
+          }
+        },
+        required: ["status", "next_state_hint", "actions"],
+        additionalProperties: false
+      },
+      cwd: process.cwd(),
+      sandbox: "read-only",
+      maxRetries: 0
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.data).toEqual({
+      status: "done",
+      next_state_hint: "continue",
+      actions: ["patched"]
+    });
+  });
+
   test("returns failure after retry budget is exhausted", async () => {
     const runner: ProcessRunner = async (_cmd, args) => {
       await fs.writeFile(outputPathFromArgs(args), "{still invalid", "utf8");

@@ -57,17 +57,24 @@ function parseJsonSafely<T>(payload: string): T | null {
   }
 }
 
-function extractFirstJsonObject(payload: string): string | null {
-  const start = payload.indexOf("{");
-  if (start < 0) {
-    return null;
-  }
+interface ParsedJsonCandidate<T> {
+  rawMessage: string;
+  data: T;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function extractJsonObjects(payload: string): string[] {
+  const matches: string[] = [];
+  let start = -1;
 
   let depth = 0;
   let inString = false;
   let escaped = false;
 
-  for (let index = start; index < payload.length; index += 1) {
+  for (let index = 0; index < payload.length; index += 1) {
     const char = payload[index];
 
     if (inString) {
@@ -91,38 +98,145 @@ function extractFirstJsonObject(payload: string): string | null {
     }
 
     if (char === "{") {
+      if (depth === 0) {
+        start = index;
+      }
       depth += 1;
       continue;
     }
 
-    if (char === "}") {
+    if (char === "}" && depth > 0) {
       depth -= 1;
-      if (depth === 0) {
-        return payload.slice(start, index + 1);
+      if (depth === 0 && start >= 0) {
+        matches.push(payload.slice(start, index + 1));
+        start = -1;
       }
     }
   }
 
-  return null;
+  return matches;
 }
 
-function parseResponseJson<T>(rawMessage: string): T | null {
+function matchesJsonSchema(value: unknown, schemaLike: unknown): boolean {
+  if (!isRecord(schemaLike)) {
+    return true;
+  }
+
+  const enumValues = Array.isArray(schemaLike.enum) ? schemaLike.enum : null;
+  if (enumValues && !enumValues.some((item) => Object.is(item, value))) {
+    return false;
+  }
+
+  const declaredType = typeof schemaLike.type === "string" ? schemaLike.type : undefined;
+  const inferredType =
+    declaredType ??
+    (isRecord(schemaLike.properties) || Array.isArray(schemaLike.required)
+      ? "object"
+      : schemaLike.items !== undefined
+        ? "array"
+        : undefined);
+
+  if (inferredType === "string") {
+    return typeof value === "string";
+  }
+
+  if (inferredType === "number") {
+    return typeof value === "number" && Number.isFinite(value);
+  }
+
+  if (inferredType === "integer") {
+    return typeof value === "number" && Number.isInteger(value);
+  }
+
+  if (inferredType === "boolean") {
+    return typeof value === "boolean";
+  }
+
+  if (inferredType === "null") {
+    return value === null;
+  }
+
+  if (inferredType === "array") {
+    if (!Array.isArray(value)) {
+      return false;
+    }
+    if (schemaLike.items === undefined) {
+      return true;
+    }
+    return value.every((item) => matchesJsonSchema(item, schemaLike.items));
+  }
+
+  if (inferredType === "object") {
+    if (!isRecord(value)) {
+      return false;
+    }
+
+    const properties = isRecord(schemaLike.properties) ? schemaLike.properties : {};
+    const required = Array.isArray(schemaLike.required)
+      ? schemaLike.required.filter((item): item is string => typeof item === "string")
+      : [];
+
+    for (const key of required) {
+      if (!(key in value)) {
+        return false;
+      }
+    }
+
+    for (const [key, childSchema] of Object.entries(properties)) {
+      if (key in value && !matchesJsonSchema(value[key], childSchema)) {
+        return false;
+      }
+    }
+
+    if (schemaLike.additionalProperties === false) {
+      for (const key of Object.keys(value)) {
+        if (!(key in properties)) {
+          return false;
+        }
+      }
+    }
+  }
+
+  return true;
+}
+
+function parseResponseJson<T>(rawMessage: string, schema: JsonSchema, preferLast: boolean): ParsedJsonCandidate<T> | null {
   const trimmed = rawMessage.trim();
   if (!trimmed) {
     return null;
   }
 
-  const direct = parseJsonSafely<T>(trimmed);
+  const candidates: Array<ParsedJsonCandidate<T>> = [];
+  const seen = new Set<string>();
+
+  const pushCandidate = (candidateRaw: string): void => {
+    if (seen.has(candidateRaw)) {
+      return;
+    }
+    seen.add(candidateRaw);
+    const parsed = parseJsonSafely<T>(candidateRaw);
+    if (parsed !== null) {
+      candidates.push({ rawMessage: candidateRaw, data: parsed });
+    }
+  };
+
+  pushCandidate(trimmed);
+
+  for (const embedded of extractJsonObjects(trimmed)) {
+    pushCandidate(embedded);
+  }
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const ordered = preferLast ? [...candidates].reverse() : candidates;
+  const direct = ordered.find((candidate) => matchesJsonSchema(candidate.data, schema));
   if (direct) {
     return direct;
   }
 
-  const embedded = extractFirstJsonObject(trimmed);
-  if (!embedded) {
-    return null;
-  }
-
-  return parseJsonSafely<T>(embedded);
+  return null;
 }
 
 function summarizeForRetry(errorMessage: string, stderr: string): string {
@@ -325,8 +439,19 @@ export class CodexClient {
           onStdoutChunk: attemptOptions.onStdoutChunk,
           onStderrChunk: attemptOptions.onStderrChunk
         });
-        const rawMessage = await fs.readFile(outputPath, "utf8").catch(() => "");
-        const parsed = parseResponseJson<T>(rawMessage);
+        const outputPayload = await fs.readFile(outputPath, "utf8").catch(() => "");
+        const outputCandidate = parseResponseJson<T>(outputPayload, attemptOptions.schema, false);
+        const stdoutCandidate = outputCandidate
+          ? null
+          : parseResponseJson<T>(runResult.stdout, attemptOptions.schema, true);
+        const stderrCandidate =
+          outputCandidate || stdoutCandidate
+            ? null
+            : parseResponseJson<T>(runResult.stderr, attemptOptions.schema, true);
+
+        const parsedCandidate = outputCandidate ?? stdoutCandidate ?? stderrCandidate;
+        const rawMessage = parsedCandidate?.rawMessage ?? outputPayload;
+        const parsed = parsedCandidate?.data;
 
         if (combinedStdout) {
           combinedStdout += "\n";
