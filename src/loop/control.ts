@@ -143,6 +143,18 @@ export async function resumeLoop(config: AppConfig): Promise<void> {
   const paths = buildLoopPaths(config.homeDir);
   await ensureLoopHome(paths);
   await clearFlag(paths.pauseFlagPath);
+
+  const state = await readLoopState(paths);
+  const pid = state.pid ?? (await readPid(paths));
+  if (state.state !== "paused" || !pid || !isPidAlive(pid)) {
+    return;
+  }
+
+  await writeLoopState(paths, {
+    ...state,
+    state: "running",
+    pid
+  });
 }
 
 export async function instructLoop(config: AppConfig, message: string): Promise<void> {

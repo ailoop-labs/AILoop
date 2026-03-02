@@ -2,8 +2,15 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
-import { buildLoopPaths, defaultLoopState, hasFlag, setFlag, writeLoopState } from "./state";
-import { ensureProjectRoles, getLoopStatus, listProjectRoles, prepareStartFlags, tailLatestLog } from "./control";
+import { buildLoopPaths, defaultLoopState, hasFlag, readLoopState, setFlag, writeLoopState } from "./state";
+import {
+  ensureProjectRoles,
+  getLoopStatus,
+  listProjectRoles,
+  prepareStartFlags,
+  resumeLoop,
+  tailLatestLog
+} from "./control";
 import type { AppConfig } from "../config/env";
 
 function makeTestConfig(homeDir: string): AppConfig {
@@ -80,6 +87,30 @@ describe("tailLatestLog", () => {
 
     const lines = await tailLatestLog(makeTestConfig(homeDir), 2);
     expect(lines).toEqual(["newer-2", "newer-3"]);
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+});
+
+describe("resumeLoop", () => {
+  test("clears pause flag and immediately marks paused loops as running", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-resume-test-"));
+    const paths = buildLoopPaths(homeDir);
+    await fs.mkdir(homeDir, { recursive: true });
+
+    await setFlag(paths.pauseFlagPath);
+    await writeLoopState(paths, {
+      ...defaultLoopState(process.pid),
+      state: "paused",
+      pid: process.pid
+    });
+
+    await resumeLoop(makeTestConfig(homeDir));
+
+    expect(await hasFlag(paths.pauseFlagPath)).toBe(false);
+    const state = await readLoopState(paths);
+    expect(state.state).toBe("running");
+    expect(state.pid).toBe(process.pid);
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
