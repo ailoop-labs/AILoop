@@ -958,11 +958,11 @@ export default function App() {
           <div className="mt-4 h-[22rem] overflow-hidden rounded-xl border border-white/10 bg-ink/75">
             {displayLogText ? (
               <ScrollFollow
-                startFollowing={status?.state === "running"}
+                startFollowing
                 render={({ follow, onScroll }) => (
                   <LazyLog
                     text={displayLogText}
-                    follow={status?.state === "running" ? follow : false}
+                    follow={follow}
                     onScroll={onScroll}
                     enableSearch={false}
                     enableHotKeys={false}
