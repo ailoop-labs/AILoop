@@ -59,4 +59,20 @@ describe("deriveRoundProgress", () => {
     expect(result.role).toBe("Evaluator");
     expect(result.step).toContain("completed");
   });
+
+  test("shows active auto-rework attempt number in executor stage", () => {
+    const result = deriveRoundProgress({
+      state: "running",
+      round: 12,
+      logs: [
+        "[2026-03-02T12:05:00.000Z] Evaluator failed; triggering auto-rework attempt 2/3.",
+        "[2026-03-02T12:05:01.000Z] [codex stdout] applying patch"
+      ]
+    });
+
+    expect(result.role).toBe("Executor");
+    expect(result.phase).toBe("executor");
+    expect(result.step).toContain("2/3");
+    expect(result.step).toContain("Auto-rework");
+  });
 });

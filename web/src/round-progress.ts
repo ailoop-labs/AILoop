@@ -34,6 +34,34 @@ function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function findLatestLogIndex(lines: string[], matcher: (line: string) => boolean): number {
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (matcher(lines[index] ?? "")) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function parseAutoReworkAttempt(line: string): { attempt: number; total: number; failed: boolean } | null {
+  const match = line.match(/auto[- ]rework attempt\s+(\d+)\/(\d+)/i);
+  if (!match) {
+    return null;
+  }
+
+  const attempt = Number(match[1]);
+  const total = Number(match[2]);
+  if (!Number.isFinite(attempt) || !Number.isFinite(total)) {
+    return null;
+  }
+
+  return {
+    attempt,
+    total,
+    failed: /failed/i.test(line)
+  };
+}
+
 export function deriveRoundProgress(input: RoundProgressInput): RoundProgressView {
   const normalizedLogs = input.logs.map(stripLogPrefix);
   const lastLine = normalizedLogs.at(-1) ?? "";
@@ -81,6 +109,33 @@ export function deriveRoundProgress(input: RoundProgressInput): RoundProgressVie
       role: "Evaluator",
       phase: "evaluator",
       step: "Evaluator completed checks"
+    };
+  }
+
+  const lastAutoReworkDecisionIndex = findLatestLogIndex(normalizedLogs, (line) =>
+    line.startsWith("Post-auto-rework evaluation decision:")
+  );
+  const lastAutoRework = (() => {
+    for (let index = normalizedLogs.length - 1; index >= 0; index -= 1) {
+      const parsed = parseAutoReworkAttempt(normalizedLogs[index] ?? "");
+      if (parsed) {
+        return {
+          ...parsed,
+          index
+        };
+      }
+    }
+    return null;
+  })();
+  if (lastAutoRework && lastAutoRework.index > lastAutoReworkDecisionIndex) {
+    return {
+      roundLabel,
+      percent: lastAutoRework.failed ? 72 : 60,
+      role: "Executor",
+      phase: "executor",
+      step: lastAutoRework.failed
+        ? `Auto-rework attempt ${lastAutoRework.attempt}/${lastAutoRework.total} failed`
+        : `Auto-rework attempt ${lastAutoRework.attempt}/${lastAutoRework.total} in progress`
     };
   }
 
