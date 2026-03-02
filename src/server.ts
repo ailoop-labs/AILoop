@@ -97,6 +97,7 @@ async function serveStaticFromDist(urlPath: string): Promise<Response | null> {
 const server = Bun.serve({
   hostname: config.consoleHost,
   port: config.consolePort,
+  idleTimeout: 255,
   async fetch(request) {
     const url = new URL(request.url);
 

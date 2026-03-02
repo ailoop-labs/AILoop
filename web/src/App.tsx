@@ -293,7 +293,7 @@ export default function App() {
   const [runHistoryPage, setRunHistoryPage] = useState(1);
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeLoopConfig | null>(null);
   const [instruction, setInstruction] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
   const [configBusy, setConfigBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isAuthenticated = tokenRequired === false || (tokenRequired === true && authToken.trim().length > 0);
@@ -479,7 +479,7 @@ export default function App() {
 
   const sendControl = async (path: string, body?: Record<string, unknown>): Promise<void> => {
     try {
-      setBusy(true);
+      setBusy(path);
       await api(path, {
         method: "POST",
         headers: {
@@ -491,7 +491,9 @@ export default function App() {
     } catch (requestError) {
       handleRequestError(requestError, "控制操作失败：请先重新登录。");
     } finally {
-      setBusy(false);
+      if (busy === path || busy === null || true) {
+        setBusy(null);
+      }
     }
   };
 
@@ -693,9 +695,8 @@ export default function App() {
           </div>
           <div className="flex items-center gap-3">
             <span
-              className={`rounded-full px-4 py-2 text-sm font-semibold uppercase tracking-[0.2em] ${
-                status ? stateTone[status.state] : "bg-slate text-mist"
-              }`}
+              className={`rounded-full px-4 py-2 text-sm font-semibold uppercase tracking-[0.2em] ${status ? stateTone[status.state] : "bg-slate text-mist"
+                }`}
             >
               {status ? stateLabel[status.state] : "loading"}
             </span>
@@ -736,30 +737,36 @@ export default function App() {
 
         <div className="mt-6 grid gap-2 md:grid-cols-4">
           <button
-            className="rounded-xl bg-accent px-4 py-2 font-semibold text-ink transition hover:bg-accent/80 disabled:cursor-not-allowed disabled:bg-accent/40"
+            className="rounded-xl flex items-center justify-center gap-2 bg-accent px-4 py-2 font-semibold text-ink transition hover:bg-accent/80 disabled:cursor-not-allowed disabled:bg-accent/40"
             onClick={() => void sendControl("/api/loop/start")}
-            disabled={busy || configBusy || !controlAvailability.canStart}
+            disabled={busy !== null || configBusy || !controlAvailability.canStart}
           >
+            {busy === "/api/loop/start" && (
+              <svg className="animate-spin -ml-1 h-4 w-4 text-ink" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            )}
             Start
           </button>
           <button
             className="rounded-xl bg-warning px-4 py-2 font-semibold text-ink transition hover:bg-warning/80 disabled:cursor-not-allowed disabled:bg-warning/40"
             onClick={() => void sendControl("/api/loop/pause")}
-            disabled={busy || configBusy || !controlAvailability.canPause}
+            disabled={busy !== null || configBusy || !controlAvailability.canPause}
           >
             Pause
           </button>
           <button
             className="rounded-xl bg-sky-300 px-4 py-2 font-semibold text-ink transition hover:bg-sky-200 disabled:cursor-not-allowed disabled:bg-sky-200/50"
             onClick={() => void sendControl("/api/loop/resume")}
-            disabled={busy || configBusy || !controlAvailability.canResume}
+            disabled={busy !== null || configBusy || !controlAvailability.canResume}
           >
             Resume
           </button>
           <button
             className="rounded-xl bg-ember px-4 py-2 font-semibold text-ink transition hover:bg-ember/80 disabled:cursor-not-allowed disabled:bg-ember/40"
             onClick={() => void sendControl("/api/loop/stop")}
-            disabled={busy || configBusy || !controlAvailability.canStop}
+            disabled={busy !== null || configBusy || !controlAvailability.canStop}
           >
             Stop
           </button>
@@ -772,14 +779,14 @@ export default function App() {
           <div className="flex gap-2">
             <button
               onClick={() => void resetRuntimeConfig()}
-              disabled={configBusy || busy}
+              disabled={configBusy || busy !== null}
               className="rounded-lg border border-white/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-mist/70 transition hover:border-warning hover:text-warning disabled:cursor-not-allowed disabled:opacity-60"
             >
               Reset
             </button>
             <button
               onClick={() => void saveRuntimeConfig()}
-              disabled={!runtimeConfig || configBusy || busy}
+              disabled={!runtimeConfig || configBusy || busy !== null}
               className="rounded-lg bg-accent px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-ink transition hover:bg-accent/80 disabled:cursor-not-allowed disabled:bg-accent/40"
             >
               Save
@@ -1020,23 +1027,21 @@ export default function App() {
               {roleRuntimeSteps.map((step, index) => (
                 <div
                   key={step.key}
-                  className={`relative rounded-xl border px-3 py-3 ${
-                    step.status === "done"
-                      ? "border-accent/40 bg-accent/10"
-                      : step.status === "current"
-                        ? "border-sky-300/50 bg-sky-300/10"
-                        : "border-white/10 bg-ink/70"
-                  }`}
+                  className={`relative rounded-xl border px-3 py-3 ${step.status === "done"
+                    ? "border-accent/40 bg-accent/10"
+                    : step.status === "current"
+                      ? "border-sky-300/50 bg-sky-300/10"
+                      : "border-white/10 bg-ink/70"
+                    }`}
                 >
                   <div className="flex items-start gap-2">
                     <span
-                      className={`mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
-                        step.status === "done"
-                          ? "bg-accent text-ink"
-                          : step.status === "current"
-                            ? "bg-sky-300 text-ink"
-                            : "bg-slate text-mist/80"
-                      }`}
+                      className={`mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${step.status === "done"
+                        ? "bg-accent text-ink"
+                        : step.status === "current"
+                          ? "bg-sky-300 text-ink"
+                          : "bg-slate text-mist/80"
+                        }`}
                     >
                       {step.status === "done" ? "✓" : index + 1}
                     </span>
@@ -1112,7 +1117,7 @@ export default function App() {
             />
             <button
               onClick={() => void submitInstruction()}
-              disabled={busy}
+              disabled={busy !== null}
               className="rounded-xl bg-accent px-5 py-3 font-semibold text-ink transition hover:bg-accent/80 disabled:cursor-not-allowed disabled:bg-accent/40"
             >
               Send
@@ -1197,13 +1202,12 @@ export default function App() {
                       <p className="mt-1 text-xs text-mist/55">Raw ID: {run.timestamp}</p>
                     </div>
                     <span
-                      className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] ${
-                        report.decision === "pass"
-                          ? "bg-accent/20 text-accent"
-                          : report.decision === "fail"
-                            ? "bg-ember/20 text-ember"
-                            : "bg-slate/70 text-mist/80"
-                      }`}
+                      className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] ${report.decision === "pass"
+                        ? "bg-accent/20 text-accent"
+                        : report.decision === "fail"
+                          ? "bg-ember/20 text-ember"
+                          : "bg-slate/70 text-mist/80"
+                        }`}
                     >
                       Evaluator {report.decision}
                     </span>

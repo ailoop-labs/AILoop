@@ -37,13 +37,13 @@ export function buildLoopPaths(homeDir: string): LoopPaths {
   };
 }
 
-export async function ensureLoopHome(paths: LoopPaths): Promise<void> {
+export async function ensureLoopHome(paths: LoopPaths, initialGoalContent?: string): Promise<void> {
   await ensureDir(paths.homeDir);
   await ensureDir(paths.runsDir);
 
   await ensureRegularFile(
     paths.goalPath,
-    "# AutoLoop Goal\n\nDescribe the top-level goal this autonomous loop should pursue. Keep it outcome-focused and measurable.\n"
+    initialGoalContent ?? "# AutoLoop Goal\n\nDescribe the top-level goal this autonomous loop should pursue. Keep it outcome-focused and measurable.\n"
   );
   await ensureRegularFile(paths.taskPath, "# AutoLoop Task Log\n");
   await ensureRegularFile(paths.instructionsPath, "[]\n");

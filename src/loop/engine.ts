@@ -18,8 +18,10 @@ import {
   writeSummaryFile
 } from "../reporting/summary";
 import type { EvaluationResult, LoopStateName, SubTask, ToolResult } from "../types/contracts";
+import { fileExists } from "../utils/fs";
 import { SecretRedactor } from "../utils/redaction";
 import { runTimestamp } from "../utils/time";
+import { generateProjectGoal } from "../agent/goal-generator";
 import { cooldownWithControlChecks, waitWhilePaused } from "./scheduler";
 import {
   buildLoopPaths,
@@ -152,7 +154,20 @@ export class LoopEngine {
   }
 
   async run(): Promise<void> {
-    await ensureLoopHome(this.paths);
+    const exists = await fileExists(this.paths.goalPath);
+    let shouldGenerate = !exists;
+    if (exists) {
+      const content = await fs.readFile(this.paths.goalPath, "utf8");
+      if (content.trim() === "# AutoLoop Goal\n\nDescribe the top-level goal this autonomous loop should pursue. Keep it outcome-focused and measurable.") {
+        shouldGenerate = true;
+      }
+    }
+
+    if (shouldGenerate) {
+      await ensureLoopHome(this.paths, await generateProjectGoal(this.config));
+    } else {
+      await ensureLoopHome(this.paths);
+    }
     await this.acquireLock();
     await this.setState("running");
     await writePid(this.paths, process.pid);
@@ -355,16 +370,16 @@ export class LoopEngine {
           stateChange = await workspace.buildStateChange(snapshot);
           finalToolResult.artifacts.log_path = artifacts.logPath;
           finalToolResult.artifacts.state_change_path = artifacts.stateChangePath;
-        evaluation = await this.evaluator.evaluate({
-          subTask,
-          toolResult: finalToolResult,
-          stateChange,
-          logLines,
-          runTimestamp: runId,
-          budgetLimits: guardrails.limitsSnapshot(),
-          budgetUsage: guardrails.usage(),
-          onLog: log
-        });
+          evaluation = await this.evaluator.evaluate({
+            subTask,
+            toolResult: finalToolResult,
+            stateChange,
+            logLines,
+            runTimestamp: runId,
+            budgetLimits: guardrails.limitsSnapshot(),
+            budgetUsage: guardrails.usage(),
+            onLog: log
+          });
           await log(`Post-remediation evaluation decision: ${evaluation.decision}.`);
         } else {
           finalToolResult = {
@@ -376,8 +391,7 @@ export class LoopEngine {
             }
           };
           await log(
-            `Evidence remediation failed: ${
-              remediation.toolResult.error?.message ?? "unknown remediation error"
+            `Evidence remediation failed: ${remediation.toolResult.error?.message ?? "unknown remediation error"
             }`
           );
         }
@@ -421,13 +435,11 @@ export class LoopEngine {
 
           if (rework.toolResult.status === "failure") {
             autoReworkAttempts.push(
-              `Attempt ${attempt}/${this.config.evaluatorReworkMaxAttempts}: trigger='${triggerReason}', executor_status=failure, error='${
-                sanitizeReworkNote(rework.toolResult.error?.message) || "unknown"
+              `Attempt ${attempt}/${this.config.evaluatorReworkMaxAttempts}: trigger='${triggerReason}', executor_status=failure, error='${sanitizeReworkNote(rework.toolResult.error?.message) || "unknown"
               }'`
             );
             await log(
-              `Auto-rework attempt ${attempt}/${this.config.evaluatorReworkMaxAttempts} failed: ${
-                rework.toolResult.error?.message ?? "unknown executor error"
+              `Auto-rework attempt ${attempt}/${this.config.evaluatorReworkMaxAttempts} failed: ${rework.toolResult.error?.message ?? "unknown executor error"
               }`
             );
             break;
@@ -625,13 +637,13 @@ export class LoopEngine {
     const lockPidAlive =
       Number.isInteger(lockPid) && lockPid > 0
         ? (() => {
-            try {
-              process.kill(lockPid, 0);
-              return true;
-            } catch {
-              return false;
-            }
-          })()
+          try {
+            process.kill(lockPid, 0);
+            return true;
+          } catch {
+            return false;
+          }
+        })()
         : false;
 
     if (lockPidAlive) {

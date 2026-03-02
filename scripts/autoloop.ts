@@ -3,7 +3,7 @@ import { loadConfig } from "../src/config/env";
 import { LoopEngine } from "../src/loop/engine";
 import {
   ensureProjectRoles,
-  getLoopStatus,
+  getCliStatus,
   instructLoop,
   listRuns,
   pauseLoop,
@@ -23,7 +23,7 @@ async function runForeground(): Promise<void> {
 }
 
 async function printStatus(): Promise<void> {
-  const status = await getLoopStatus(config);
+  const status = await getCliStatus(config);
   console.log(JSON.stringify(status, null, 2));
 }
 

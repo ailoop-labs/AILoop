@@ -5,6 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { buildLoopPaths, defaultLoopState, hasFlag, readLoopState, setFlag, writeLoopState } from "./state";
 import {
   ensureProjectRoles,
+  getCliStatus,
   getLoopStatus,
   listProjectRoles,
   prepareStartFlags,
@@ -12,6 +13,7 @@ import {
   tailLatestLog
 } from "./control";
 import type { AppConfig } from "../config/env";
+import { saveRuntimeLoopConfig } from "../config/runtime";
 
 function makeTestConfig(homeDir: string): AppConfig {
   return {
@@ -167,6 +169,33 @@ describe("getLoopStatus", () => {
 
     const persisted = await readLoopState(paths);
     expect(persisted.current_budget).toBeNull();
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+});
+
+describe("getCliStatus", () => {
+  test("returns runtime budget limits alongside loop state", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-cli-status-test-"));
+    await fs.mkdir(homeDir, { recursive: true });
+    const config = makeTestConfig(homeDir);
+
+    await saveRuntimeLoopConfig(config, {
+      ...config,
+      budget: {
+        usdPerRound: 7.25,
+        timeMinutes: 22,
+        actions: 44
+      }
+    });
+
+    const status = await getCliStatus(config);
+    expect(status.state.state).toBe("idle");
+    expect(status.budget).toEqual({
+      usdPerRound: 7.25,
+      timeMinutes: 22,
+      actions: 44
+    });
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
