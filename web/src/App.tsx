@@ -6,6 +6,7 @@ import { buildLogViewerText } from "./log-lines";
 import { shouldForceLogTailFollow } from "./log-follow";
 import { GoalMarkdown } from "./goal-markdown";
 import { deriveRoundProgress } from "./round-progress";
+import { paginateRunHistory, RUN_HISTORY_PAGE_SIZE } from "./run-history-pagination";
 
 type LoopStateName = "idle" | "running" | "cooldown" | "paused" | "stopping" | "error";
 
@@ -289,6 +290,7 @@ export default function App() {
   const [isGoalDialogOpen, setIsGoalDialogOpen] = useState(false);
   const [selectedRole, setSelectedRole] = useState<ProjectRoleItem | null>(null);
   const [selectedRun, setSelectedRun] = useState<RunItem | null>(null);
+  const [runHistoryPage, setRunHistoryPage] = useState(1);
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeLoopConfig | null>(null);
   const [instruction, setInstruction] = useState("");
   const [busy, setBusy] = useState(false);
@@ -464,6 +466,16 @@ export default function App() {
   }, [status?.state]);
 
   const browserTimeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "Local", []);
+  const runHistoryPagination = useMemo(
+    () => paginateRunHistory(runs, runHistoryPage, RUN_HISTORY_PAGE_SIZE),
+    [runs, runHistoryPage]
+  );
+
+  useEffect(() => {
+    if (runHistoryPagination.currentPage !== runHistoryPage) {
+      setRunHistoryPage(runHistoryPagination.currentPage);
+    }
+  }, [runHistoryPage, runHistoryPagination.currentPage]);
 
   const sendControl = async (path: string, body?: Record<string, unknown>): Promise<void> => {
     try {
@@ -1168,7 +1180,7 @@ export default function App() {
           {runs.length === 0 ? (
             <p className="text-sm text-mist/70">No run artifacts yet.</p>
           ) : (
-            runs.map((run, index) => {
+            runHistoryPagination.items.map((run, index) => {
               const report = parseRoundReport(run.summary);
               const parsedTimestamp = parseRunTimestamp(run.timestamp);
               const displayTimestamp = formatRunTimestamp(run.timestamp);
@@ -1176,7 +1188,9 @@ export default function App() {
                 <article key={run.timestamp} className="rounded-2xl border border-white/10 bg-ink/60 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-mist/55">Run #{index + 1}</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-mist/55">
+                        Run #{runHistoryPagination.startIndex + index + 1}
+                      </p>
                       <p className="text-xs uppercase tracking-[0.2em] text-accent/80">
                         {parsedTimestamp ? displayTimestamp : run.timestamp}
                       </p>
@@ -1229,6 +1243,29 @@ export default function App() {
             })
           )}
         </div>
+        {runs.length > 0 ? (
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <p className="text-xs uppercase tracking-[0.2em] text-mist/60">
+              Page {runHistoryPagination.currentPage} / {runHistoryPagination.totalPages} · {RUN_HISTORY_PAGE_SIZE} per page
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setRunHistoryPage((page) => Math.max(1, page - 1))}
+                disabled={runHistoryPagination.currentPage <= 1}
+                className="rounded-lg border border-white/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-mist/70 transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:border-white/10 disabled:text-mist/40"
+              >
+                Prev
+              </button>
+              <button
+                onClick={() => setRunHistoryPage((page) => Math.min(runHistoryPagination.totalPages, page + 1))}
+                disabled={runHistoryPagination.currentPage >= runHistoryPagination.totalPages}
+                className="rounded-lg border border-white/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-mist/70 transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:border-white/10 disabled:text-mist/40"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       {isGoalDialogOpen ? (
