@@ -179,6 +179,31 @@ describe("CodexClient.runJson", () => {
     expect(result.data?.status).toBe("ok");
   });
 
+  test("reports timeout instead of JSON parse failure when process times out", async () => {
+    const runner: ProcessRunner = async (_cmd, args) => {
+      await fs.writeFile(outputPathFromArgs(args), "", "utf8");
+      return {
+        code: 0,
+        stdout: "",
+        stderr: "runner timed out",
+        timedOut: true
+      };
+    };
+
+    const client = new CodexClient(createCodexConfig(), runner);
+    const result = await client.runJson({
+      prompt: "Return JSON",
+      schema: { type: "object" },
+      cwd: process.cwd(),
+      sandbox: "read-only",
+      maxRetries: 0
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("timed out");
+    expect(result.error).not.toContain("not valid JSON");
+  });
+
   test("waits one minute and retries transient interface errors before succeeding", async () => {
     const attempts = [
       { code: 1, output: "", stdout: "", stderr: "ERROR: unexpected status 502 Bad Gateway: upstream" },

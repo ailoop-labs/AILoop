@@ -348,11 +348,10 @@ export class CodexClient {
           };
         }
 
-        const errorMessage =
-          runResult.code !== 0
-            ? runResult.timedOut
-              ? `Codex process timed out after ${timeoutMs}ms`
-              : `Codex exited with code ${runResult.code}`
+        const errorMessage = runResult.timedOut
+          ? `Codex process timed out after ${timeoutMs}ms`
+          : runResult.code !== 0
+            ? `Codex exited with code ${runResult.code}`
             : "Codex response was not valid JSON";
         const failure: CodexJsonCallResult<T> = {
           ok: false,
