@@ -3,6 +3,7 @@ import { LazyLog, ScrollFollow } from "@melloware/react-logviewer";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { buildLogViewerText } from "./log-lines";
+import { GoalMarkdown } from "./goal-markdown";
 
 type LoopStateName = "idle" | "running" | "cooldown" | "paused" | "stopping" | "error";
 
@@ -624,9 +625,7 @@ export default function App() {
 
         <div className="mt-4 rounded-xl border border-white/10 bg-ink/60 p-4">
           <p className="text-xs uppercase tracking-[0.2em] text-mist/70">Ultimate Goal</p>
-          <pre className="mt-2 whitespace-pre-wrap text-sm leading-6 text-mist/90">
-            {goal.trim() || "No goal configured in .autoloop/goal.md"}
-          </pre>
+          <GoalMarkdown goal={goal} />
         </div>
 
         <div className="mt-6 grid gap-2 md:grid-cols-4">
