@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { normalizeLogLinesForDisplay } from "./log-lines";
 
 type LoopStateName = "idle" | "running" | "cooldown" | "paused" | "stopping" | "error";
 
@@ -248,6 +249,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const logTailRef = useRef<HTMLPreElement | null>(null);
   const isAuthenticated = tokenRequired === false || (tokenRequired === true && authToken.trim().length > 0);
+  const displayLogLines = useMemo(() => normalizeLogLinesForDisplay(logs), [logs]);
 
   const handleRequestError = (requestError: unknown, unauthorizedMessage: string): void => {
     const message = requestError instanceof Error ? requestError.message : String(requestError);
@@ -965,7 +967,7 @@ export default function App() {
             ref={logTailRef}
             className="mt-4 max-h-[22rem] overflow-auto whitespace-pre-wrap break-words rounded-xl border border-white/10 bg-ink/75 p-4 text-xs leading-6 text-mist/80"
           >
-            {logs.length > 0 ? logs.join("\n") : "No logs yet."}
+            {displayLogLines.length > 0 ? displayLogLines.join("\n") : "No logs yet."}
           </pre>
         </article>
       </section>
