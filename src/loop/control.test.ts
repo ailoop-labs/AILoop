@@ -137,6 +137,39 @@ describe("getLoopStatus", () => {
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
+
+  test("clears stale budget snapshot when loop is idle", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-status-idle-budget-test-"));
+    const paths = buildLoopPaths(homeDir);
+    await fs.mkdir(homeDir, { recursive: true });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "idle",
+      pid: null,
+      current_budget: {
+        limits: {
+          usdPerRound: 1,
+          timeMinutes: 1,
+          actions: 10
+        },
+        usage: {
+          usdUsed: 0.3,
+          actionsUsed: 2,
+          elapsedMs: 45_000
+        }
+      }
+    });
+
+    const status = await getLoopStatus(makeTestConfig(homeDir));
+    expect(status.state).toBe("idle");
+    expect(status.current_budget).toBeNull();
+
+    const persisted = await readLoopState(paths);
+    expect(persisted.current_budget).toBeNull();
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
 });
 
 describe("ensureProjectRoles", () => {

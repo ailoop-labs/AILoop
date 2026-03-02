@@ -181,12 +181,26 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStateData & 
   if (!pidAlive && state.state !== "running") {
     const normalized = {
       ...state,
-      pid: null
+      pid: null,
+      current_budget: state.state === "idle" ? null : state.current_budget
     };
     await writeLoopState(paths, normalized);
     return {
       ...normalized,
       pid_alive: false
+    };
+  }
+
+  if (state.state === "idle" && state.current_budget) {
+    const normalized = {
+      ...state,
+      pid: pid ?? null,
+      current_budget: null
+    };
+    await writeLoopState(paths, normalized);
+    return {
+      ...normalized,
+      pid_alive: pidAlive
     };
   }
 
