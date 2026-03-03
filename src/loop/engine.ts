@@ -253,6 +253,16 @@ export class LoopEngine {
     const workspace = new WorkspaceManager(this.paths);
     let snapshot = await workspace.createSnapshot();
     const guardrails = new Guardrails(this.config.budget);
+    const enforceBudgetBeforeAction = async (actionName: string): Promise<void> => {
+      try {
+        guardrails.checkBudget();
+      } catch (error) {
+        if (error instanceof BudgetBreachError) {
+          await log(`Budget guard blocked ${actionName}: ${error.message}`);
+        }
+        throw error;
+      }
+    };
 
     let subTask: SubTask = {
       rationale: "Round initialization",
@@ -269,6 +279,7 @@ export class LoopEngine {
       const priorState = await readLoopState(this.paths);
       const plannerPreviousToolResult = this.previousToolResult ?? priorState.previous_tool_result;
 
+      await enforceBudgetBeforeAction("planner.plan");
       subTask = await this.planner.plan(
         {
           goal,
@@ -287,6 +298,7 @@ export class LoopEngine {
       snapshot = await workspace.createSnapshot(snapshotTargets);
 
       await log(`Planner objective: ${subTask.objective}`);
+      await enforceBudgetBeforeAction("executor.execute");
       const execution = await this.executor.execute({
         subTask,
         round,
@@ -306,6 +318,7 @@ export class LoopEngine {
       finalToolResult.artifacts.log_path = artifacts.logPath;
       finalToolResult.artifacts.state_change_path = artifacts.stateChangePath;
 
+      await enforceBudgetBeforeAction("evaluator.evaluate");
       let evaluation: EvaluationResult = await this.evaluator.evaluate({
         subTask,
         toolResult: finalToolResult,
@@ -347,6 +360,7 @@ export class LoopEngine {
           "Collect concrete evidence from commands/files and persist it in workspace artifacts so evaluator can verify compliance."
         ];
 
+        await enforceBudgetBeforeAction("executor.execute remediation");
         const remediation = await this.executor.execute({
           subTask: remediationTask,
           round,
@@ -370,6 +384,7 @@ export class LoopEngine {
           stateChange = await workspace.buildStateChange(snapshot);
           finalToolResult.artifacts.log_path = artifacts.logPath;
           finalToolResult.artifacts.state_change_path = artifacts.stateChangePath;
+          await enforceBudgetBeforeAction("evaluator.evaluate remediation");
           evaluation = await this.evaluator.evaluate({
             subTask,
             toolResult: finalToolResult,
@@ -408,6 +423,7 @@ export class LoopEngine {
             attempt,
             this.config.evaluatorReworkMaxAttempts
           );
+          await enforceBudgetBeforeAction(`executor.execute auto-rework ${attempt}`);
           const rework = await this.executor.execute({
             subTask: reworkTask,
             round,
@@ -446,6 +462,7 @@ export class LoopEngine {
           }
 
           stateChange = await workspace.buildStateChange(snapshot);
+          await enforceBudgetBeforeAction(`evaluator.evaluate auto-rework ${attempt}`);
           evaluation = await this.evaluator.evaluate({
             subTask,
             toolResult: finalToolResult,
