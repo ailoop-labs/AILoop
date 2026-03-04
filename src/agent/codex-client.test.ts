@@ -123,6 +123,40 @@ describe("CodexClient.runJson", () => {
     });
   });
 
+  test("accepts schema-valid JSON output when codex exits non-zero", async () => {
+    const runner: ProcessRunner = async (_cmd, args) => {
+      await fs.writeFile(outputPathFromArgs(args), '{"status":"success","source":"output"}', "utf8");
+      return {
+        code: 1,
+        stdout: "",
+        stderr: "codex exited non-zero after writing output"
+      };
+    };
+
+    const client = new CodexClient(createCodexConfig(), runner);
+    const result = await client.runJson<{ status: string; source: string }>({
+      prompt: "Return JSON",
+      schema: {
+        type: "object",
+        properties: {
+          status: { type: "string" },
+          source: { type: "string" }
+        },
+        required: ["status", "source"],
+        additionalProperties: false
+      },
+      cwd: process.cwd(),
+      sandbox: "read-only",
+      maxRetries: 0
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.data).toEqual({
+      status: "success",
+      source: "output"
+    });
+  });
+
   test("falls back to parsing JSON from stderr when output payload is invalid", async () => {
     const runner: ProcessRunner = async (_cmd, args) => {
       await fs.writeFile(outputPathFromArgs(args), "", "utf8");

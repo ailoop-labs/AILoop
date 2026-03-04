@@ -463,7 +463,7 @@ export class CodexClient {
         }
         combinedStderr += runResult.stderr;
 
-        if (runResult.code === 0 && parsed) {
+        if (parsed && !runResult.timedOut) {
           return {
             ok: true,
             data: parsed,
