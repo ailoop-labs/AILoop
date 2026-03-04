@@ -565,7 +565,7 @@ export class LoopEngine {
           type: errorType,
           message
         },
-        next_state_hint: "pause"
+        next_state_hint: error instanceof BudgetBreachError ? "pause" : "continue"
       };
 
       await workspace.rollback(snapshot);
@@ -600,13 +600,15 @@ export class LoopEngine {
         metrics,
         risks: [message],
         autoReworkAttempts: [],
-        nextRecommendation: "pause"
+        nextRecommendation: error instanceof BudgetBreachError ? "pause" : "continue"
       });
+
+      const nextState = error instanceof BudgetBreachError ? "paused" : "running";
 
       await updateLoopState(this.paths, (current) => ({
         ...current,
         round,
-        state: "paused",
+        state: nextState,
         pid: process.pid,
         last_error: message,
         consecutive_evaluator_failures: current.consecutive_evaluator_failures + 1,

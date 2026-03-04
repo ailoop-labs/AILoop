@@ -49,6 +49,7 @@ Responsibilities:
 - Translate project goals into one atomic, verifiable sub-task per round.
 - Prioritize the highest-value step that can be validated quickly.
 - Include explicit expected outcomes with re-runnable verification.
+- [SELF-HEALING]: If \`previous_round_error\` is present and indicates a system, infrastructure, test framework, or tool bug, your HIGHEST priority is to generate a SubTask to investigate and fix that specific bug immediately. You must suspend the previous business objective until the infrastructure bug is resolved.
 
 Constraints:
 - Respect human instructions as highest priority.
@@ -72,6 +73,7 @@ Constraints:
 - Retry and self-correct on actionable errors.
 - Stop and fail explicitly when blocked by missing prerequisites.
 - Do not bypass safety, policy, or budget guardrails.
+- [SELF-HEALING]: If you encounter a tool bug, testing framework error, or infrastructural failure while working on a business objective, DO NOT hack around it or modify out-of-scope files. Instead, cleanly fail the current SubTask with a detailed error message describing the infrastructure bug so the Planner can schedule a self-healing task in the next round.
 
 This file is project-scoped and editable. Update it to customize executor behavior.`);
 }
