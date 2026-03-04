@@ -93,7 +93,7 @@ describe("CodexClient.runJson", () => {
     });
   });
 
-  test("uses the first complete JSON object when multiple objects are present in payload", async () => {
+  test("uses the last complete JSON object when multiple objects are present in payload", async () => {
     const runner: ProcessRunner = async (_cmd, args) => {
       await fs.writeFile(
         outputPathFromArgs(args),
@@ -119,7 +119,7 @@ describe("CodexClient.runJson", () => {
     expect(result.ok).toBe(true);
     expect(result.data).toEqual({
       status: "success",
-      attempt: 1
+      attempt: 2
     });
   });
 

@@ -440,7 +440,7 @@ export class CodexClient {
           onStderrChunk: attemptOptions.onStderrChunk
         });
         const outputPayload = await fs.readFile(outputPath, "utf8").catch(() => "");
-        const outputCandidate = parseResponseJson<T>(outputPayload, attemptOptions.schema, false);
+        const outputCandidate = parseResponseJson<T>(outputPayload, attemptOptions.schema, true);
         const stdoutCandidate = outputCandidate
           ? null
           : parseResponseJson<T>(runResult.stdout, attemptOptions.schema, true);
