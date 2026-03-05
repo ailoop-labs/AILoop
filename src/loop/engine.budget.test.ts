@@ -70,7 +70,7 @@ describe("LoopEngine budget guard", () => {
 
     const logText = await fs.readFile(path.join(homeDir, "runs", logFile as string), "utf8");
     expect(logText).toContain(
-      "Budget guard blocked round.bootstrap: BudgetBreach: time budget exceeded"
+      "Budget guard blocked round.bootstrap (pre-action-time-guard): BudgetBreach: time budget exceeded"
     );
 
     const summaryText = await fs.readFile(path.join(homeDir, "runs", summaryFile as string), "utf8");
