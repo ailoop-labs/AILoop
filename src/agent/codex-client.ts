@@ -398,6 +398,20 @@ async function runProcess(
   });
 }
 
+let globalRequestChain: Promise<void> = Promise.resolve();
+
+function acquireGlobalLock<T>(fn: () => Promise<T>, cooldownMs: number, sleepFn: SleepFn): Promise<T> {
+  const ticket = globalRequestChain.then(async () => {
+    try {
+      return await fn();
+    } finally {
+      await sleepFn(cooldownMs);
+    }
+  });
+  globalRequestChain = ticket.then(() => {}, () => {});
+  return ticket;
+}
+
 export class CodexClient {
   constructor(
     private readonly config: CodexConfig,
@@ -409,6 +423,11 @@ export class CodexClient {
   ) {}
 
   async runJson<T>(options: CodexJsonCallOptions): Promise<CodexJsonCallResult<T>> {
+    const cooldownMs = 2000;
+    return acquireGlobalLock(() => this._runJsonInner<T>(options), cooldownMs, this.sleep);
+  }
+
+  private async _runJsonInner<T>(options: CodexJsonCallOptions): Promise<CodexJsonCallResult<T>> {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-codex-"));
     const schemaPath = path.join(tempDir, "schema.json");
     const outputPath = path.join(tempDir, "result.json");

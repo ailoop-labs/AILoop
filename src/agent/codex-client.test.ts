@@ -384,7 +384,7 @@ describe("CodexClient.runJson", () => {
 
     expect(result.ok).toBe(true);
     expect(result.data?.status).toBe("ok");
-    expect(sleepCalls).toEqual([60_000, 60_000]);
+    expect(sleepCalls).toEqual([60_000, 60_000, 2_000]);
     const retryNotices = stderrChunks.filter((line) => line.includes("AutoLoop interface retry"));
     expect(retryNotices.length).toBe(2);
     expect(retryNotices[0]).toContain("waiting 60000ms");
@@ -417,6 +417,6 @@ describe("CodexClient.runJson", () => {
 
     expect(result.ok).toBe(false);
     expect(callCount).toBe(6);
-    expect(sleepCalls).toEqual([60_000, 60_000, 60_000, 60_000, 60_000]);
+    expect(sleepCalls).toEqual([60_000, 60_000, 60_000, 60_000, 60_000, 2_000]);
   });
 });
