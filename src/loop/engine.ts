@@ -21,7 +21,7 @@ import type { EvaluationResult, LoopStateName, SubTask, ToolResult } from "../ty
 import { fileExists } from "../utils/fs";
 import { SecretRedactor } from "../utils/redaction";
 import { runTimestamp } from "../utils/time";
-import { generateProjectGoal } from "../agent/goal-generator";
+import { buildDeterministicGoal } from "./control";
 import { cooldownWithControlChecks, waitWhilePaused } from "./scheduler";
 import {
   buildLoopPaths,
@@ -164,7 +164,7 @@ export class LoopEngine {
     }
 
     if (shouldGenerate) {
-      await ensureLoopHome(this.paths, await generateProjectGoal(this.config));
+      await ensureLoopHome(this.paths, await buildDeterministicGoal(process.cwd()));
     } else {
       await ensureLoopHome(this.paths);
     }

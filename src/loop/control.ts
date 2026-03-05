@@ -12,7 +12,19 @@ import { readRuntimeLoopConfig, runtimeLoopConfigToEnv } from "../config/runtime
 import { listRunRecords, readLastLogTail } from "../reporting/summary";
 import type { BudgetLimits, LoopStateData } from "../types/contracts";
 import { fileExists, readJsonFile, readTextFile } from "../utils/fs";
-import { generateProjectGoal } from "../agent/goal-generator";
+
+export async function buildDeterministicGoal(workspaceRoot: string = process.cwd()): Promise<string> {
+  const goalMd = await readTextFile(path.join(workspaceRoot, "GOAL.md"), "");
+  if (goalMd.trim()) {
+    return goalMd;
+  }
+  const readmeMd = await readTextFile(path.join(workspaceRoot, "README.md"), "");
+  if (readmeMd.trim()) {
+    return `# Project Goal (Derived from README.md)\n\n${readmeMd}`;
+  }
+  return "# AutoLoop Goal\n\nDescribe the top-level goal this autonomous loop should pursue. Keep it outcome-focused and measurable.\n";
+}
+
 import {
   appendInstruction,
   buildLoopPaths,
@@ -87,7 +99,7 @@ export async function ensureLoopHomeWithGoal(config: AppConfig): Promise<LoopPat
   }
 
   if (shouldGenerate) {
-    await ensureLoopHome(paths, await generateProjectGoal(config));
+    await ensureLoopHome(paths, await buildDeterministicGoal(process.cwd()));
   } else {
     await ensureLoopHome(paths);
   }
