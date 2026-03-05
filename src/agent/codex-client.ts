@@ -423,7 +423,7 @@ export class CodexClient {
   ) {}
 
   async runJson<T>(options: CodexJsonCallOptions): Promise<CodexJsonCallResult<T>> {
-    const cooldownMs = 2000;
+    const cooldownMs = process.env.NODE_ENV === "test" ? 0 : 10000;
     return acquireGlobalLock(() => this._runJsonInner<T>(options), cooldownMs, this.sleep);
   }
 
