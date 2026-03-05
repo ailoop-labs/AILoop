@@ -274,6 +274,7 @@ export class LoopEngine {
     const autoReworkAttempts: string[] = [];
 
     try {
+      await enforceBudgetBeforeAction("round.bootstrap");
       const goal = await fs.readFile(this.paths.goalPath, "utf8");
       const instructions = await drainInstructions(this.paths);
       const priorState = await readLoopState(this.paths);
