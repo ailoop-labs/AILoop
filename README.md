@@ -58,9 +58,7 @@ Design principles:
 
 ## 5. Open Source Basics
 
-License recommendation:
-- MIT (simple and fast adoption), or
-- Apache-2.0 (clearer patent grant).
+License: MIT
 
 Before first public release:
 - Remove all secrets and private endpoints.
