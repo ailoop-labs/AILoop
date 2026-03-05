@@ -47,16 +47,7 @@ Design principles:
 - Cloud billing integration.
 - Large public plugin marketplace.
 
-## 4. Suggested Initial Milestones
-
-- `v0.1.0`
-  - Core engine + Web Console + Shell/HTTP Tools + Multi-dimensional Budgets.
-- `v0.2.0`
-  - Pluggable Evaluators (LLM-as-a-judge) + Complex Workspace Rollbacks (Git/DB).
-- `v0.3.0`
-  - Advanced Tool Registry (Browser automation, specific SaaS API integrations).
-
-## 5. Open Source Basics
+## 4. Open Source Basics
 
 License: MIT
 
