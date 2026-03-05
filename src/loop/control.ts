@@ -86,28 +86,14 @@ function rolePath(paths: LoopPaths, role: ProjectRole): string {
   return paths.evaluatorRolePath;
 }
 
-export async function ensureLoopHomeWithGoal(config: AppConfig): Promise<LoopPaths> {
+export async function ensureLoopHomeAndGetPaths(config: AppConfig): Promise<LoopPaths> {
   const paths = buildLoopPaths(config.homeDir);
-  const exists = await fileExists(paths.goalPath);
-  let shouldGenerate = !exists;
-
-  if (exists) {
-    const content = await readTextFile(paths.goalPath, "");
-    if (content.trim() === "# AutoLoop Goal\n\nDescribe the top-level goal this autonomous loop should pursue. Keep it outcome-focused and measurable.") {
-      shouldGenerate = true;
-    }
-  }
-
-  if (shouldGenerate) {
-    await ensureLoopHome(paths, await buildDeterministicGoal(process.cwd()));
-  } else {
-    await ensureLoopHome(paths);
-  }
+  await ensureLoopHome(paths);
   return paths;
 }
 
 export async function listProjectRoles(config: AppConfig): Promise<ProjectRoleView[]> {
-  const paths = await ensureLoopHomeWithGoal(config);
+  const paths = await ensureLoopHomeAndGetPaths(config);
 
   const roles: ProjectRole[] = ["planner", "executor", "evaluator"];
   const output: ProjectRoleView[] = [];
@@ -128,7 +114,7 @@ export async function listProjectRoles(config: AppConfig): Promise<ProjectRoleVi
 }
 
 export async function startBackgroundLoop(config: AppConfig): Promise<{ started: boolean; message: string }> {
-  const paths = await ensureLoopHomeWithGoal(config);
+  const paths = await ensureLoopHomeAndGetPaths(config);
   await ensureProjectRoles(config, { workspaceRoot: process.cwd(), regen: false });
 
   const existingPid = await readPid(paths);
@@ -159,17 +145,17 @@ export async function prepareStartFlags(paths: LoopPaths): Promise<void> {
 }
 
 export async function stopLoop(config: AppConfig): Promise<void> {
-  const paths = await ensureLoopHomeWithGoal(config);
+  const paths = await ensureLoopHomeAndGetPaths(config);
   await setFlag(paths.stopFlagPath);
 }
 
 export async function pauseLoop(config: AppConfig): Promise<void> {
-  const paths = await ensureLoopHomeWithGoal(config);
+  const paths = await ensureLoopHomeAndGetPaths(config);
   await setFlag(paths.pauseFlagPath);
 }
 
 export async function resumeLoop(config: AppConfig): Promise<void> {
-  const paths = await ensureLoopHomeWithGoal(config);
+  const paths = await ensureLoopHomeAndGetPaths(config);
   await clearFlag(paths.pauseFlagPath);
 
   const state = await readLoopState(paths);
@@ -186,12 +172,12 @@ export async function resumeLoop(config: AppConfig): Promise<void> {
 }
 
 export async function instructLoop(config: AppConfig, message: string): Promise<void> {
-  const paths = await ensureLoopHomeWithGoal(config);
+  const paths = await ensureLoopHomeAndGetPaths(config);
   await appendInstruction(paths, message);
 }
 
 export async function getLoopStatus(config: AppConfig): Promise<LoopStateData & { pid_alive: boolean }> {
-  const paths = await ensureLoopHomeWithGoal(config);
+  const paths = await ensureLoopHomeAndGetPaths(config);
 
   const state = await readLoopState(paths);
   const pid = state.pid ?? (await readPid(paths));
@@ -259,7 +245,7 @@ export async function listRuns(config: AppConfig, limit = 20): Promise<
     metrics: Record<string, unknown> | null;
   }>
 > {
-  const paths = await ensureLoopHomeWithGoal(config);
+  const paths = await ensureLoopHomeAndGetPaths(config);
   const records = await listRunRecords(paths.runsDir, limit);
 
   const output: Array<{
@@ -282,7 +268,7 @@ export async function listRuns(config: AppConfig, limit = 20): Promise<
 }
 
 export async function tailLatestLog(config: AppConfig, lines = 200): Promise<string[]> {
-  const paths = await ensureLoopHomeWithGoal(config);
+  const paths = await ensureLoopHomeAndGetPaths(config);
   const entries = await fs.readdir(paths.runsDir);
   const latestLog = entries
     .filter((entry) => entry.endsWith(".round.log"))
@@ -294,9 +280,8 @@ export async function tailLatestLog(config: AppConfig, lines = 200): Promise<str
   return readLastLogTail(path.join(paths.runsDir, latestLog), lines);
 }
 
-export async function readGoal(config: AppConfig): Promise<string> {
-  const paths = await ensureLoopHomeWithGoal(config);
-  return readTextFile(paths.goalPath, "");
+export async function readGoal(_config: AppConfig): Promise<string> {
+  return buildDeterministicGoal(process.cwd());
 }
 
 export function resolveWebDistPath(): string {
