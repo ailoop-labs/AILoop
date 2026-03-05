@@ -69,26 +69,6 @@ describe("loop state persistence", () => {
     await fs.rm(homeDir, { recursive: true, force: true });
   });
 
-  test("ensureLoopHome heals goal.md when it is a directory", async () => {
-    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-state-heal-goal-"));
-    const paths = buildLoopPaths(homeDir);
-
-    await fs.mkdir(paths.goalPath, { recursive: true });
-    await fs.writeFile(path.join(paths.goalPath, "nested.txt"), "preserve this directory", "utf8");
-
-    await ensureLoopHome(paths);
-
-    const goalStat = await fs.stat(paths.goalPath);
-    expect(goalStat.isFile()).toBe(true);
-    const goalContent = await fs.readFile(paths.goalPath, "utf8");
-    expect(goalContent).toContain("# AutoLoop Goal");
-
-    const homeEntries = await fs.readdir(homeDir);
-    expect(homeEntries.some((entry) => entry.startsWith("goal.md.invalid-type-"))).toBe(true);
-
-    await fs.rm(homeDir, { recursive: true, force: true });
-  });
-
   test("ensureLoopHome heals instructions.json when it is a directory", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-state-heal-instructions-"));
     const paths = buildLoopPaths(homeDir);

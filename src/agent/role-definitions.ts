@@ -106,7 +106,7 @@ function defaultRoleDefinition(role: ProjectRole): string {
   return defaultEvaluatorRoleDefinition();
 }
 
-function buildRoleGenerationPrompt(input: { goal: string; projectGoal: string; readme: string }): string {
+function buildRoleGenerationPrompt(input: { projectGoal: string; readme: string }): string {
   const truncate = (value: string, max: number): string =>
     value.length > max ? `${value.slice(0, max - 3)}...` : value;
 
@@ -120,7 +120,7 @@ function buildRoleGenerationPrompt(input: { goal: string; projectGoal: string; r
     "- evaluator_role_md",
     "",
     "Requirements:",
-    "- Make definitions specific to project context from goal/readme.",
+    "- Make definitions specific to project context from readme.",
     "- Keep content concise, practical, and directly actionable.",
     "- Preserve core engine constraints (budget, safety, schema, rollback).",
     "- Include headings in each markdown document.",
@@ -128,7 +128,6 @@ function buildRoleGenerationPrompt(input: { goal: string; projectGoal: string; r
     "Context:",
     JSON.stringify(
       {
-        autoloop_goal_md: truncate(input.goal, 8000),
         project_goal_md: truncate(input.projectGoal, 6000),
         project_readme_md: truncate(input.readme, 12000)
       },
@@ -205,14 +204,13 @@ export async function ensureProjectRoleDefinitions(
   }
 
   const codex = options.codexClient ?? new CodexClient(config.codex);
-  const goal = await readTextFile(paths.goalPath, "");
   const projectGoal = await readTextFile(path.join(workspaceRoot, "GOAL.md"), "");
   const readme = await readTextFile(path.join(workspaceRoot, "README.md"), "");
 
   let payload: GeneratedRolePayload | null = null;
   let source: EnsureProjectRoleDefinitionsResult["source"] = "template";
   const generation = await codex.runJson<GeneratedRolePayload>({
-    prompt: buildRoleGenerationPrompt({ goal, projectGoal, readme }),
+    prompt: buildRoleGenerationPrompt({ projectGoal, readme }),
     schema: GENERATED_ROLE_SCHEMA,
     cwd: workspaceRoot,
     sandbox: config.codex.plannerSandbox

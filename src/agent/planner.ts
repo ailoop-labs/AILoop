@@ -97,8 +97,8 @@ function fallbackPlan(context: PlannerContext): SubTask {
 
   if (!goal) {
     return {
-      rationale: "Missing required context: goal.md is empty, so the safest next action is clarification.",
-      objective: "Request clarification from the operator to populate .autoloop/goal.md before continuing execution.",
+      rationale: "Missing required context: README.md is empty, so the safest next action is clarification.",
+      objective: "Request clarification from the operator to populate .autoloop/README.md before continuing execution.",
       expected_outcome: "A human instruction is queued with concrete goal details.",
       recommended_tools: ["read_file"]
     };
@@ -131,7 +131,7 @@ function fallbackPlan(context: PlannerContext): SubTask {
 
   return {
     rationale: `${blockerNote} The round should produce one clear, outcome-oriented change without broad scope expansion.`,
-    objective: `Complete one atomic, verifiable step for round ${context.round} that advances the goal in goal.md.`,
+    objective: `Complete one atomic, verifiable step for round ${context.round} that advances the goal in README.md.`,
     expected_outcome: "Evidence in workspace state or checks shows measurable progress toward the goal.",
     recommended_tools: ["read_file", "write_file", "run_shell"]
   };

@@ -6,7 +6,6 @@ import { ensureDir, ensureRegularFile, fileExists, readJsonFile, readTextFile, w
 export interface LoopPaths {
   homeDir: string;
   runsDir: string;
-  goalPath: string;
   taskPath: string;
   plannerRolePath: string;
   executorRolePath: string;
@@ -14,16 +13,15 @@ export interface LoopPaths {
   instructionsPath: string;
   statePath: string;
   pidPath: string;
-  lockPath: string;
-  pauseFlagPath: string;
   stopFlagPath: string;
+  pauseFlagPath: string;
+  lockPath: string;
 }
 
 export function buildLoopPaths(homeDir: string): LoopPaths {
   return {
     homeDir,
     runsDir: path.join(homeDir, "runs"),
-    goalPath: path.join(homeDir, "goal.md"),
     taskPath: path.join(homeDir, "task.md"),
     plannerRolePath: path.join(homeDir, "PLANNER_ROLE.md"),
     executorRolePath: path.join(homeDir, "EXECUTOR_ROLE.md"),
@@ -31,20 +29,16 @@ export function buildLoopPaths(homeDir: string): LoopPaths {
     instructionsPath: path.join(homeDir, "instructions.json"),
     statePath: path.join(homeDir, "loop.state"),
     pidPath: path.join(homeDir, "loop.pid"),
-    lockPath: path.join(homeDir, "loop.lock"),
+    stopFlagPath: path.join(homeDir, "loop.stop"),
     pauseFlagPath: path.join(homeDir, "loop.pause"),
-    stopFlagPath: path.join(homeDir, "loop.stop")
+    lockPath: path.join(homeDir, "loop.lock")
   };
 }
 
-export async function ensureLoopHome(paths: LoopPaths, initialGoalContent?: string): Promise<void> {
+export async function ensureLoopHome(paths: LoopPaths): Promise<void> {
   await ensureDir(paths.homeDir);
   await ensureDir(paths.runsDir);
 
-  await ensureRegularFile(
-    paths.goalPath,
-    initialGoalContent ?? "# AutoLoop Goal\n\nDescribe the top-level goal this autonomous loop should pursue. Keep it outcome-focused and measurable.\n"
-  );
   await ensureRegularFile(paths.taskPath, "# AutoLoop Task Log\n");
   await ensureRegularFile(paths.instructionsPath, "[]\n");
 }

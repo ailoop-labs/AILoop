@@ -292,7 +292,7 @@ export class LoopEngine {
 
     try {
       await enforceBudgetBeforeAction("round.bootstrap");
-      const goal = await fs.readFile(this.paths.goalPath, "utf8");
+      const goal = await buildDeterministicGoal(process.cwd());
       const instructions = await drainInstructions(this.paths);
       const priorState = await readLoopState(this.paths);
       const plannerPreviousToolResult = this.previousToolResult ?? priorState.previous_tool_result;
