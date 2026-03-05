@@ -303,6 +303,20 @@ function isTransientInterfaceFailure(errorMessage: string, stderr: string): bool
 }
 
 function buildArgs(config: CodexConfig, options: CodexJsonCallOptions, schemaPath: string, outputPath: string): string[] {
+  if (config.bin.endsWith("gemini")) {
+    const args = [
+      "--output-format",
+      "json"
+    ];
+
+    if (config.model.trim()) {
+      args.push("--model", config.model.trim());
+    }
+
+    args.push(options.prompt);
+    return args;
+  }
+
   const args = [
     "exec",
     "--ephemeral",
@@ -447,9 +461,15 @@ export class CodexClient {
           attempt > 0 && lastFailure
             ? buildRetryPrompt(basePrompt, attempt, summarizeForRetry(lastFailure.error ?? "unknown error", lastFailure.stderr))
             : basePrompt;
+
+        let finalPrompt = prompt;
+        if (this.config.bin.endsWith("gemini")) {
+          finalPrompt = `${prompt}\n\nIMPORTANT: You MUST return a single JSON object strictly matching this schema. Output ONLY the raw JSON object, no markdown formatting or backticks.\nSCHEMA:\n${JSON.stringify(options.schema, null, 2)}`;
+        }
+
         const attemptOptions: CodexJsonCallOptions = {
           ...options,
-          prompt
+          prompt: finalPrompt
         };
 
         await fs.writeFile(outputPath, "", "utf8");
@@ -458,11 +478,24 @@ export class CodexClient {
           onStdoutChunk: attemptOptions.onStdoutChunk,
           onStderrChunk: attemptOptions.onStderrChunk
         });
+
+        let effectiveStdout = runResult.stdout;
+        if (this.config.bin.endsWith("gemini")) {
+          try {
+            const parsed = JSON.parse(effectiveStdout);
+            if (parsed && typeof parsed.response === "string") {
+              effectiveStdout = parsed.response;
+            }
+          } catch {
+            // fallback to raw stdout if parsing fails
+          }
+        }
+
         const outputPayload = await fs.readFile(outputPath, "utf8").catch(() => "");
         const outputCandidate = parseResponseJson<T>(outputPayload, attemptOptions.schema, true);
         const stdoutCandidate = outputCandidate
           ? null
-          : parseResponseJson<T>(runResult.stdout, attemptOptions.schema, true);
+          : parseResponseJson<T>(effectiveStdout, attemptOptions.schema, true);
         const stderrCandidate =
           outputCandidate || stdoutCandidate
             ? null
