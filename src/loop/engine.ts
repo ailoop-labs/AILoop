@@ -253,12 +253,29 @@ export class LoopEngine {
     const workspace = new WorkspaceManager(this.paths);
     let snapshot = await workspace.createSnapshot();
     const guardrails = new Guardrails(this.config.budget);
+    const pauseForBudgetBreach = async (
+      error: BudgetBreachError,
+      actionName: string,
+      source: "pre-action-time-guard" | "guardrails.checkBudget"
+    ): Promise<void> => {
+      await log(`Budget guard blocked ${actionName} (${source}): ${error.message}`);
+      await setFlag(this.paths.pauseFlagPath);
+      await this.setState("paused", error.message);
+    };
     const enforceBudgetBeforeAction = async (actionName: string): Promise<void> => {
+      const elapsedMs = Date.now() - startedAt;
+      const timeLimitMs = this.config.budget.timeMinutes * 60_000;
+      if (elapsedMs > timeLimitMs) {
+        const timeBreach = new BudgetBreachError("time", "BudgetBreach: time budget exceeded");
+        await pauseForBudgetBreach(timeBreach, actionName, "pre-action-time-guard");
+        throw timeBreach;
+      }
+
       try {
         guardrails.checkBudget();
       } catch (error) {
         if (error instanceof BudgetBreachError) {
-          await log(`Budget guard blocked ${actionName}: ${error.message}`);
+          await pauseForBudgetBreach(error, actionName, "guardrails.checkBudget");
         }
         throw error;
       }

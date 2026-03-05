@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../config/env";
 import type { ActionRecord, EvaluationResult, SubTask, ToolResult } from "../types/contracts";
-import { ensureLoopHome, type LoopPaths } from "./state";
+import { ensureLoopHome, readLoopState, type LoopPaths } from "./state";
 import { LoopEngine, extractSnapshotTargetsFromSubTask, resolveNextLastError } from "./engine";
 
 function makeToolResult(summary: string): ToolResult {
@@ -136,6 +136,64 @@ describe("LoopEngine auto rework", () => {
     expect(summaryText).toContain("Attempt 1/1:");
     expect(summaryText).toContain("trigger='Missing negative tests for edge cases.'");
     expect(summaryText).toContain("evaluation=pass");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+});
+
+describe("LoopEngine time budget guard", () => {
+  test("pauses before next action when elapsed round time exceeds limit", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-engine-time-guard-test-"));
+    const config = loadConfig({
+      AUTOLOOP_HOME: homeDir,
+      AUTOLOOP_BUDGET_TIME_MINUTES: "0.001" // 60ms
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const plan: SubTask = {
+      rationale: "test rationale",
+      objective: "Execute bounded task",
+      expected_outcome: "executor runs after planning",
+      recommended_tools: ["read_file", "run_shell"]
+    };
+
+    let executorCalls = 0;
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      executor: { execute: () => Promise<{ actions: ActionRecord[]; toolResult: ToolResult }> };
+      evaluator: { evaluate: () => Promise<EvaluationResult> };
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+    mutable.planner = {
+      plan: async () => {
+        await Bun.sleep(80);
+        return plan;
+      }
+    };
+    mutable.executor = {
+      execute: async () => {
+        executorCalls += 1;
+        return {
+          actions: [makeAction("run_shell")],
+          toolResult: makeToolResult("executor should not run when time budget is exceeded")
+        };
+      }
+    };
+    mutable.evaluator = {
+      evaluate: async () => makeEvaluation("pass", "unused")
+    };
+
+    const outcome = await mutable.runRound(1);
+
+    expect(outcome.success).toBe(false);
+    expect(outcome.errorMessage).toContain("BudgetBreach: time budget exceeded");
+    expect(executorCalls).toBe(0);
+
+    const state = await readLoopState(paths);
+    expect(state.state).toBe("paused");
+    expect(state.last_error).toContain("BudgetBreach: time budget exceeded");
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
