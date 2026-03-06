@@ -39,6 +39,7 @@ import {
 } from "./state";
 
 const INSUFFICIENT_EVIDENCE_PREFIX = "Insufficient evidence for key dimensions:";
+const CONSECUTIVE_EVALUATOR_FAILURE_LIMIT = 3;
 
 function extractMissingKeyDimensions(justification: string): string[] {
   const trimmed = justification.trim();
@@ -134,6 +135,10 @@ function sanitizeReworkNote(value: string | undefined | null): string {
   return normalized.length > 200 ? `${normalized.slice(0, 197)}...` : normalized;
 }
 
+function buildEvaluatorFailureLimitMessage(count: number): string {
+  return `EvaluatorFailureLimit: consecutive evaluator failures reached limit (${count}/${CONSECUTIVE_EVALUATOR_FAILURE_LIMIT}).`;
+}
+
 export class LoopEngine {
   private readonly paths;
   private readonly planner: PlannerAgent;
@@ -173,7 +178,7 @@ export class LoopEngine {
     await writePid(this.paths, process.pid);
 
     try {
-      let currentState = await readLoopState(this.paths);
+      const currentState = await readLoopState(this.paths);
       let round = currentState.round;
       const stopAtRound = this.config.maxCycles > 0 ? round + this.config.maxCycles : null;
 
@@ -191,6 +196,18 @@ export class LoopEngine {
             break;
           }
           await this.setState("running");
+        }
+
+        const stateBeforeRound = await readLoopState(this.paths);
+        if (
+          stateBeforeRound.consecutive_evaluator_failures >= CONSECUTIVE_EVALUATOR_FAILURE_LIMIT
+        ) {
+          const failureMessage = buildEvaluatorFailureLimitMessage(
+            stateBeforeRound.consecutive_evaluator_failures
+          );
+          await setFlag(this.paths.pauseFlagPath);
+          await this.setState("paused", failureMessage);
+          continue;
         }
 
         if (stopAtRound !== null && round >= stopAtRound) {
@@ -544,15 +561,24 @@ export class LoopEngine {
 
       await trimOldRuns(this.paths.runsDir, this.config.maxRetainRuns);
 
-      const nextFailureCount = evaluation.decision === "fail" ? priorState.consecutive_evaluator_failures + 1 : 0;
+      const nextFailureCount =
+        evaluation.decision === "fail" ? priorState.consecutive_evaluator_failures + 1 : 0;
+      const reachedEvaluatorFailureLimit =
+        nextFailureCount >= CONSECUTIVE_EVALUATOR_FAILURE_LIMIT;
+      const evaluatorFailureMessage = reachedEvaluatorFailureLimit
+        ? buildEvaluatorFailureLimitMessage(nextFailureCount)
+        : null;
       this.previousToolResult = finalToolResult;
 
       await writeLoopState(this.paths, {
         ...priorState,
         round,
-        state: nextFailureCount >= 3 ? "paused" : priorState.state,
+        state: reachedEvaluatorFailureLimit ? "paused" : priorState.state,
         pid: process.pid,
-        last_error: finalToolResult.error?.message ?? (evaluation.decision === "fail" ? evaluation.justification : null),
+        last_error:
+          finalToolResult.error?.message ??
+          evaluatorFailureMessage ??
+          (evaluation.decision === "fail" ? evaluation.justification : null),
         consecutive_evaluator_failures: nextFailureCount,
         previous_tool_result: finalToolResult,
         current_budget: {
@@ -561,10 +587,15 @@ export class LoopEngine {
         }
       });
 
-      if (nextFailureCount >= 3 || evaluation.decision === "fail" || finalToolResult.status === "failure") {
+      if (
+        reachedEvaluatorFailureLimit ||
+        evaluation.decision === "fail" ||
+        finalToolResult.status === "failure"
+      ) {
         return {
           success: false,
-          errorMessage: finalToolResult.error?.message ?? evaluation.justification
+          errorMessage:
+            finalToolResult.error?.message ?? evaluatorFailureMessage ?? evaluation.justification
         };
       }
 
