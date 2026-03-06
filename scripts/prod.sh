@@ -98,8 +98,8 @@ if [[ -z "${AUTOLOOP_CONSOLE_ADMIN_TOKEN:-}" ]]; then
   if [[ -n "$configured_admin_token" ]]; then
     export AUTOLOOP_CONSOLE_ADMIN_TOKEN="$configured_admin_token"
   else
-    today_utc="$(bun -e 'console.log(new Date().toISOString().split("T")[0])')"
-    today_epoch="$(bun -e 'console.log(Math.floor(new Date(process.argv[1] + "T00:00:00Z").getTime() / 1000))' "$today_utc")"
+    today_utc="$(NO_COLOR=1 bun -e 'console.log(new Date().toISOString().split("T")[0])')"
+    today_epoch="$(NO_COLOR=1 bun -e 'console.log(Math.floor(new Date(process.argv[1] + "T00:00:00Z").getTime() / 1000))' "$today_utc")"
     cached_issued_date=""
     cached_token=""
     issued_date="$today_utc"
@@ -110,7 +110,7 @@ if [[ -z "${AUTOLOOP_CONSOLE_ADMIN_TOKEN:-}" ]]; then
     fi
 
     if [[ -n "$cached_issued_date" && -n "$cached_token" ]]; then
-      cached_epoch="$(bun -e 'const t=new Date(process.argv[1]+"T00:00:00Z").getTime(); console.log(Number.isNaN(t) ? "" : Math.floor(t/1000))' "$cached_issued_date" 2>/dev/null || true)"
+      cached_epoch="$(NO_COLOR=1 bun -e 'const t=new Date(process.argv[1]+"T00:00:00Z").getTime(); console.log(Number.isNaN(t) ? "" : Math.floor(t/1000))' "$cached_issued_date" 2>/dev/null || true)"
       if [[ -n "$cached_epoch" ]]; then
         token_age_days=$(( (today_epoch - cached_epoch) / 86400 ))
       else
@@ -128,7 +128,7 @@ if [[ -z "${AUTOLOOP_CONSOLE_ADMIN_TOKEN:-}" ]]; then
       if command -v openssl >/dev/null 2>&1; then
         generated_admin_token="$(openssl rand -hex 24)"
       else
-        generated_admin_token="$(bun -e 'const bytes = crypto.getRandomValues(new Uint8Array(24)); console.log(Array.from(bytes, (n) => n.toString(16).padStart(2, "0")).join(""));')"
+        generated_admin_token="$(NO_COLOR=1 bun -e 'const bytes = crypto.getRandomValues(new Uint8Array(24)); console.log(Array.from(bytes, (n) => n.toString(16).padStart(2, "0")).join(""));')"
       fi
       mkdir -p "$RUN_DIR"
       printf "%s %s\n" "$today_utc" "$generated_admin_token" >"$TOKEN_CACHE_FILE"
@@ -138,7 +138,7 @@ if [[ -z "${AUTOLOOP_CONSOLE_ADMIN_TOKEN:-}" ]]; then
 
     export AUTOLOOP_CONSOLE_ADMIN_TOKEN="$generated_admin_token"
     export AUTOLOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE="$issued_date"
-    token_expiry_date="$(bun -e 'const d=new Date(process.argv[1]+"T00:00:00Z"); d.setUTCDate(d.getUTCDate()+7); console.log(Number.isNaN(d.getTime()) ? "" : d.toISOString().split("T")[0])' "$issued_date" 2>/dev/null || true)"
+    token_expiry_date="$(NO_COLOR=1 bun -e 'const d=new Date(process.argv[1]+"T00:00:00Z"); d.setUTCDate(d.getUTCDate()+7); console.log(Number.isNaN(d.getTime()) ? "" : d.toISOString().split("T")[0])' "$issued_date" 2>/dev/null || true)"
     if [[ -n "$token_expiry_date" ]]; then
       echo "This token is valid for 7 UTC days (expires on ${token_expiry_date} UTC)."
     else
