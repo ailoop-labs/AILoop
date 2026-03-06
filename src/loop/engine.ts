@@ -39,6 +39,7 @@ import {
 } from "./state";
 
 const INSUFFICIENT_EVIDENCE_PREFIX = "Insufficient evidence for key dimensions:";
+const MAX_CONSECUTIVE_EVALUATOR_FAILURES = 3;
 
 function extractMissingKeyDimensions(justification: string): string[] {
   const trimmed = justification.trim();
@@ -132,6 +133,10 @@ function buildEvaluatorReworkInstructions(
 function sanitizeReworkNote(value: string | undefined | null): string {
   const normalized = (value ?? "").replace(/\s+/g, " ").trim();
   return normalized.length > 200 ? `${normalized.slice(0, 197)}...` : normalized;
+}
+
+function buildEvaluatorFailureThresholdMessage(count: number, threshold: number): string {
+  return `Consecutive evaluator failures reached threshold (${count}/${threshold}). Pausing loop.`;
 }
 
 export class LoopEngine {
@@ -292,9 +297,20 @@ export class LoopEngine {
 
     try {
       await enforceBudgetBeforeAction("round.bootstrap");
+      const priorState = await readLoopState(this.paths);
+      if (priorState.consecutive_evaluator_failures >= MAX_CONSECUTIVE_EVALUATOR_FAILURES) {
+        const message = buildEvaluatorFailureThresholdMessage(
+          priorState.consecutive_evaluator_failures,
+          MAX_CONSECUTIVE_EVALUATOR_FAILURES
+        );
+        await log(message);
+        await setFlag(this.paths.pauseFlagPath);
+        await this.setState("paused", message);
+        return { success: false, errorMessage: message };
+      }
+
       const goal = await buildDeterministicGoal(process.cwd());
       const instructions = await drainInstructions(this.paths);
-      const priorState = await readLoopState(this.paths);
       const plannerPreviousToolResult = this.previousToolResult ?? priorState.previous_tool_result;
 
       await enforceBudgetBeforeAction("planner.plan");
@@ -550,7 +566,7 @@ export class LoopEngine {
       await writeLoopState(this.paths, {
         ...priorState,
         round,
-        state: nextFailureCount >= 3 ? "paused" : priorState.state,
+        state: nextFailureCount >= MAX_CONSECUTIVE_EVALUATOR_FAILURES ? "paused" : priorState.state,
         pid: process.pid,
         last_error: finalToolResult.error?.message ?? (evaluation.decision === "fail" ? evaluation.justification : null),
         consecutive_evaluator_failures: nextFailureCount,
@@ -561,7 +577,11 @@ export class LoopEngine {
         }
       });
 
-      if (nextFailureCount >= 3 || evaluation.decision === "fail" || finalToolResult.status === "failure") {
+      if (
+        nextFailureCount >= MAX_CONSECUTIVE_EVALUATOR_FAILURES ||
+        evaluation.decision === "fail" ||
+        finalToolResult.status === "failure"
+      ) {
         return {
           success: false,
           errorMessage: finalToolResult.error?.message ?? evaluation.justification
