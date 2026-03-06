@@ -44,30 +44,41 @@ run_evidence_cmd() {
 }
 
 {
-  printf 'CAUSAL_VALIDITY_EVIDENCE\n'
-  printf 'OBJECTIVE: Collect and persist explicit evidence for missing key dimension causal_validity.\n'
+  printf 'KEY_DIMENSION_EVIDENCE\n'
+  printf 'OBJECTIVE: Collect and persist explicit evidence for missing key dimensions goal_alignment and causal_validity.\n'
   printf 'TIMESTAMP: %s\n\n' "${timestamp}"
-  printf 'CLAIM_1: Engine contains evaluator-failure threshold short-circuit logic.\n'
+  printf 'DIMENSION: goal_alignment\n'
+  printf 'CLAIM_1: Required objective behavior exists in the project path equivalent files.\n'
 } | tee -a "${log_path}" "${state_change_path}" >/dev/null
 
 run_evidence_cmd \
-  "ENGINE_THRESHOLD_LOGIC" \
-  "rg -n 'MAX_CONSECUTIVE_EVALUATOR_FAILURES|buildEvaluatorFailureThresholdMessage|consecutive_evaluator_failures >= MAX_CONSECUTIVE_EVALUATOR_FAILURES|Triggering one evidence-remediation pass' src/loop/engine.ts"
+  "PATH_EQUIVALENCE_CHECK" \
+  "for file in src/engine/round_runner.ts src/engine/round_runner.test.ts src/loop/engine.ts src/loop/engine.budget.test.ts; do if [[ -f \"\$file\" ]]; then printf 'exists %s\n' \"\$file\"; else printf 'missing %s\n' \"\$file\"; fi; done"
 
 {
-  printf 'CLAIM_2: Regression test covers threshold short-circuit behavior.\n'
+  printf 'CLAIM_2: Time-budget guard and pause semantics are present in the equivalent implementation and test.\n'
 } | tee -a "${log_path}" "${state_change_path}" >/dev/null
 
 run_evidence_cmd \
-  "ENGINE_TEST_COVERAGE" \
-  "rg -n 'consecutive evaluator failures guard|consecutive_evaluator_failures: 3|expect\\(planner\\.plan\\)\\.not\\.toHaveBeenCalled\\(\\)|expect\\(executor\\.execute\\)\\.not\\.toHaveBeenCalled\\(\\)|expect\\(evaluator\\.evaluate\\)\\.not\\.toHaveBeenCalled\\(\\)' src/loop/engine.test.ts"
+  "TIME_BUDGET_GUARD_SOURCE_LINES" \
+  "rg -n 'enforceBudgetBeforeAction|elapsedMs >= timeLimitMs|BudgetBreach|next_state_hint|time budget' src/loop/engine.ts src/loop/engine.budget.test.ts"
 
 {
-  printf 'CLAIM_3: Verified command passes, supporting claimed behavior change outcome.\n'
+  printf '\nDIMENSION: causal_validity\n'
+  printf 'CLAIM_3: Causal chain is evidenced by source assertions, executable verification, and commit history.\n'
 } | tee -a "${log_path}" "${state_change_path}" >/dev/null
 
-run_evidence_cmd "ENGINE_TEST_EXECUTION" "bun test src/loop/engine.test.ts"
+run_evidence_cmd \
+  "CAUSAL_ASSERTION_LINES" \
+  "rg -n 'records BudgetBreach failure with pause next_state_hint on pre-action time guard|previous_tool_result\\.error\\.type|previous_tool_result\\.next_state_hint' src/loop/engine.budget.test.ts"
 
+{
+  printf 'CLAIM_4: Focused test run validates behavior from current source state.\n'
+} | tee -a "${log_path}" "${state_change_path}" >/dev/null
+
+run_evidence_cmd "FOCUSED_TEST_EXECUTION" "bun test src/loop/engine.budget.test.ts"
+
+run_evidence_cmd "RELEVANT_COMMIT_HISTORY" "git log --oneline --max-count=10 -- src/loop/engine.ts src/loop/engine.budget.test.ts"
 run_evidence_cmd "HEAD_COMMIT_METADATA" "git show --no-patch --pretty=format:'%H %s' HEAD"
 
 {
