@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../config/env";
 import type { ActionRecord, EvaluationResult, SubTask, ToolResult } from "../types/contracts";
-import { ensureLoopHome, readLoopState, type LoopPaths } from "./state";
+import { ensureLoopHome, readLoopState, type LoopPaths, writeLoopState } from "./state";
 import { LoopEngine, extractSnapshotTargetsFromSubTask, resolveNextLastError } from "./engine";
 
 function makeToolResult(summary: string): ToolResult {
@@ -194,6 +194,51 @@ describe("LoopEngine time budget guard", () => {
     const state = await readLoopState(paths);
     expect(state.state).toBe("paused");
     expect(state.last_error).toContain("BudgetBreach: time budget exceeded");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+});
+
+describe("LoopEngine round error handling", () => {
+  test("preserves seeded evaluator failure count on pre-evaluation execution errors", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-engine-round-error-test-"));
+    const config = loadConfig({
+      AUTOLOOP_HOME: homeDir
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+    const seededState = await readLoopState(paths);
+    await writeLoopState(paths, {
+      ...seededState,
+      consecutive_evaluator_failures: 2
+    });
+
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+    mutable.planner = {
+      plan: async () => {
+        // Simulate an intermediate state write before the round errors out.
+        const midRoundState = await readLoopState(paths);
+        await writeLoopState(paths, {
+          ...midRoundState,
+          consecutive_evaluator_failures: 9
+        });
+        throw new Error("planner exploded before execution");
+      }
+    };
+
+    const outcome = await mutable.runRound(1);
+    expect(outcome.success).toBe(false);
+    expect(outcome.errorMessage).toBe("planner exploded before execution");
+
+    const state = await readLoopState(paths);
+    expect(state.previous_tool_result?.status).toBe("failure");
+    expect(state.previous_tool_result?.error?.type).toBe("RoundExecutionError");
+    expect(state.previous_tool_result?.next_state_hint).toBe("continue");
+    expect(state.consecutive_evaluator_failures).toBe(2);
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
