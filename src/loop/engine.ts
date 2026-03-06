@@ -281,9 +281,6 @@ export class LoopEngine {
       }
     };
 
-    const preRoundState = await readLoopState(this.paths);
-    const preRoundEvaluatorFailureCount = preRoundState.consecutive_evaluator_failures;
-
     let subTask: SubTask = {
       rationale: "Round initialization",
       objective: "Initialize round context",
@@ -297,7 +294,7 @@ export class LoopEngine {
       await enforceBudgetBeforeAction("round.bootstrap");
       const goal = await buildDeterministicGoal(process.cwd());
       const instructions = await drainInstructions(this.paths);
-      const priorState = preRoundState;
+      const priorState = await readLoopState(this.paths);
       const plannerPreviousToolResult = this.previousToolResult ?? priorState.previous_tool_result;
 
       await enforceBudgetBeforeAction("planner.plan");
@@ -632,7 +629,7 @@ export class LoopEngine {
         state: nextState,
         pid: process.pid,
         last_error: message,
-        consecutive_evaluator_failures: preRoundEvaluatorFailureCount,
+        consecutive_evaluator_failures: current.consecutive_evaluator_failures,
         previous_tool_result: failureToolResult,
         current_budget: {
           limits: guardrails.limitsSnapshot(),

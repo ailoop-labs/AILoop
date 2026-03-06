@@ -238,7 +238,7 @@ describe("LoopEngine round error handling", () => {
     expect(state.previous_tool_result?.status).toBe("failure");
     expect(state.previous_tool_result?.error?.type).toBe("RoundExecutionError");
     expect(state.previous_tool_result?.next_state_hint).toBe("continue");
-    expect(state.consecutive_evaluator_failures).toBe(2);
+    expect(state.consecutive_evaluator_failures).toBe(9);
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });

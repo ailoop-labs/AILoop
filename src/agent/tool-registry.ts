@@ -26,11 +26,23 @@ function fail(message: string): ToolCallResult {
   return { ok: false, output: "", error: message };
 }
 
+import { SkillManager } from "./skills/manager";
+
 export class ToolRegistry {
   private readonly tools = new Map<string, Tool>();
+  private readonly skillManager: SkillManager;
 
-  constructor() {
+  constructor(workspaceRoot: string = process.cwd()) {
+    this.skillManager = new SkillManager(workspaceRoot);
     this.registerBuiltins();
+  }
+
+  async initialize(): Promise<void> {
+    await this.skillManager.initialize();
+  }
+
+  getSkillManager(): SkillManager {
+    return this.skillManager;
   }
 
   getTool(name: string): Tool | undefined {
@@ -55,6 +67,21 @@ export class ToolRegistry {
   }
 
   private registerBuiltins(): void {
+    this.register({
+      name: "activate_skill",
+      description: "Activates a specialized agent skill by name. Returns the skill's instructions wrapped in <activated_skill> tags. Use this when you identify a task that matches a skill's description. You only need to activate a skill once per session.",
+      costEstimate: () => 0,
+      execute: async (args: Record<string, unknown>) => {
+        try {
+          const name = toStringArg(args, "name");
+          const output = await this.skillManager.activateSkill(name);
+          return ok(`Skill '${name}' activated successfully.`, { output });
+        } catch (error) {
+          return fail((error as Error).message);
+        }
+      }
+    });
+
     this.register({
       name: "read_file",
       description: "Read a UTF-8 text file.",

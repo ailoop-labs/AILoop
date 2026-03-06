@@ -30,7 +30,7 @@ interface CodexExecutorResponse {
   actions: string[];
 }
 
-interface ExecutorPromptInput {
+export interface ExecutorPromptInput {
   round: number;
   goal: string;
   instructions: string[];
@@ -38,6 +38,7 @@ interface ExecutorPromptInput {
   autoloopHome: string;
   workspaceRoot: string;
   availableTools: Array<{ name: string; description: string }>;
+  availableSkills: Array<{ name: string; description: string }>;
 }
 
 const EXECUTOR_RESPONSE_SCHEMA: JsonSchema = {
@@ -126,6 +127,9 @@ export function buildExecutorPrompt(input: ExecutorPromptInput, executorRoleDefi
     "Available tool semantics for action log naming:",
     JSON.stringify(input.availableTools, null, 2),
     "",
+    "Available Expert Skills (use activate_skill to load):",
+    JSON.stringify(input.availableSkills, null, 2),
+    "",
     "Round input:",
     JSON.stringify(
       {
@@ -165,9 +169,14 @@ export class ExecutorAgent {
   }
 
   async execute(options: ExecuteOptions): Promise<ExecuteResult> {
+    await this.tools.initialize();
     const availableTools = this.tools.listTools().map((tool) => ({
       name: tool.name,
       description: tool.description
+    }));
+    const availableSkills = this.tools.getSkillManager().getAvailableSkills().map((skill) => ({
+      name: skill.name,
+      description: skill.description
     }));
     const executorRoleDefinition = await loadProjectRoleDefinition(this.homeDir, "executor");
     const prompt = buildExecutorPrompt(
@@ -178,7 +187,8 @@ export class ExecutorAgent {
         subTask: options.subTask,
         autoloopHome: options.paths.homeDir,
         workspaceRoot: process.cwd(),
-        availableTools
+        availableTools,
+        availableSkills
       },
       executorRoleDefinition
     );
