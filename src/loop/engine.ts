@@ -629,7 +629,7 @@ export class LoopEngine {
         state: nextState,
         pid: process.pid,
         last_error: message,
-        consecutive_evaluator_failures: current.consecutive_evaluator_failures + 1,
+        consecutive_evaluator_failures: current.consecutive_evaluator_failures,
         previous_tool_result: failureToolResult,
         current_budget: {
           limits: guardrails.limitsSnapshot(),

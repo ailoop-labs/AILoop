@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../config/env";
 import type { SubTask } from "../types/contracts";
 import { LoopEngine } from "./engine";
-import { ensureLoopHome, readLoopState, type LoopPaths } from "./state";
+import { ensureLoopHome, readLoopState, type LoopPaths, writeLoopState } from "./state";
 
 describe("LoopEngine budget guard", () => {
   test("fails before planner execution when time budget is already exceeded", async () => {
@@ -88,6 +88,11 @@ describe("LoopEngine budget guard", () => {
     const engine = new LoopEngine(config);
     const paths = (engine as unknown as { paths: LoopPaths }).paths;
     await ensureLoopHome(paths);
+    const seededState = await readLoopState(paths);
+    await writeLoopState(paths, {
+      ...seededState,
+      consecutive_evaluator_failures: 2
+    });
 
     const mutable = engine as unknown as {
       planner: { plan: () => Promise<SubTask> };
@@ -119,6 +124,7 @@ describe("LoopEngine budget guard", () => {
     expect(state.previous_tool_result?.status).toBe("failure");
     expect(state.previous_tool_result?.error?.type).toBe("BudgetBreach");
     expect(state.previous_tool_result?.next_state_hint).toBe("pause");
+    expect(state.consecutive_evaluator_failures).toBe(2);
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
