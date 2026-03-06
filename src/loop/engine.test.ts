@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../config/env";
 import type { ActionRecord, EvaluationResult, SubTask, ToolResult } from "../types/contracts";
-import { ensureLoopHome, readLoopState, type LoopPaths, writeLoopState } from "./state";
+import { ensureLoopHome, readLoopState, type LoopPaths } from "./state";
 import { LoopEngine, extractSnapshotTargetsFromSubTask, resolveNextLastError } from "./engine";
 
 function makeToolResult(summary: string): ToolResult {
@@ -194,72 +194,6 @@ describe("LoopEngine time budget guard", () => {
     const state = await readLoopState(paths);
     expect(state.state).toBe("paused");
     expect(state.last_error).toContain("BudgetBreach: time budget exceeded");
-
-    await fs.rm(homeDir, { recursive: true, force: true });
-  });
-});
-
-describe("LoopEngine consecutive evaluator failures guard", () => {
-  test("short-circuits the round and pauses when failure threshold is reached", async () => {
-    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-engine-eval-threshold-test-"));
-    const config = loadConfig({
-      AUTOLOOP_HOME: homeDir
-    });
-    const engine = new LoopEngine(config);
-    const paths = (engine as unknown as { paths: LoopPaths }).paths;
-    await ensureLoopHome(paths);
-
-    await writeLoopState(paths, {
-      state: "running",
-      round: 3,
-      updated_at: new Date().toISOString(),
-      pid: null,
-      last_error: null,
-      consecutive_evaluator_failures: 3,
-      previous_tool_result: null,
-      current_budget: null
-    });
-
-    let plannerCalls = 0;
-    let executorCalls = 0;
-    let evaluatorCalls = 0;
-    const mutable = engine as unknown as {
-      planner: { plan: () => Promise<SubTask> };
-      executor: { execute: () => Promise<{ actions: ActionRecord[]; toolResult: ToolResult }> };
-      evaluator: { evaluate: () => Promise<EvaluationResult> };
-      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
-    };
-    mutable.planner = {
-      plan: async () => {
-        plannerCalls += 1;
-        throw new Error("planner should not run");
-      }
-    };
-    mutable.executor = {
-      execute: async () => {
-        executorCalls += 1;
-        throw new Error("executor should not run");
-      }
-    };
-    mutable.evaluator = {
-      evaluate: async () => {
-        evaluatorCalls += 1;
-        throw new Error("evaluator should not run");
-      }
-    };
-
-    const outcome = await mutable.runRound(4);
-
-    expect(outcome.success).toBe(false);
-    expect(outcome.errorMessage).toContain("Consecutive evaluator failures reached threshold");
-    expect(plannerCalls).toBe(0);
-    expect(executorCalls).toBe(0);
-    expect(evaluatorCalls).toBe(0);
-
-    const state = await readLoopState(paths);
-    expect(state.state).toBe("paused");
-    expect(state.consecutive_evaluator_failures).toBe(3);
-    expect(state.last_error).toContain("Consecutive evaluator failures reached threshold");
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });

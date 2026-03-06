@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../config/env";
 import type { SubTask } from "../types/contracts";
 import { LoopEngine } from "./engine";
-import { ensureLoopHome, type LoopPaths } from "./state";
+import { ensureLoopHome, readLoopState, type LoopPaths } from "./state";
 
 describe("LoopEngine budget guard", () => {
   test("fails before planner execution when time budget is already exceeded", async () => {
@@ -75,6 +75,50 @@ describe("LoopEngine budget guard", () => {
 
     const summaryText = await fs.readFile(path.join(homeDir, "runs", summaryFile as string), "utf8");
     expect(summaryText).toContain("BudgetBreach: time budget exceeded");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("records BudgetBreach failure with pause next_state_hint on pre-action time guard", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-engine-budget-hint-test-"));
+    const config = loadConfig({
+      AUTOLOOP_HOME: homeDir,
+      AUTOLOOP_BUDGET_TIME_MINUTES: "-1"
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      executor: { execute: () => Promise<unknown> };
+      evaluator: { evaluate: () => Promise<unknown> };
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+    mutable.planner = {
+      plan: async () => {
+        throw new Error("planner should not run");
+      }
+    };
+    mutable.executor = {
+      execute: async () => {
+        throw new Error("executor should not run");
+      }
+    };
+    mutable.evaluator = {
+      evaluate: async () => {
+        throw new Error("evaluator should not run");
+      }
+    };
+
+    const outcome = await mutable.runRound(1);
+    expect(outcome.success).toBe(false);
+    expect(outcome.errorMessage).toBe("BudgetBreach: time budget exceeded");
+
+    const state = await readLoopState(paths);
+    expect(state.previous_tool_result?.status).toBe("failure");
+    expect(state.previous_tool_result?.error?.type).toBe("BudgetBreach");
+    expect(state.previous_tool_result?.next_state_hint).toBe("pause");
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
