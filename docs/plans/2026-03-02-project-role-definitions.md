@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add project-scoped AI-generated role definition files under `.autoloop/` and load them into Planner/Executor/Evaluator prompts.
+**Goal:** Add project-scoped AI-generated role definition files under `.ailoop/` and load them into Planner/Executor/Evaluator prompts.
 
 **Architecture:** Introduce a dedicated role-definition manager that ensures role docs exist (generate on missing, fallback to deterministic templates) and expose this via startup hooks and CLI command. Prompt builders in each role agent read their corresponding role file and prepend it as project-specific guidance while preserving existing hard constraints and output schemas.
 
@@ -47,7 +47,7 @@ Expected: still FAIL with missing implementation symbols.
 - Modify: `src/agent/planner.test.ts`
 - Create: `src/agent/executor.test.ts`
 - Modify: `src/evaluation/strategies/llm-judge.test.ts`
-- Modify: `scripts/autoloop.ts` tests if available, else create focused command parser test around new handler
+- Modify: `scripts/ailoop.ts` tests if available, else create focused command parser test around new handler
 
 **Step 1: Add failing planner/executor/evaluator prompt tests**
 
@@ -83,7 +83,7 @@ export async function ensureRoleDefinitions(options: EnsureRoleDefinitionsOption
 Behavior:
 - if `regen=false`, only generate missing files
 - if `regen=true`, regenerate all three
-- generation input from `.autoloop/goal.md` + workspace `README.md`
+- generation input from `.ailoop/goal.md` + workspace `README.md`
 - on generation failure, write deterministic templates
 
 **Step 2: Add role paths to LoopPaths**
@@ -92,7 +92,7 @@ Behavior:
 plannerRolePath: path.join(homeDir, "PLANNER_ROLE.md")
 ```
 
-**Step 3: Ensure `.autoloop` baseline remains idempotent**
+**Step 3: Ensure `.ailoop` baseline remains idempotent**
 
 Run: `bun test src/loop/state.test.ts src/agent/role-definitions.test.ts`
 Expected: PASS.
@@ -104,7 +104,7 @@ Expected: PASS.
 - Modify: `src/agent/executor.ts`
 - Modify: `src/evaluation/strategies/llm-judge.ts`
 - Modify: `src/loop/control.ts`
-- Modify: `scripts/autoloop.ts`
+- Modify: `scripts/ailoop.ts`
 
 **Step 1: Prepend role content in prompts**
 
@@ -134,7 +134,7 @@ Expected: PASS.
 
 **Step 1: Document role files and commands**
 
-- `.autoloop/PLANNER_ROLE.md`, `.autoloop/EXECUTOR_ROLE.md`, `.autoloop/EVALUATOR_ROLE.md`
+- `.ailoop/PLANNER_ROLE.md`, `.ailoop/EXECUTOR_ROLE.md`, `.ailoop/EVALUATOR_ROLE.md`
 - auto-generation behavior and `--regen`
 
 **Step 2: Run full checks**

@@ -6,10 +6,10 @@ import { buildLoopPaths, defaultLoopState, ensureLoopHome, readLoopState, writeL
 
 describe("loop state persistence", () => {
   test("buildLoopPaths includes project role definition paths", () => {
-    const paths = buildLoopPaths("/tmp/autoloop-home");
-    expect(paths.plannerRolePath).toBe("/tmp/autoloop-home/PLANNER_ROLE.md");
-    expect(paths.executorRolePath).toBe("/tmp/autoloop-home/EXECUTOR_ROLE.md");
-    expect(paths.evaluatorRolePath).toBe("/tmp/autoloop-home/EVALUATOR_ROLE.md");
+    const paths = buildLoopPaths("/tmp/ailoop-home");
+    expect(paths.plannerRolePath).toBe("/tmp/ailoop-home/PLANNER_ROLE.md");
+    expect(paths.executorRolePath).toBe("/tmp/ailoop-home/EXECUTOR_ROLE.md");
+    expect(paths.evaluatorRolePath).toBe("/tmp/ailoop-home/EVALUATOR_ROLE.md");
   });
 
   test("defaultLoopState initializes previous_tool_result", () => {
@@ -18,7 +18,7 @@ describe("loop state persistence", () => {
   });
 
   test("readLoopState normalizes missing optional fields", async () => {
-    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-state-test-"));
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-state-test-"));
     const paths = buildLoopPaths(homeDir);
 
     await fs.mkdir(homeDir, { recursive: true });
@@ -47,7 +47,7 @@ describe("loop state persistence", () => {
   });
 
   test("writeLoopState keeps persisted previous_tool_result", async () => {
-    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-state-write-test-"));
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-state-write-test-"));
     const paths = buildLoopPaths(homeDir);
 
     const state = defaultLoopState();
@@ -70,7 +70,7 @@ describe("loop state persistence", () => {
   });
 
   test("ensureLoopHome heals instructions.json when it is a directory", async () => {
-    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-state-heal-instructions-"));
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-state-heal-instructions-"));
     const paths = buildLoopPaths(homeDir);
 
     await fs.mkdir(paths.instructionsPath, { recursive: true });

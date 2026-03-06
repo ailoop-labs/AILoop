@@ -47,8 +47,8 @@ function makeConfig(homeDir: string): AppConfig {
 
 describe("ensureProjectRoleDefinitions", () => {
   test("creates missing role files from AI output", async () => {
-    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-role-defs-create-"));
-    const homeDir = path.join(workspaceRoot, ".autoloop");
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-role-defs-create-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
     await fs.writeFile(path.join(workspaceRoot, "README.md"), "# Project README\n\nBuild CLI tooling.\n", "utf8");
 
     let calls = 0;
@@ -84,8 +84,8 @@ describe("ensureProjectRoleDefinitions", () => {
   });
 
   test("does not overwrite existing role files when regen=false", async () => {
-    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-role-defs-no-overwrite-"));
-    const homeDir = path.join(workspaceRoot, ".autoloop");
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-role-defs-no-overwrite-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
     await fs.mkdir(homeDir, { recursive: true });
     await fs.writeFile(path.join(homeDir, "PLANNER_ROLE.md"), "# Planner Role\n\nEXISTING", "utf8");
     await fs.writeFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "# Executor Role\n\nEXISTING", "utf8");
@@ -118,8 +118,8 @@ describe("ensureProjectRoleDefinitions", () => {
   });
 
   test("overwrites role files when regen=true", async () => {
-    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-role-defs-regen-"));
-    const homeDir = path.join(workspaceRoot, ".autoloop");
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-role-defs-regen-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
     await fs.mkdir(homeDir, { recursive: true });
     await fs.writeFile(path.join(homeDir, "PLANNER_ROLE.md"), "# Planner Role\n\nOLD", "utf8");
     await fs.writeFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "# Executor Role\n\nOLD", "utf8");
@@ -155,8 +155,8 @@ describe("ensureProjectRoleDefinitions", () => {
   });
 
   test("falls back to deterministic templates when AI generation fails", async () => {
-    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-role-defs-fallback-"));
-    const homeDir = path.join(workspaceRoot, ".autoloop");
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-role-defs-fallback-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
 
     const mockCodex = {
       async runJson<T>() {

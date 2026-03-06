@@ -1,8 +1,8 @@
-# AutoLoop Agent Specification (AGENTS.md)
+# AILoop Agent Specification (AGENTS.md)
 
-This document defines the cognitive boundaries, prompt engineering guidelines, and required behaviors for the intelligent agents within the AutoLoop system.
+This document defines the cognitive boundaries, prompt engineering guidelines, and required behaviors for the intelligent agents within the AILoop system.
 
-AutoLoop relies on two primary agents to form its autonomous loop:
+AILoop relies on two primary agents to form its autonomous loop:
 1. **The Planner (`src/agent/planner.ts`):** High-level strategy and sub-task definition.
 2. **The Executor (`src/agent/executor.ts`):** Low-level action execution and tool usage.
 
@@ -22,7 +22,7 @@ If conflicts occur, use this precedence order:
 
 ### 0.1 Project-Scoped Role Definitions
 
-Role behavior is project-scoped via editable files in `.autoloop/`:
+Role behavior is project-scoped via editable files in `.ailoop/`:
 - `PLANNER_ROLE.md`
 - `EXECUTOR_ROLE.md`
 - `EVALUATOR_ROLE.md`
@@ -149,8 +149,8 @@ At the end of each round, the Executor must return a machine-readable result:
   "status": "success | failure",
   "summary": "Short factual statement of what was attempted.",
   "artifacts": {
-    "state_change_path": ".autoloop/runs/<timestamp>.round.state_change.txt",
-    "log_path": ".autoloop/runs/<timestamp>.round.log"
+    "state_change_path": ".ailoop/runs/<timestamp>.round.state_change.txt",
+    "log_path": ".ailoop/runs/<timestamp>.round.log"
   },
   "error": {
     "type": "optional_error_type",
@@ -180,7 +180,7 @@ These are mandatory across all agents:
 - Evaluator returns explicit `Pass` or `Fail`, never ambiguous wording.
 
 ### 5.4 Artifact Naming & Location
-Round artifacts should follow the `.autoloop/runs/` convention:
+Round artifacts should follow the `.ailoop/runs/` convention:
 - `<timestamp>.round.log`
 - `<timestamp>.round.summary.md`
 - `<timestamp>.round.metrics.json`

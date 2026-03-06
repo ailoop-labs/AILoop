@@ -10,13 +10,13 @@
     "subject": "Expand evidence script for goal alignment and causality"
   },
   "artifacts": {
-    "log_path": ".autoloop/runs/2026-03-06T06-34-20-3NZ.round.log",
-    "state_change_path": ".autoloop/runs/2026-03-06T06-34-20-3NZ.round.state_change.txt",
+    "log_path": ".ailoop/runs/2026-03-06T06-34-20-3NZ.round.log",
+    "state_change_path": ".ailoop/runs/2026-03-06T06-34-20-3NZ.round.state_change.txt",
     "tracked_evidence_path": "docs/evidence/2026-03-06T06-34-20-3NZ.key-dimensions.json"
   },
   "hashes_sha256": {
-    ".autoloop/runs/2026-03-06T06-34-20-3NZ.round.log": "260b1aa31ff61d33a7cf390972b479526be975f6dfc73c015dda35901208c0dd",
-    ".autoloop/runs/2026-03-06T06-34-20-3NZ.round.state_change.txt": "260b1aa31ff61d33a7cf390972b479526be975f6dfc73c015dda35901208c0dd",
+    ".ailoop/runs/2026-03-06T06-34-20-3NZ.round.log": "260b1aa31ff61d33a7cf390972b479526be975f6dfc73c015dda35901208c0dd",
+    ".ailoop/runs/2026-03-06T06-34-20-3NZ.round.state_change.txt": "260b1aa31ff61d33a7cf390972b479526be975f6dfc73c015dda35901208c0dd",
     "src/loop/engine.ts": "eac2326dea16b661638ee43f8e0bde56918e93089ade170758f53c1080758a1a",
     "src/loop/engine.budget.test.ts": "e70f848b154d6d1f4eb7cbaa72f3b8887d2ef43be08479ce577e00d3f0a06cc3",
     "scripts/collect-causal-validity-evidence.sh": "4aa284972dd26d52571329d13ef17ba8e36f84295611a640c48dcfe9162f7ee4"

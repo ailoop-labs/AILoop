@@ -35,7 +35,7 @@ export interface ExecutorPromptInput {
   goal: string;
   instructions: string[];
   subTask: SubTask;
-  autoloopHome: string;
+  ailoopHome: string;
   workspaceRoot: string;
   availableTools: Array<{ name: string; description: string }>;
   availableSkills: Array<{ name: string; description: string }>;
@@ -99,7 +99,7 @@ function emitLog(options: ExecuteOptions, message: string): void {
 
 export function buildExecutorPrompt(input: ExecutorPromptInput, executorRoleDefinition: string): string {
   return [
-    "You are the AutoLoop Executor agent.",
+    "You are the AILoop Executor agent.",
     "Project-specific Executor Role Definition:",
     executorRoleDefinition.trim(),
     "",
@@ -137,7 +137,7 @@ export function buildExecutorPrompt(input: ExecutorPromptInput, executorRoleDefi
         goal: input.goal,
         instructions: input.instructions,
         subTask: input.subTask,
-        autoloopHome: input.autoloopHome,
+        ailoopHome: input.ailoopHome,
         workspaceRoot: input.workspaceRoot
       },
       null,
@@ -185,7 +185,7 @@ export class ExecutorAgent {
         goal: options.goal,
         instructions: options.instructions,
         subTask: options.subTask,
-        autoloopHome: options.paths.homeDir,
+        ailoopHome: options.paths.homeDir,
         workspaceRoot: process.cwd(),
         availableTools,
         availableSkills

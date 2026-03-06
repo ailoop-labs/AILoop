@@ -19,8 +19,8 @@ function makeSummaryInput(autoReworkAttempts: string[]): SummaryInput {
       status: "success",
       summary: "done",
       artifacts: {
-        state_change_path: ".autoloop/runs/example.round.state_change.txt",
-        log_path: ".autoloop/runs/example.round.log"
+        state_change_path: ".ailoop/runs/example.round.state_change.txt",
+        log_path: ".ailoop/runs/example.round.log"
       },
       error: null,
       next_state_hint: "continue"
@@ -55,7 +55,7 @@ function makeSummaryInput(autoReworkAttempts: string[]): SummaryInput {
 
 describe("writeSummaryFile auto rework section", () => {
   test("renders attempt details when auto rework was executed", async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-summary-test-"));
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-summary-test-"));
     const summaryPath = path.join(dir, "round.summary.md");
     await writeSummaryFile(summaryPath, makeSummaryInput(["Attempt 1/2: evaluation=fail", "Attempt 2/2: evaluation=pass"]));
     const text = await fs.readFile(summaryPath, "utf8");
@@ -68,7 +68,7 @@ describe("writeSummaryFile auto rework section", () => {
   });
 
   test("renders explicit none message when no auto rework happened", async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-summary-test-"));
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-summary-test-"));
     const summaryPath = path.join(dir, "round.summary.md");
     await writeSummaryFile(summaryPath, makeSummaryInput([]));
     const text = await fs.readFile(summaryPath, "utf8");

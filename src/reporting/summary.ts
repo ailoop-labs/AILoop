@@ -46,7 +46,7 @@ export async function writeSummaryFile(summaryPath: string, input: SummaryInput)
   const uniqueTools = Array.from(new Set(toolsUsed));
 
   const markdown = [
-    "# AutoLoop Round Summary",
+    "# AILoop Round Summary",
     "",
     "## Goal Alignment",
     input.goal.trim() || "Goal was empty.",

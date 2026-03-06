@@ -1,7 +1,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-const FALLBACK_GOAL_TEXT = "No goal configured in .autoloop/README.md";
+const FALLBACK_GOAL_TEXT = "No goal configured in .ailoop/README.md";
 
 interface GoalMarkdownProps {
   goal: string;

@@ -28,8 +28,8 @@ function makeRoundContext(): RoundEvaluationContext {
       status: "success",
       summary: "updated workspace snapshot",
       artifacts: {
-        state_change_path: ".autoloop/runs/example.round.state_change.txt",
-        log_path: ".autoloop/runs/example.round.log"
+        state_change_path: ".ailoop/runs/example.round.state_change.txt",
+        log_path: ".ailoop/runs/example.round.log"
       },
       error: null,
       next_state_hint: "continue"
@@ -52,7 +52,7 @@ function makeRoundContext(): RoundEvaluationContext {
 
 function makeLlmConfig(dimensions: AppConfig["codex"]["llmEvaluatorDimensions"] = ["goal_alignment"]): AppConfig {
   return {
-    homeDir: "/tmp/autoloop-test",
+    homeDir: "/tmp/ailoop-test",
     intervalSeconds: 1,
     maxCycles: 1,
     exitOnError: false,

@@ -22,7 +22,7 @@ export async function buildDeterministicGoal(workspaceRoot: string = process.cwd
   if (readmeMd.trim()) {
     return `# Project Goal (Derived from README.md)\n\n${readmeMd}`;
   }
-  return "# AutoLoop Goal\n\nDescribe the top-level goal this autonomous loop should pursue. Keep it outcome-focused and measurable.\n";
+  return "# AILoop Goal\n\nDescribe the top-level goal this autonomous loop should pursue. Keep it outcome-focused and measurable.\n";
 }
 
 import {
@@ -125,7 +125,7 @@ export async function startBackgroundLoop(config: AppConfig): Promise<{ started:
   await prepareStartFlags(paths);
   const runtimeConfig = await readRuntimeLoopConfig(config);
   const runtimeEnv = runtimeLoopConfigToEnv(runtimeConfig);
-  const child = spawn("bun", ["run", "scripts/autoloop.ts", "run"], {
+  const child = spawn("bun", ["run", "scripts/ailoop.ts", "run"], {
     cwd: process.cwd(),
     detached: true,
     stdio: "ignore",

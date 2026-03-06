@@ -33,8 +33,8 @@ function createLoopPaths(homeDir: string): LoopPaths {
 
 describe("WorkspaceManager.buildStateChange", () => {
   test("reports only round delta instead of pre-existing dirty changes", async () => {
-    const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-workspace-test-"));
-    const homeDir = path.join(repoDir, ".autoloop");
+    const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-workspace-test-"));
+    const homeDir = path.join(repoDir, ".ailoop");
     const paths = createLoopPaths(homeDir);
     await fs.mkdir(paths.homeDir, { recursive: true });
     await fs.mkdir(paths.runsDir, { recursive: true });
@@ -45,7 +45,7 @@ describe("WorkspaceManager.buildStateChange", () => {
 
     await fs.writeFile(path.join(repoDir, "existing.txt"), "base\n", "utf8");
     await fs.writeFile(paths.taskPath, "# task\n", "utf8");
-    run("git add existing.txt .autoloop/task.md", repoDir);
+    run("git add existing.txt .ailoop/task.md", repoDir);
     run("git commit -m 'init'", repoDir);
 
     await fs.writeFile(path.join(repoDir, "existing.txt"), "base\nold-dirty-change\n", "utf8");
@@ -63,9 +63,9 @@ describe("WorkspaceManager.buildStateChange", () => {
     await fs.rm(repoDir, { recursive: true, force: true });
   });
 
-  test("captures diff for explicitly tracked .autoloop target files", async () => {
-    const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-workspace-target-test-"));
-    const homeDir = path.join(repoDir, ".autoloop");
+  test("captures diff for explicitly tracked .ailoop target files", async () => {
+    const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-workspace-target-test-"));
+    const homeDir = path.join(repoDir, ".ailoop");
     const paths = createLoopPaths(homeDir);
     await fs.mkdir(paths.homeDir, { recursive: true });
     await fs.mkdir(paths.runsDir, { recursive: true });
@@ -74,8 +74,8 @@ describe("WorkspaceManager.buildStateChange", () => {
     run("git init", repoDir);
     run("git config user.email test@example.com", repoDir);
     run("git config user.name tester", repoDir);
-    await fs.writeFile(path.join(repoDir, ".gitignore"), ".autoloop/*\n!.autoloop/task.md\n", "utf8");
-    run("git add .autoloop/task.md", repoDir);
+    await fs.writeFile(path.join(repoDir, ".gitignore"), ".ailoop/*\n!.ailoop/task.md\n", "utf8");
+    run("git add .ailoop/task.md", repoDir);
     run("git add .gitignore", repoDir);
     run("git commit -m 'init'", repoDir);
 
@@ -87,15 +87,15 @@ describe("WorkspaceManager.buildStateChange", () => {
     await fs.writeFile(targetPath, "# created in round\n", "utf8");
 
     const stateChange = await manager.buildStateChange(snapshot);
-    expect(stateChange).toContain(".autoloop/plans/round-x.md");
+    expect(stateChange).toContain(".ailoop/plans/round-x.md");
     expect(stateChange).toContain("+# created in round");
 
     await fs.rm(repoDir, { recursive: true, force: true });
   });
 
   test("rollback removes files that did not exist before snapshot", async () => {
-    const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-workspace-rollback-test-"));
-    const homeDir = path.join(repoDir, ".autoloop");
+    const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-workspace-rollback-test-"));
+    const homeDir = path.join(repoDir, ".ailoop");
     const paths = createLoopPaths(homeDir);
     await fs.mkdir(paths.homeDir, { recursive: true });
     await fs.mkdir(paths.runsDir, { recursive: true });
@@ -104,8 +104,8 @@ describe("WorkspaceManager.buildStateChange", () => {
     run("git init", repoDir);
     run("git config user.email test@example.com", repoDir);
     run("git config user.name tester", repoDir);
-    await fs.writeFile(path.join(repoDir, ".gitignore"), ".autoloop/*\n!.autoloop/task.md\n", "utf8");
-    run("git add .autoloop/task.md", repoDir);
+    await fs.writeFile(path.join(repoDir, ".gitignore"), ".ailoop/*\n!.ailoop/task.md\n", "utf8");
+    run("git add .ailoop/task.md", repoDir);
     run("git add .gitignore", repoDir);
     run("git commit -m 'init'", repoDir);
 

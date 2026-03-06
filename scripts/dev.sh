@@ -33,7 +33,7 @@ SERVER_PID=$!
 bun run web:dev &
 WEB_PID=$!
 
-echo "AutoLoop Dev is running."
+echo "AILoop Dev is running."
 echo "Web Console: http://127.0.0.1:5173"
 echo "API Server:  http://127.0.0.1:3090"
 echo "Use the web console for start/pause/resume/stop and parameter settings."

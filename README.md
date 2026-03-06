@@ -1,6 +1,6 @@
-# AutoLoop
+# AILoop
 
-AutoLoop is an open-source, goal-driven autonomous agent framework designed to execute generalized task loops for engineering, operations, and knowledge work.
+AILoop is an open-source, goal-driven autonomous agent framework designed to execute generalized task loops for engineering, operations, and knowledge work.
 It repeatedly plans, executes, evaluates, and summarizes tasks until a target outcome is reached.
 
 This repository currently contains only this README as a source-of-truth specification.
@@ -8,7 +8,7 @@ Use this document to regenerate the full codebase with AI.
 
 ## 1. Product Intent
 
-AutoLoop solves this problem:
+AILoop solves this problem:
 - A person or team has a clear, ongoing objective.
 - The user wants an autonomous loop that makes useful progress in small, measurable, and safe rounds.
 - Every round must be observable, controllable, and bounded by strict resource budgets.

@@ -24,7 +24,7 @@ describe("buildAdaptivePlannerDirectives", () => {
     const directives = buildAdaptivePlannerDirectives(
       createContext({
         consecutive_evaluator_failures: 3,
-        previous_round_error: "No observable file creation or content diff for `.autoloop/plans/round-5-core-loop-baseline.md`."
+        previous_round_error: "No observable file creation or content diff for `.ailoop/plans/round-5-core-loop-baseline.md`."
       })
     );
 

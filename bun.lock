@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "autoloop",
+      "name": "ailoop",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5.9.2",

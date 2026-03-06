@@ -4,8 +4,8 @@
   "generated_at_utc": "2026-03-06T06:32:26Z",
   "generator_command": "bash scripts/collect-causal-validity-evidence.sh",
   "artifacts": {
-    "log_path": ".autoloop/runs/2026-03-06T06-32-26-3NZ.round.log",
-    "state_change_path": ".autoloop/runs/2026-03-06T06-32-26-3NZ.round.state_change.txt"
+    "log_path": ".ailoop/runs/2026-03-06T06-32-26-3NZ.round.log",
+    "state_change_path": ".ailoop/runs/2026-03-06T06-32-26-3NZ.round.state_change.txt"
   },
   "dimensions": {
     "goal_alignment": {

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 workspace_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-runs_dir="${workspace_root}/.autoloop/runs"
+runs_dir="${workspace_root}/.ailoop/runs"
 
 if [[ $# -ge 1 && -n "${1}" ]]; then
   timestamp="$1"

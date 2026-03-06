@@ -54,7 +54,7 @@ export function buildPlannerPrompt(
   plannerRoleDefinition: string
 ): string {
   return [
-    "You are the AutoLoop Planner agent.",
+    "You are the AILoop Planner agent.",
     "Project-specific Planner Role Definition:",
     plannerRoleDefinition.trim(),
     "",
@@ -98,7 +98,7 @@ function fallbackPlan(context: PlannerContext): SubTask {
   if (!goal) {
     return {
       rationale: "Missing required context: README.md is empty, so the safest next action is clarification.",
-      objective: "Request clarification from the operator to populate .autoloop/README.md before continuing execution.",
+      objective: "Request clarification from the operator to populate .ailoop/README.md before continuing execution.",
       expected_outcome: "A human instruction is queued with concrete goal details.",
       recommended_tools: ["read_file"]
     };

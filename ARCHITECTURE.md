@@ -1,8 +1,8 @@
-# AutoLoop Architecture Design Document
+# AILoop Architecture Design Document
 
 ## 1. System Overview
 
-AutoLoop is designed as a generalized, autonomous task loop framework. It is intended to repeatedly execute tasks (Rounds) towards a defined overarching goal. Goals are domain-agnostic and defined by the user. To achieve "generalized work," the system is strictly decoupled: the core Engine knows nothing about *what* work is being done; it only knows how to schedule, budget, plan, execute, evaluate, and rollback rounds based on abstracted plugins (Tools and Evaluators).
+AILoop is designed as a generalized, autonomous task loop framework. It is intended to repeatedly execute tasks (Rounds) towards a defined overarching goal. Goals are domain-agnostic and defined by the user. To achieve "generalized work," the system is strictly decoupled: the core Engine knows nothing about *what* work is being done; it only knows how to schedule, budget, plan, execute, evaluate, and rollback rounds based on abstracted plugins (Tools and Evaluators).
 
 ### Core Philosophy
 - **Extensibility via Interfaces:** Tools, Evaluators, and Workspaces must implement strict, typed interfaces.
@@ -146,7 +146,7 @@ stateDiagram-v2
 ```
 
 ### 4.2 Data Persistence (Artifacts)
-All state is file-based (MVP) under `AUTOLOOP_HOME` (default `.autoloop/`).
+All state is file-based (MVP) under `AUTOLOOP_HOME` (default `.ailoop/`).
 - `loop.lock`: PID and current state.
 - `runs/`: Directory for historical data.
   - `[timestamp].round.log`: Raw execution logs (with silent secret redaction).
@@ -158,7 +158,7 @@ All state is file-based (MVP) under `AUTOLOOP_HOME` (default `.autoloop/`).
 
 ## 5. Security & Isolation Strategy
 
-Rather than trying to build a perfect sandbox, AutoLoop relies on **Recoverability and Redaction**:
+Rather than trying to build a perfect sandbox, AILoop relies on **Recoverability and Redaction**:
 1. **Secret Redaction (Logging level):** A custom logger middleware scans all outgoing text (Logs, Summaries, Console stdout) against a list of known secrets (loaded from `.env`) and replaces them with `[REDACTED]`. The Agent still has the actual strings in memory to make API calls, but they never leak to disk.
 2. **The "Undo" Button (Workspace level):** No round is permanent until evaluated. The `WorkspaceManager` ensures that whatever the Agent does (modifying files, changing DB schemas in a staging environment) is wrapped in a transactional or snapshot context.
 
@@ -166,7 +166,7 @@ Rather than trying to build a perfect sandbox, AutoLoop relies on **Recoverabili
 
 ## 6. Extensibility Guide (For Future Developers)
 
-To add new capabilities to AutoLoop, developers will primarily interact with two interfaces:
+To add new capabilities to AILoop, developers will primarily interact with two interfaces:
 
 **1. Adding a New Tool (e.g., Browser Automation):**
 Implement the `Tool` interface. Register it in the `ToolRegistry` during Engine boot. The Executor will automatically expose its schema to the LLM.

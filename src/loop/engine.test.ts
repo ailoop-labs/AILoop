@@ -43,15 +43,15 @@ describe("extractSnapshotTargetsFromSubTask", () => {
     const workspaceRoot = "/tmp/workspace";
     const subTask: SubTask = {
       rationale: "test",
-      objective: "Create `.autoloop/plans/round-7.md` with checklist.",
-      expected_outcome: "File `src/loop/engine.ts` updated and `.autoloop/runs/report.txt` written.",
+      objective: "Create `.ailoop/plans/round-7.md` with checklist.",
+      expected_outcome: "File `src/loop/engine.ts` updated and `.ailoop/runs/report.txt` written.",
       recommended_tools: ["write_file"]
     };
 
     const targets = extractSnapshotTargetsFromSubTask(subTask, workspaceRoot);
-    expect(targets).toContain(path.join(workspaceRoot, ".autoloop/plans/round-7.md"));
+    expect(targets).toContain(path.join(workspaceRoot, ".ailoop/plans/round-7.md"));
     expect(targets).toContain(path.join(workspaceRoot, "src/loop/engine.ts"));
-    expect(targets).toContain(path.join(workspaceRoot, ".autoloop/runs/report.txt"));
+    expect(targets).toContain(path.join(workspaceRoot, ".ailoop/runs/report.txt"));
   });
 });
 
@@ -71,7 +71,7 @@ describe("resolveNextLastError", () => {
 
 describe("LoopEngine auto rework", () => {
   test("retries once after evaluator fail by feeding failure reason back to executor", async () => {
-    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-engine-rework-test-"));
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-rework-test-"));
     const config = loadConfig({
       AUTOLOOP_HOME: homeDir,
       AUTOLOOP_EVAL_REWORK_MAX_ATTEMPTS: "1"
@@ -143,7 +143,7 @@ describe("LoopEngine auto rework", () => {
 
 describe("LoopEngine time budget guard", () => {
   test("pauses before next action when elapsed round time exceeds limit", async () => {
-    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-engine-time-guard-test-"));
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-time-guard-test-"));
     const config = loadConfig({
       AUTOLOOP_HOME: homeDir,
       AUTOLOOP_BUDGET_TIME_MINUTES: "0.001" // 60ms
@@ -201,7 +201,7 @@ describe("LoopEngine time budget guard", () => {
 
 describe("LoopEngine round error handling", () => {
   test("preserves seeded evaluator failure count on pre-evaluation execution errors", async () => {
-    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-engine-round-error-test-"));
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-round-error-test-"));
     const config = loadConfig({
       AUTOLOOP_HOME: homeDir
     });

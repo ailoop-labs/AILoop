@@ -24,7 +24,7 @@ async function waitForPausedState(paths: LoopPaths, timeoutMs = 6_000): Promise<
 
 describe("LoopEngine evaluator failure threshold guard", () => {
   test("pauses before starting a new round once failure limit is already reached", async () => {
-    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-engine-failure-limit-test-"));
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-failure-limit-test-"));
     const config = loadConfig({
       AUTOLOOP_HOME: homeDir,
       AUTOLOOP_MAX_CYCLES: "1"

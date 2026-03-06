@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-RUN_DIR=".autoloop"
+RUN_DIR=".ailoop"
 PID_FILE="$RUN_DIR/prod.server.pid"
 LOG_FILE="$RUN_DIR/prod.server.log"
 TOKEN_CACHE_FILE="$RUN_DIR/console.admin.token.cache"
@@ -17,7 +17,7 @@ fi
 
 graceful_stop_server() {
   if [[ ! -f "$PID_FILE" ]]; then
-    echo "AutoLoop Production server is not running (PID file not found)."
+    echo "AILoop Production server is not running (PID file not found)."
     return 0
   fi
 
@@ -31,7 +31,7 @@ graceful_stop_server() {
 
   if ! kill -0 "$existing_pid" >/dev/null 2>&1; then
     rm -f "$PID_FILE"
-    echo "AutoLoop Production server is not running (stale PID file cleaned)."
+    echo "AILoop Production server is not running (stale PID file cleaned)."
     return 0
   fi
 
@@ -47,7 +47,7 @@ graceful_stop_server() {
   done
 
   rm -f "$PID_FILE"
-  echo "Stopped AutoLoop Production server (PID: $existing_pid)."
+  echo "Stopped AILoop Production server (PID: $existing_pid)."
 }
 
 MODE="${1:-foreground}"
@@ -72,7 +72,7 @@ if [[ "$MODE" == "daemon" ]]; then
   if [[ -f "$PID_FILE" ]]; then
     existing_pid="$(cat "$PID_FILE")"
     if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" >/dev/null 2>&1; then
-      echo "AutoLoop Production server is already running (PID: $existing_pid)."
+      echo "AILoop Production server is already running (PID: $existing_pid)."
       echo "Log: $LOG_FILE"
       exit 0
     fi
@@ -159,7 +159,7 @@ if [[ -n "$port_pids" ]]; then
   sleep 1
 fi
 
-echo "AutoLoop Production server is running at http://127.0.0.1:3090"
+echo "AILoop Production server is running at http://127.0.0.1:3090"
 echo "Use the web console for all loop operations and parameter settings."
 
 if [[ "$MODE" == "daemon" ]]; then

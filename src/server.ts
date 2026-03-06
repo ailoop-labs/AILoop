@@ -102,7 +102,7 @@ const server = Bun.serve({
     const url = new URL(request.url);
 
     if (url.pathname === "/api/health" && request.method === "GET") {
-      return json({ ok: true, service: "autoloop-console" });
+      return json({ ok: true, service: "ailoop-console" });
     }
 
     if (url.pathname === "/api/auth/status" && request.method === "GET") {
@@ -225,4 +225,4 @@ const server = Bun.serve({
   }
 });
 
-console.log(`AutoLoop console server running on http://${server.hostname}:${server.port}`);
+console.log(`AILoop console server running on http://${server.hostname}:${server.port}`);

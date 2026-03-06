@@ -1,20 +1,20 @@
-# AutoLoop MVP Verification Checklist
+# AILoop MVP Verification Checklist
 
 This checklist maps the MVP success criteria from `README.md` and `ARCHITECTURE.md` to concrete verification checks with explicit pass/fail evidence.
 
 ## Preconditions
 - Use workspace root: `/root/projects/AILoop`
-- Use clean runtime home for repeatability: `export AUTOLOOP_HOME=.autoloop`
+- Use clean runtime home for repeatability: `export AUTOLOOP_HOME=.ailoop`
 - Start from dependencies installed and env configured.
 
 ## 1) Core Loop End-to-End
 
 | ID | Verification check (executable) | Pass evidence | Fail evidence |
 |---|---|---|---|
-| CL-1 | `bun run autoloop --help` | Output includes: `run`, `start`, `stop`, `pause`, `resume`, `status`, `watch`, `instruct` | Any required command missing |
-| CL-2 | Foreground round: `bun run autoloop run` | Round executes plan -> execute -> evaluate -> persist; `.autoloop/runs/` gains a new timestamped round set | Command crashes, or round artifacts missing |
-| CL-3 | Background lifecycle: `bun run autoloop start`, then `bun run autoloop status`, `bun run autoloop pause`, `bun run autoloop resume`, `bun run autoloop stop` | `status`/state files show valid transitions: `idle -> running -> paused -> running -> stopping -> idle` | Invalid transition, stuck state, or unhandled error state |
-| CL-4 | Instruction injection: `bun run autoloop instruct "test instruction"` before next round | Next round planner context or logs show instruction consumed | Instruction not persisted/injected |
+| CL-1 | `bun run ailoop --help` | Output includes: `run`, `start`, `stop`, `pause`, `resume`, `status`, `watch`, `instruct` | Any required command missing |
+| CL-2 | Foreground round: `bun run ailoop run` | Round executes plan -> execute -> evaluate -> persist; `.ailoop/runs/` gains a new timestamped round set | Command crashes, or round artifacts missing |
+| CL-3 | Background lifecycle: `bun run ailoop start`, then `bun run ailoop status`, `bun run ailoop pause`, `bun run ailoop resume`, `bun run ailoop stop` | `status`/state files show valid transitions: `idle -> running -> paused -> running -> stopping -> idle` | Invalid transition, stuck state, or unhandled error state |
+| CL-4 | Instruction injection: `bun run ailoop instruct "test instruction"` before next round | Next round planner context or logs show instruction consumed | Instruction not persisted/injected |
 
 ## 2) Web Console + API Contract
 
@@ -32,13 +32,13 @@ This checklist maps the MVP success criteria from `README.md` and `ARCHITECTURE.
 |---|---|---|---|
 | GR-1 | Budget breaker test with tiny limits (e.g., `AUTOLOOP_BUDGET_ACTIONS=1`) and run one round | Loop pauses on breach; reason indicates budget breach; no unsafe continuation | Loop keeps running after breach or reason absent |
 | GR-2 | Evaluator-failure pause test: configure failing evaluator command and run rounds | After repeated failures (target: 3), state becomes `paused` automatically | Failures continue indefinitely without pause |
-| GR-3 | Secret redaction test: set env var containing `TOKEN`/`SECRET`, trigger logs/artifacts | Raw secret never appears in `.autoloop/runs/*`; redacted token marker present | Secret value appears unredacted on disk |
+| GR-3 | Secret redaction test: set env var containing `TOKEN`/`SECRET`, trigger logs/artifacts | Raw secret never appears in `.ailoop/runs/*`; redacted token marker present | Secret value appears unredacted on disk |
 
 ## 4) Artifact Completeness + Auditability
 
 | ID | Verification check (executable) | Pass evidence | Fail evidence |
 |---|---|---|---|
-| AR-1 | After a round, list latest timestamp: `ls -1 .autoloop/runs | sort | tail` | Matching set exists: `.round.log`, `.round.summary.md`, `.round.metrics.json`, `.round.state_change.txt` | Any required artifact missing |
+| AR-1 | After a round, list latest timestamp: `ls -1 .ailoop/runs | sort | tail` | Matching set exists: `.round.log`, `.round.summary.md`, `.round.metrics.json`, `.round.state_change.txt` | Any required artifact missing |
 | AR-2 | Inspect summary content | Summary contains: goal alignment, actions taken, evaluation result, budget consumed vs limit, risks/assumptions, next-round recommendation | Required summary sections missing |
 | AR-3 | Inspect metrics JSON | Metrics include cost, duration, action count with numeric values | Missing keys or invalid types |
 | AR-4 | Inspect state-change artifact | Contains reproducible diff/command-query summary with no unredacted secrets | Cosmetic/no-op artifact or leaked secret |

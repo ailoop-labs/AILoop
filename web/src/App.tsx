@@ -114,7 +114,7 @@ const stateLabel: Record<LoopStateName, string> = {
   error: "error"
 };
 
-const TOKEN_STORAGE_KEY = "autoloop-console-admin-token";
+const TOKEN_STORAGE_KEY = "ailoop-console-admin-token";
 
 function readStoredToken(): string {
   if (typeof window === "undefined") {
@@ -690,7 +690,7 @@ export default function App() {
       <section className="reveal rounded-3xl border border-white/10 bg-panel/80 p-6 shadow-lift backdrop-blur">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <p className="text-xs uppercase tracking-[0.32em] text-accent/80">AutoLoop Control Plane</p>
+            <p className="text-xs uppercase tracking-[0.32em] text-accent/80">AILoop Control Plane</p>
             <h1 className="mt-1 text-3xl font-bold text-mist md:text-4xl">Autonomy Dashboard</h1>
           </div>
           <div className="flex items-center gap-3">

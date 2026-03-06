@@ -358,7 +358,7 @@ export function buildDimensionPrompt(
 ): string {
   const decisionExamples = DIMENSION_DECISION_EXAMPLES[dimension] ?? [];
   return [
-    `You are an AutoLoop evaluator for dimension: ${dimension}.`,
+    `You are an AILoop evaluator for dimension: ${dimension}.`,
     ...(evaluatorRoleDefinition.trim()
       ? ["Project-specific Evaluator Role Definition:", evaluatorRoleDefinition.trim(), ""]
       : []),

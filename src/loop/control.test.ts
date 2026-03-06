@@ -57,7 +57,7 @@ function makeTestConfig(homeDir: string): AppConfig {
 
 describe("prepareStartFlags", () => {
   test("clears both stop and pause flags before start", async () => {
-    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-control-test-"));
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-control-test-"));
     const paths = buildLoopPaths(homeDir);
 
     await setFlag(paths.stopFlagPath);
@@ -76,7 +76,7 @@ describe("prepareStartFlags", () => {
 
 describe("tailLatestLog", () => {
   test("returns tail from newest round log even when round artifacts are incomplete", async () => {
-    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-tail-test-"));
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-tail-test-"));
     const runsDir = path.join(homeDir, "runs");
     await fs.mkdir(runsDir, { recursive: true });
 
@@ -96,7 +96,7 @@ describe("tailLatestLog", () => {
 
 describe("resumeLoop", () => {
   test("clears pause flag and immediately marks paused loops as running", async () => {
-    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-resume-test-"));
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-resume-test-"));
     const paths = buildLoopPaths(homeDir);
     await fs.mkdir(homeDir, { recursive: true });
 
@@ -120,7 +120,7 @@ describe("resumeLoop", () => {
 
 describe("getLoopStatus", () => {
   test("recovers cooldown state to idle when process is not alive", async () => {
-    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-status-cooldown-test-"));
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-cooldown-test-"));
     const paths = buildLoopPaths(homeDir);
     await fs.mkdir(homeDir, { recursive: true });
 
@@ -141,7 +141,7 @@ describe("getLoopStatus", () => {
   });
 
   test("clears stale budget snapshot when loop is idle", async () => {
-    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-status-idle-budget-test-"));
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-idle-budget-test-"));
     const paths = buildLoopPaths(homeDir);
     await fs.mkdir(homeDir, { recursive: true });
 
@@ -176,7 +176,7 @@ describe("getLoopStatus", () => {
 
 describe("getCliStatus", () => {
   test("returns runtime budget limits alongside loop state", async () => {
-    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-cli-status-test-"));
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-cli-status-test-"));
     await fs.mkdir(homeDir, { recursive: true });
     const config = makeTestConfig(homeDir);
 
@@ -203,8 +203,8 @@ describe("getCliStatus", () => {
 
 describe("ensureProjectRoles", () => {
   test("creates project role files when they are missing", async () => {
-    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-control-roles-test-"));
-    const homeDir = path.join(workspaceRoot, ".autoloop");
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-control-roles-test-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
     await fs.writeFile(path.join(workspaceRoot, "README.md"), "# Example\n\nService project", "utf8");
 
     const mockCodex = {
@@ -239,8 +239,8 @@ describe("ensureProjectRoles", () => {
 
 describe("listProjectRoles", () => {
   test("returns role metadata and markdown for the current project", async () => {
-    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-control-list-roles-test-"));
-    const homeDir = path.join(workspaceRoot, ".autoloop");
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-control-list-roles-test-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
     await fs.mkdir(homeDir, { recursive: true });
     await fs.writeFile(path.join(homeDir, "PLANNER_ROLE.md"), "# Planner Role\n\nCustom planner\n", "utf8");
     await fs.writeFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "# Executor Role\n\nCustom executor\n", "utf8");

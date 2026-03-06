@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "autoloop-web",
+      "name": "ailoop-web",
       "dependencies": {
         "@melloware/react-logviewer": "^6.3.5",
         "react": "^19.1.0",

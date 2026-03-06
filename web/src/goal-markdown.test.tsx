@@ -14,7 +14,7 @@ describe("GoalMarkdown", () => {
   test("uses fallback text when goal markdown is empty", () => {
     const html = renderToStaticMarkup(<GoalMarkdown goal={"   "} />);
 
-    expect(html).toContain("No goal configured in .autoloop/README.md");
+    expect(html).toContain("No goal configured in .ailoop/README.md");
   });
 
   test("applies a max height and scrolling container", () => {

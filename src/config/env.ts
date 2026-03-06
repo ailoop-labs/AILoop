@@ -79,7 +79,7 @@ function parseLlmEvaluatorDimensions(value: string | undefined): EvaluationDimen
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const homeDir = path.resolve(env.AUTOLOOP_HOME ?? "./.autoloop");
+  const homeDir = path.resolve(env.AUTOLOOP_HOME ?? "./.ailoop");
   const intervalSeconds = parseNumber(env.AUTOLOOP_INTERVAL_SECONDS, 1200);
   const maxCycles = parseNumber(env.AUTOLOOP_MAX_CYCLES, 0);
   const exitOnError = (env.AUTOLOOP_EXIT_ON_ERROR ?? "0") === "1";

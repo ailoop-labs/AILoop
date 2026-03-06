@@ -442,7 +442,7 @@ export class CodexClient {
   }
 
   private async _runJsonInner<T>(options: CodexJsonCallOptions): Promise<CodexJsonCallResult<T>> {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "autoloop-codex-"));
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-codex-"));
     const schemaPath = path.join(tempDir, "schema.json");
     const outputPath = path.join(tempDir, "result.json");
 
@@ -550,7 +550,7 @@ export class CodexClient {
           const reason = summarizeForRetry(errorMessage, runResult.stderr);
           emitChunkSafely(
             attemptOptions.onStderrChunk,
-            `AutoLoop interface retry ${nextRetry}/${INTERFACE_ERROR_MAX_RETRIES}: waiting ${INTERFACE_ERROR_RETRY_DELAY_MS}ms before retry. reason=${reason}\n`
+            `AILoop interface retry ${nextRetry}/${INTERFACE_ERROR_MAX_RETRIES}: waiting ${INTERFACE_ERROR_RETRY_DELAY_MS}ms before retry. reason=${reason}\n`
           );
           interfaceRetryCount += 1;
           await this.sleep(INTERFACE_ERROR_RETRY_DELAY_MS);

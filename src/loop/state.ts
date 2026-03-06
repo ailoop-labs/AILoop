@@ -39,7 +39,7 @@ export async function ensureLoopHome(paths: LoopPaths): Promise<void> {
   await ensureDir(paths.homeDir);
   await ensureDir(paths.runsDir);
 
-  await ensureRegularFile(paths.taskPath, "# AutoLoop Task Log\n");
+  await ensureRegularFile(paths.taskPath, "# AILoop Task Log\n");
   await ensureRegularFile(paths.instructionsPath, "[]\n");
 }
 

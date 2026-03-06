@@ -73,7 +73,7 @@ function extractPathTokens(text: string): string[] {
     }
   }
 
-  const plainRegex = /\b(?:\.\/)?(?:src|scripts|web\/src|\.autoloop)\/[A-Za-z0-9._/-]+/g;
+  const plainRegex = /\b(?:\.\/)?(?:src|scripts|web\/src|\.ailoop)\/[A-Za-z0-9._/-]+/g;
   for (const match of text.matchAll(plainRegex)) {
     const value = normalizePathToken(match[0] ?? "");
     if (value) {
@@ -163,7 +163,7 @@ export class LoopEngine {
     let shouldGenerate = !exists;
     if (exists) {
       const content = await fs.readFile(this.paths.goalPath, "utf8");
-      if (content.trim() === "# AutoLoop Goal\n\nDescribe the top-level goal this autonomous loop should pursue. Keep it outcome-focused and measurable.") {
+      if (content.trim() === "# AILoop Goal\n\nDescribe the top-level goal this autonomous loop should pursue. Keep it outcome-focused and measurable.") {
         shouldGenerate = true;
       }
     }

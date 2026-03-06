@@ -17,7 +17,7 @@ describe("buildExecutorPrompt", () => {
         goal: "Ship feature",
         instructions: ["Keep scope minimal"],
         subTask: sampleSubTask,
-        autoloopHome: "/tmp/.autoloop",
+        ailoopHome: "/tmp/.ailoop",
         workspaceRoot: "/tmp/workspace",
         availableTools: [{ name: "run_shell", description: "Execute shell command" }]
       },
@@ -35,7 +35,7 @@ describe("buildExecutorPrompt", () => {
         goal: "Ship feature",
         instructions: ["Keep scope minimal"],
         subTask: sampleSubTask,
-        autoloopHome: "/tmp/.autoloop",
+        ailoopHome: "/tmp/.ailoop",
         workspaceRoot: "/tmp/workspace",
         availableTools: [{ name: "run_shell", description: "Execute shell command" }]
       },
