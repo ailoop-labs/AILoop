@@ -106,7 +106,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     maxRetainRuns,
     budget: {
       usdPerRound: parseNumber(env.AUTOLOOP_BUDGET_USD_PER_ROUND, 0.5),
-      timeMinutes: parseNumber(env.AUTOLOOP_BUDGET_TIME_MINUTES, 15),
+      timeMinutes: parseNumber(env.AUTOLOOP_BUDGET_TIME_MINUTES, 60),
       actions: parseNumber(env.AUTOLOOP_BUDGET_ACTIONS, 30)
     },
     evaluatorType,
