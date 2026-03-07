@@ -14,7 +14,7 @@ type CorePathKey = (typeof CORE_PATH_KEYS)[number];
 type CorePathsContext = Record<CorePathKey, string | null>;
 
 function contextFilePath(): string {
-  return path.join(process.cwd(), ".autoloop", "context", "core_paths.json");
+  return path.join(process.cwd(), ".ailoop", "context", "core_paths.json");
 }
 
 async function readCorePathsContext(): Promise<CorePathsContext> {

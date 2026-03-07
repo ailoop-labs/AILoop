@@ -19,9 +19,9 @@ describe("loadConfig llm evaluator options", () => {
 
   test("parses custom dimensions and threshold from env", () => {
     const config = loadConfig({
-      AUTOLOOP_LLM_EVALUATOR_DIMENSIONS: "goal_alignment,causal_validity,constraint_compliance",
-      AUTOLOOP_LLM_EVALUATOR_MIN_PASS_SCORE: "81",
-      AUTOLOOP_EVAL_REWORK_MAX_ATTEMPTS: "3"
+      AILOOP_LLM_EVALUATOR_DIMENSIONS: "goal_alignment,causal_validity,constraint_compliance",
+      AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE: "81",
+      AILOOP_EVAL_REWORK_MAX_ATTEMPTS: "3"
     });
 
     expect(config.codex.llmEvaluatorDimensions).toEqual([

@@ -11,8 +11,8 @@ describe("LoopEngine budget guard", () => {
   test("fails before planner execution when time budget is already exceeded", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-budget-test-"));
     const config = loadConfig({
-      AUTOLOOP_HOME: homeDir,
-      AUTOLOOP_BUDGET_TIME_MINUTES: "-1"
+      AILOOP_HOME: homeDir,
+      AILOOP_BUDGET_TIME_MINUTES: "-1"
     });
     const engine = new LoopEngine(config);
     const paths = (engine as unknown as { paths: LoopPaths }).paths;
@@ -82,8 +82,8 @@ describe("LoopEngine budget guard", () => {
   test("records BudgetBreach failure with pause next_state_hint on pre-action time guard", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-budget-hint-test-"));
     const config = loadConfig({
-      AUTOLOOP_HOME: homeDir,
-      AUTOLOOP_BUDGET_TIME_MINUTES: "-1"
+      AILOOP_HOME: homeDir,
+      AILOOP_BUDGET_TIME_MINUTES: "-1"
     });
     const engine = new LoopEngine(config);
     const paths = (engine as unknown as { paths: LoopPaths }).paths;

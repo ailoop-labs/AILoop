@@ -73,8 +73,8 @@ describe("LoopEngine auto rework", () => {
   test("retries once after evaluator fail by feeding failure reason back to executor", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-rework-test-"));
     const config = loadConfig({
-      AUTOLOOP_HOME: homeDir,
-      AUTOLOOP_EVAL_REWORK_MAX_ATTEMPTS: "1"
+      AILOOP_HOME: homeDir,
+      AILOOP_EVAL_REWORK_MAX_ATTEMPTS: "1"
     });
     const engine = new LoopEngine(config);
     const paths = (engine as unknown as { paths: LoopPaths }).paths;
@@ -145,8 +145,8 @@ describe("LoopEngine time budget guard", () => {
   test("pauses before next action when elapsed round time exceeds limit", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-time-guard-test-"));
     const config = loadConfig({
-      AUTOLOOP_HOME: homeDir,
-      AUTOLOOP_BUDGET_TIME_MINUTES: "0.001" // 60ms
+      AILOOP_HOME: homeDir,
+      AILOOP_BUDGET_TIME_MINUTES: "0.001" // 60ms
     });
     const engine = new LoopEngine(config);
     const paths = (engine as unknown as { paths: LoopPaths }).paths;
@@ -203,7 +203,7 @@ describe("LoopEngine round error handling", () => {
   test("preserves seeded evaluator failure count on pre-evaluation execution errors", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-round-error-test-"));
     const config = loadConfig({
-      AUTOLOOP_HOME: homeDir
+      AILOOP_HOME: homeDir
     });
     const engine = new LoopEngine(config);
     const paths = (engine as unknown as { paths: LoopPaths }).paths;

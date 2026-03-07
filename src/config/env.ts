@@ -79,17 +79,17 @@ function parseLlmEvaluatorDimensions(value: string | undefined): EvaluationDimen
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const homeDir = path.resolve(env.AUTOLOOP_HOME ?? "./.ailoop");
-  const intervalSeconds = parseNumber(env.AUTOLOOP_INTERVAL_SECONDS, 1200);
-  const maxCycles = parseNumber(env.AUTOLOOP_MAX_CYCLES, 0);
-  const exitOnError = (env.AUTOLOOP_EXIT_ON_ERROR ?? "0") === "1";
-  const evaluatorReworkMaxAttempts = Math.max(0, Math.min(5, Math.round(parseNumber(env.AUTOLOOP_EVAL_REWORK_MAX_ATTEMPTS, 1))));
-  const consoleHost = env.AUTOLOOP_CONSOLE_HOST ?? "0.0.0.0";
-  const consolePort = parseNumber(env.AUTOLOOP_CONSOLE_PORT, 3090);
-  const consoleAdminToken = env.AUTOLOOP_CONSOLE_ADMIN_TOKEN ?? "";
-  const maxRetainRuns = parseNumber(env.AUTOLOOP_MAX_RETAIN_RUNS, 50);
+  const homeDir = path.resolve(env.AILOOP_HOME ?? "./.ailoop");
+  const intervalSeconds = parseNumber(env.AILOOP_INTERVAL_SECONDS, 1200);
+  const maxCycles = parseNumber(env.AILOOP_MAX_CYCLES, 0);
+  const exitOnError = (env.AILOOP_EXIT_ON_ERROR ?? "0") === "1";
+  const evaluatorReworkMaxAttempts = Math.max(0, Math.min(5, Math.round(parseNumber(env.AILOOP_EVAL_REWORK_MAX_ATTEMPTS, 1))));
+  const consoleHost = env.AILOOP_CONSOLE_HOST ?? "0.0.0.0";
+  const consolePort = parseNumber(env.AILOOP_CONSOLE_PORT, 3090);
+  const consoleAdminToken = env.AILOOP_CONSOLE_ADMIN_TOKEN ?? "";
+  const maxRetainRuns = parseNumber(env.AILOOP_MAX_RETAIN_RUNS, 50);
 
-  const evaluatorTypeRaw = (env.AUTOLOOP_EVALUATOR_TYPE ?? "llm") as EvaluatorType;
+  const evaluatorTypeRaw = (env.AILOOP_EVALUATOR_TYPE ?? "llm") as EvaluatorType;
   const evaluatorType: EvaluatorType = ["shell", "llm", "webhook"].includes(evaluatorTypeRaw)
     ? evaluatorTypeRaw
     : "shell";
@@ -105,23 +105,23 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     consoleAdminToken,
     maxRetainRuns,
     budget: {
-      usdPerRound: parseNumber(env.AUTOLOOP_BUDGET_USD_PER_ROUND, 0.5),
-      timeMinutes: parseNumber(env.AUTOLOOP_BUDGET_TIME_MINUTES, 60),
-      actions: parseNumber(env.AUTOLOOP_BUDGET_ACTIONS, 30)
+      usdPerRound: parseNumber(env.AILOOP_BUDGET_USD_PER_ROUND, 0.5),
+      timeMinutes: parseNumber(env.AILOOP_BUDGET_TIME_MINUTES, 60),
+      actions: parseNumber(env.AILOOP_BUDGET_ACTIONS, 30)
     },
     evaluatorType,
-    evaluatorCmd: env.AUTOLOOP_EVALUATOR_CMD ?? "",
-    webhookEvaluatorUrl: env.AUTOLOOP_WEBHOOK_EVALUATOR_URL ?? "",
+    evaluatorCmd: env.AILOOP_EVALUATOR_CMD ?? "",
+    webhookEvaluatorUrl: env.AILOOP_WEBHOOK_EVALUATOR_URL ?? "",
     codex: {
-      bin: env.AUTOLOOP_CODEX_BIN ?? "codex",
-      model: env.AUTOLOOP_CODEX_MODEL ?? "",
-      profile: env.AUTOLOOP_CODEX_PROFILE ?? "",
-      plannerSandbox: parseSandboxMode(env.AUTOLOOP_CODEX_PLANNER_SANDBOX, "read-only"),
-      executorSandbox: parseSandboxMode(env.AUTOLOOP_CODEX_EXECUTOR_SANDBOX, "danger-full-access"),
-      evaluatorSandbox: parseSandboxMode(env.AUTOLOOP_CODEX_EVALUATOR_SANDBOX, "danger-full-access"),
-      timeoutMs: parseNumber(env.AUTOLOOP_CODEX_TIMEOUT_MS, 180_000),
-      llmEvaluatorDimensions: parseLlmEvaluatorDimensions(env.AUTOLOOP_LLM_EVALUATOR_DIMENSIONS),
-      llmEvaluatorMinPassScore: Math.max(0, Math.min(100, parseNumber(env.AUTOLOOP_LLM_EVALUATOR_MIN_PASS_SCORE, 75)))
+      bin: env.AILOOP_CODEX_BIN ?? "codex",
+      model: env.AILOOP_CODEX_MODEL ?? "",
+      profile: env.AILOOP_CODEX_PROFILE ?? "",
+      plannerSandbox: parseSandboxMode(env.AILOOP_CODEX_PLANNER_SANDBOX, "read-only"),
+      executorSandbox: parseSandboxMode(env.AILOOP_CODEX_EXECUTOR_SANDBOX, "danger-full-access"),
+      evaluatorSandbox: parseSandboxMode(env.AILOOP_CODEX_EVALUATOR_SANDBOX, "danger-full-access"),
+      timeoutMs: parseNumber(env.AILOOP_CODEX_TIMEOUT_MS, 180_000),
+      llmEvaluatorDimensions: parseLlmEvaluatorDimensions(env.AILOOP_LLM_EVALUATOR_DIMENSIONS),
+      llmEvaluatorMinPassScore: Math.max(0, Math.min(100, parseNumber(env.AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE, 75)))
     }
   };
 }

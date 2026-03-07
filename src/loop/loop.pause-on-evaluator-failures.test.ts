@@ -26,8 +26,8 @@ describe("LoopEngine evaluator failure threshold guard", () => {
   test("pauses before starting a new round once failure limit is already reached", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-failure-limit-test-"));
     const config = loadConfig({
-      AUTOLOOP_HOME: homeDir,
-      AUTOLOOP_MAX_CYCLES: "1"
+      AILOOP_HOME: homeDir,
+      AILOOP_MAX_CYCLES: "1"
     });
     const engine = new LoopEngine(config);
     const paths = (engine as unknown as { paths: LoopPaths }).paths;
@@ -55,8 +55,8 @@ describe("LoopEngine evaluator failure threshold guard", () => {
       const pausedState = await waitForPausedState(paths);
 
       expect(runRoundCalls).toBe(0);
-      expect(pausedState.last_error).toContain("EvaluatorFailureLimit");
-      expect(pausedState.last_error).toContain(`${EVALUATOR_FAILURE_LIMIT}`);
+      expect(pausedState.last_error || "").toContain("EvaluatorFailureLimit");
+      expect(pausedState.last_error || "").toContain(`${EVALUATOR_FAILURE_LIMIT}`);
       expect(pausedState.consecutive_evaluator_failures).toBe(EVALUATOR_FAILURE_LIMIT);
     } finally {
       await setFlag(paths.stopFlagPath);
