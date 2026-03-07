@@ -118,7 +118,8 @@ function buildEvaluatorReworkInstructions(
   baseInstructions: string[],
   evaluation: EvaluationResult,
   attempt: number,
-  maxAttempts: number
+  maxAttempts: number,
+  stateChange: string
 ): string[] {
   const next = [...baseInstructions, `Evaluator failure: ${evaluation.justification}`];
   if (evaluation.recommended_next_action?.trim()) {
@@ -126,6 +127,9 @@ function buildEvaluatorReworkInstructions(
   }
   next.push(
     `Auto rework attempt ${attempt}/${maxAttempts}: apply the smallest safe change that resolves blocking issues, then run verification and capture concrete evidence in artifacts.`
+  );
+  next.push(
+    `IMPORTANT: The workspace contains your uncommitted draft changes. Here is what you already modified:\n\n${stateChange}\n\nDo not start over. Apply your fixes ON TOP OF these existing changes.`
   );
   return next;
 }
@@ -467,7 +471,8 @@ export class LoopEngine {
               instructions,
               evaluation,
               attempt,
-              this.config.evaluatorReworkMaxAttempts
+              this.config.evaluatorReworkMaxAttempts,
+              stateChange
             ),
             guardrails,
             paths: this.paths,
@@ -520,9 +525,24 @@ export class LoopEngine {
         }
       }
 
-      if (evaluation.decision === "fail" || finalToolResult.status === "failure") {
+      if (finalToolResult.status === "failure") {
         await workspace.rollback(snapshot);
         stateChange = `${stateChange}\nRollback: workspace snapshot restored due to failed round.\n`;
+      } else if (evaluation.decision === "pass") {
+        // Executor succeeded AND Evaluator passed -> We are ready to commit!
+        await log("Evaluation passed. Engine is committing and pushing changes.");
+        const commitMessage = `AutoLoop Round ${round}: ${subTask.objective}\n\n${subTask.expected_outcome}`;
+        
+        try {
+          await this.tools.getTool("run_shell")?.execute(
+            { command: `git add . && git commit -m "${commitMessage.replace(/"/g, '\\"')}" && git push origin HEAD` },
+            { onLog: log } as any
+          );
+        } catch (e) {
+          await log(`Failed to push changes: ${(e as Error).message}`);
+        }
+      } else {
+        await log("Evaluation failed. Draft changes preserved in workspace for future auto-rework.");
       }
 
       const usage = guardrails.usage();
