@@ -28,6 +28,7 @@ export async function buildDeterministicGoal(workspaceRoot: string = process.cwd
 import {
   appendInstruction,
   buildLoopPaths,
+  clearPid,
   clearFlag,
   defaultLoopState,
   ensureLoopHome,
@@ -184,13 +185,23 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStateData & 
   const pidAlive = pid ? isPidAlive(pid) : false;
 
   if ((state.state === "running" || state.state === "cooldown") && !pidAlive) {
-    const recovered = defaultLoopState(null);
-    recovered.last_error = "Process was not alive during status check";
+    const recovered = {
+      ...state,
+      state: "paused" as const,
+      pid: null,
+      last_error: pid
+        ? `Interrupted: Process was not alive during status check (pid ${pid})`
+        : "Interrupted: Process was missing during status check"
+    };
+    await clearPid(paths);
     await writeLoopState(paths, recovered);
     return { ...recovered, pid_alive: false };
   }
 
   if (!pidAlive && state.state !== "running") {
+    if (pid) {
+      await clearPid(paths);
+    }
     const normalized = {
       ...state,
       pid: null,

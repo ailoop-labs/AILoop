@@ -119,23 +119,44 @@ describe("resumeLoop", () => {
 });
 
 describe("getLoopStatus", () => {
-  test("recovers cooldown state to idle when process is not alive", async () => {
+  test("marks a dead cooldown process as paused and preserves interrupted round context", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-cooldown-test-"));
     const paths = buildLoopPaths(homeDir);
     await fs.mkdir(homeDir, { recursive: true });
 
     const staleState = {
       ...defaultLoopState(),
+      round: 3,
       state: "cooldown" as const,
-      pid: 999999
+      pid: 999999,
+      current_budget: {
+        limits: {
+          usdPerRound: 1,
+          timeMinutes: 1,
+          actions: 10
+        },
+        usage: {
+          usdUsed: 0.4,
+          actionsUsed: 4,
+          elapsedMs: 20_000
+        }
+      }
     };
     await writeLoopState(paths, staleState);
 
     const status = await getLoopStatus(makeTestConfig(homeDir));
-    expect(status.state).toBe("idle");
+    expect(status.state).toBe("paused");
+    expect(status.round).toBe(3);
     expect(status.pid).toBeNull();
     expect(status.pid_alive).toBe(false);
+    expect(status.current_budget).toEqual(staleState.current_budget);
     expect(status.last_error).toContain("Process was not alive");
+
+    const persisted = await readLoopState(paths);
+    expect(persisted.state).toBe("paused");
+    expect(persisted.round).toBe(3);
+    expect(persisted.pid).toBeNull();
+    expect(persisted.current_budget).toEqual(staleState.current_budget);
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
