@@ -1,185 +1,512 @@
-# AILoop Architecture Design Document
+# AILoop Architecture
 
-## 1. System Overview
+## 1. Purpose
 
-AILoop is designed as a generalized, autonomous task loop framework. It is intended to repeatedly execute tasks (Rounds) towards a defined overarching goal. Goals are domain-agnostic and defined by the user. To achieve "generalized work," the system is strictly decoupled: the core Engine knows nothing about *what* work is being done; it only knows how to schedule, budget, plan, execute, evaluate, and rollback rounds based on abstracted plugins (Tools and Evaluators).
+AILoop is a goal-driven autonomous loop runner. The MVP architecture exists to make each round:
 
-### Core Philosophy
-- **Extensibility via Interfaces:** Tools, Evaluators, and Workspaces must implement strict, typed interfaces.
-- **Fail-Safe by Default:** Execution is bounded by multidimensional budgets (Cost, Time, Actions). Breaching a budget triggers an immediate halt and rollback.
-- **Human-in-the-Loop:** Real-time instructions and manual approvals are first-class citizens in the state machine.
+- outcome-oriented,
+- observable,
+- budget-bounded,
+- recoverable where the environment allows,
+- and interruptible by a human operator.
 
----
+This document is the technical contract for implementing the MVP described in `README.md`. It defines runtime boundaries, round lifecycle, persistence layout, evaluator behavior, and the pause semantics required when safety or quality gates fail.
 
-## 2. High-Level Component Architecture
+## 2. Architectural Principles
 
-The system consists of three main logical layers:
-1. **Control Plane (UI/API/CLI):** Handles user interaction, status reporting, and starting/stopping the loop.
-2. **Loop Engine (Orchestrator):** Manages the state machine, scheduling, resource budgets, and persistence.
-3. **Agentic Layer (Execution):** The intelligence layer that plans tasks, invokes tools, and evaluates outcomes.
+The MVP follows five implementation principles derived from the product goal:
+
+1. **One measurable round at a time.** The system advances through small, atomic rounds instead of open-ended autonomous execution.
+2. **Control plane separated from execution plane.** UI and CLI issue commands, while the loop engine owns scheduling, budgets, and state transitions.
+3. **Planner, Executor, and Evaluator are distinct contracts.** Planning, acting, and judging must be swappable and independently testable.
+4. **Artifacts are first-class outputs.** Each round must leave behind reviewable files that explain what happened.
+5. **Pause is the default safety response.** Budget breaches, repeated evaluator failures, crash recovery, and explicit human intervention all converge on a paused state.
+
+## 3. MVP System Boundaries
+
+### In Scope
+
+- Single-run loop engine for one workspace.
+- File-based persistence under `AILOOP_HOME`.
+- Planner, Executor, and Evaluator agent contracts.
+- Tool registry abstraction for local shell, file, and HTTP tools.
+- Resource budget enforcement across cost, time, and action count.
+- Web console and CLI for start, pause, resume, stop, and instruct flows.
+- Recoverable round flow when the environment supports rollback.
+
+### Out of Scope
+
+- Multi-tenant orchestration.
+- Billing, quotas across organizations, or hosted marketplace concerns.
+- Perfect sandboxing of every tool side effect.
+- Distributed workers or horizontal scaling.
+
+## 4. Runtime Components
+
+The MVP is organized into six runtime subsystems.
+
+### 4.1 Control Plane
+
+Interfaces used by the operator.
+
+- **CLI** issues direct lifecycle commands such as `start`, `pause`, `resume`, `stop`, and `status`.
+- **Web Console** shows current state, budgets, recent rounds, artifacts, and accepts live instructions.
+- **Console Server API** is the transport boundary between user-facing controls and the loop engine.
+
+The control plane never executes round logic directly. It writes commands and instructions into engine-managed state.
+
+### 4.2 Loop Engine
+
+The engine is the orchestrator and state machine owner.
+
+Primary responsibilities:
+
+- load persisted run state and pending operator instructions,
+- acquire run/workspace lock before mutating execution state,
+- schedule the next round when the run is eligible,
+- coordinate planner → executor → evaluator flow,
+- enforce cooldowns and pause rules,
+- request rollback when a round fails catastrophically,
+- write round artifacts and update run summaries.
+
+### 4.3 Agent Layer
+
+The agent layer contains three role-separated contracts:
+
+- **Planner** converts goal + history + operator instructions into exactly one atomic `SubTask`.
+- **Executor** performs an observe → reason → act loop using registered tools until the `SubTask` succeeds, fails, or budget expires.
+- **Evaluator** verifies whether the observable state change satisfies the `SubTask` objective.
+
+### 4.4 Tool Registry
+
+The registry exposes environment capabilities in a normalized way.
+
+MVP built-ins:
+
+- `read_file`
+- `write_file`
+- `run_shell`
+- `http_request`
+
+Each tool declares schema, safety notes, and execution semantics so the executor can use tools deterministically.
+
+### 4.5 Workspace Manager
+
+The workspace manager abstracts the mutable environment.
+
+Responsibilities:
+
+- create a pre-round snapshot when supported,
+- record round-level diffs or mutation summaries,
+- restore previous state when rollback is required,
+- expose workspace metadata to the engine and evaluator.
+
+Examples of rollback strategy:
+
+- Git-backed repo: diff + restore/reset.
+- Transactional database: transaction or savepoint rollback.
+- Non-recoverable environment: mark rollback as unsupported and pause for human review.
+
+### 4.6 Artifact Store
+
+The artifact store is a file-based history of every round and run.
+
+It persists:
+
+- logs,
+- summaries,
+- metrics,
+- state-change patches,
+- evaluator results,
+- and current run state.
+
+## 5. High-Level Data Flow
 
 ```mermaid
-graph TD
-    subgraph Control Plane
-        CLI[CLI Command]
-        Web[Web Console UI]
-        API[Console Server API]
-    end
-
-    subgraph Loop Engine
-        Engine[State Engine & Scheduler]
-        Guardrails[Budget & Safety Guardrails]
-        Reporter[Artifact Reporter]
-        Workspace[Workspace Manager / Snapshotting]
-    end
-
-    subgraph Agentic Layer
-        Planner[Planner Agent]
-        Executor[Executor Agent]
-        ToolRegistry[Tool Registry]
-        Evaluator[Evaluator Framework]
-    end
-
-    CLI -->|Commands| Engine
-    Web --> API
-    API -->|Commands & Instruct| Engine
-
-    Engine -->|Create Snapshot| Workspace
-    Engine -->|Request Plan| Planner
-    Engine -->|Execute Task| Executor
-    Engine -->|Evaluate Output| Evaluator
-    
-    Executor <--> ToolRegistry
-    Executor <--> Guardrails
-    
-    Engine -->|Write Artifacts| Reporter
-    Engine -->|Rollback on Fail| Workspace
+flowchart TD
+    User[Operator via CLI or Web Console] --> API[Control API]
+    API --> Engine[Loop Engine]
+    Engine --> Planner[Planner Agent]
+    Planner --> Engine
+    Engine --> Executor[Executor Agent]
+    Executor <--> Tools[Tool Registry]
+    Executor --> Engine
+    Engine --> Evaluator[Evaluator]
+    Evaluator --> Engine
+    Engine --> Workspace[Workspace Manager]
+    Engine --> Artifacts[Artifact Store]
+    Engine --> API
 ```
 
----
+Round flow:
 
-## 3. Core Component Details
+1. Operator starts or resumes a run.
+2. Engine loads state, checks lock, and confirms budgets remain available.
+3. Engine captures a pre-round snapshot when supported.
+4. Planner emits one atomic `SubTask`.
+5. Executor attempts the `SubTask` using registered tools.
+6. Evaluator checks objective versus observed state change.
+7. Engine writes artifacts, updates run state, and either enters cooldown, pause, or stop.
 
-### 3.1 Loop Engine (`src/loop/engine.ts`)
-The orchestrator of the system. It runs the main `while(true)` loop.
-- **Responsibilities:**
-  - Acquires and releases file locks (`loop.lock`).
-  - Manages the State Machine (`idle`, `running`, `paused`, `stopping`, `error`).
-  - Coordinates the transition from Planning -> Execution -> Evaluation -> Reporting.
-  - Implements the Cooldown sleep timer.
+## 6. Loop State Machine
 
-### 3.2 Workspace Manager (`src/environment/workspace.ts`)
-An abstraction over the environment the agent is mutating.
-- **Responsibilities:**
-  - **Snapshotting:** Creates a point-in-time backup before a round starts (e.g., `git stash`, temp branch, DB transaction).
-  - **Rollback:** Restores the environment if the Evaluator fails or Guardrails are breached.
-  - **Diffing:** Generates the `state_change.txt` artifact for the Reporter.
+The engine owns the canonical run state. State transitions must be explicit and persisted.
 
-### 3.3 Planner Agent (`src/agent/planner.ts`)
-An LLM wrapper responsible for strategy.
-- **Input:** Global Goal (`goal.md`), recent run history, active tools, and real-time Human Instructions.
-- **Output:** A single, actionable sub-task bounded by the current budget.
+### 6.1 States
 
-### 3.4 Executor Agent (`src/agent/executor.ts`)
-An iterative reasoning and acting loop (e.g., ReAct or Tool-Calling architecture).
-- **Responsibilities:**
-  - Attempts to solve the task given by the Planner.
-  - Dynamically invokes tools from the `ToolRegistry`.
-  - Handles intermediate tool errors (e.g., fixing a syntax error after a failed test run).
-  - Constantly checks with the `Guardrails` before every tool invocation.
+- `idle`: no active run.
+- `starting`: run initialization is in progress.
+- `running`: a round is actively being prepared, executed, or evaluated.
+- `cooldown`: a round completed successfully and the engine is waiting before the next round.
+- `paused`: execution is intentionally halted and requires human or explicit engine action to continue.
+- `stopping`: engine is performing a safe shutdown at a round boundary or after an interruptible checkpoint.
+- `error`: an unhandled internal failure occurred and the run requires explicit recovery.
 
-### 3.5 Tool Registry (`src/agent/tool-registry.ts`)
-The collection of capabilities available to the Executor.
-- **Design:** Every tool must implement a standard `Tool` interface.
-  ```typescript
-  interface Tool {
-    name: string;
-    description: string;
-    schema: JSONSchema; // For LLM tool binding
-    execute: (args: any) => Promise<ToolResult>;
-    costEstimate: (args: any) => number; // Cost in Actions or Time
-  }
-  ```
-- **Built-ins:** `run_shell`, `read_file`, `write_file`, `http_request`.
-
-### 3.6 Evaluator (`src/evaluation/evaluator.ts`)
-Determines if a round was successful.
-- **Design:** Evaluators are pluggable.
-  ```typescript
-  interface Evaluator {
-    evaluate: (context: RoundContext) => Promise<EvaluationResult>;
-  }
-  ```
-- **Implementations:**
-  - `ShellEvaluator`: Runs a command (e.g., `npm test`). Pass if exit code is 0.
-  - `LLMJudgeEvaluator`: Prompts an LLM to review the `state_change.txt` against the task description.
-  - `WebhookEvaluator`: Calls an external API to verify goal-defined outcome metrics.
-
-### 3.7 Guardrails & Budgets (`src/agent/guardrails.ts`)
-The safety net. Tracks consumption during the Executor's run.
-- **Tracking:**
-  - **Cost:** Accumulated LLM Token usage (USD).
-  - **Time:** Stopwatch from round start.
-  - **Actions:** Counter of tool invocations.
-- **Action:** If a limit is hit, it throws a `BudgetBreachError`, forcing the Engine to abort the round, rollback via Workspace, and enter the `paused` state.
-
----
-
-## 4. Data Flow & State Management
-
-### 4.1 State Machine Transitions
+### 6.2 Transition Rules
 
 ```mermaid
 stateDiagram-v2
     [*] --> idle
-    idle --> running: Start Command
-    running --> cooldown: Round Completed
-    cooldown --> running: Cooldown Elapsed
-    cooldown --> paused: Pause Cmd (next round gate)
-    cooldown --> stopping: Stop Cmd
-    running --> paused: Pause Cmd / Budget Breach / Eval Fail / Human Approval Needed
-    running --> stopping: Stop Cmd
-    paused --> running: Resume Cmd
-    stopping --> idle: Safe Stop Completed
-    running --> error: Unhandled Exception
-    error --> idle: Reset Cmd
+    idle --> starting: start
+    starting --> running: initialization complete
+    running --> cooldown: round passes evaluation
+    running --> paused: budget breach
+    running --> paused: evaluator failure threshold reached
+    running --> paused: human pause
+    running --> paused: crash recovery requires review
+    running --> stopping: human stop
+    running --> error: unhandled engine exception
+    cooldown --> running: cooldown elapsed
+    cooldown --> paused: human pause before next round
+    cooldown --> stopping: human stop
+    paused --> running: human resume
+    stopping --> idle: safe shutdown complete
+    error --> paused: recovery completed with preserved state
+    error --> idle: reset
 ```
 
-### 4.2 Data Persistence (Artifacts)
-All state is file-based (MVP) under `AILOOP_HOME` (default `.ailoop/`).
-- `loop.lock`: PID and current state.
-- `runs/`: Directory for historical data.
-  - `[timestamp].round.log`: Raw execution logs (with silent secret redaction).
-  - `[timestamp].round.summary.md`: LLM-generated summary.
-  - `[timestamp].round.metrics.json`: Budgets consumed, duration.
-  - `[timestamp].round.state_change.txt`: The diff/patch.
+### 6.3 Pause Semantics
 
----
+The system must pause instead of continuing when any of the following occurs:
 
-## 5. Security & Isolation Strategy
+- cost budget exceeded,
+- time budget exceeded,
+- action budget exceeded,
+- evaluator fails repeatedly beyond configured threshold,
+- crash recovery detects an interrupted round,
+- rollback is required but cannot be completed automatically,
+- an operator issues `pause`,
+- or a guardrail blocks further autonomous action.
 
-Rather than trying to build a perfect sandbox, AILoop relies on **Recoverability and Redaction**:
-1. **Secret Redaction (Logging level):** A custom logger middleware scans all outgoing text (Logs, Summaries, Console stdout) against a list of known secrets (loaded from `.env`) and replaces them with `[REDACTED]`. The Agent still has the actual strings in memory to make API calls, but they never leak to disk.
-2. **The "Undo" Button (Workspace level):** No round is permanent until evaluated. The `WorkspaceManager` ensures that whatever the Agent does (modifying files, changing DB schemas in a staging environment) is wrapped in a transactional or snapshot context.
+`paused` is not a failure by itself. It is a safe waiting state that preserves evidence and requires deliberate continuation.
 
----
+## 7. Round Lifecycle
 
-## 6. Extensibility Guide (For Future Developers)
+Each round follows the same deterministic lifecycle.
 
-To add new capabilities to AILoop, developers will primarily interact with two interfaces:
+### 7.1 Phase 0: Preflight
 
-**1. Adding a New Tool (e.g., Browser Automation):**
-Implement the `Tool` interface. Register it in the `ToolRegistry` during Engine boot. The Executor will automatically expose its schema to the LLM.
+The engine:
 
-**2. Adding a New Evaluator (e.g., Visual Regression):**
-Implement the `Evaluator` interface. Update the configuration (`AILOOP_EVALUATOR_TYPE=visual`) to route validation logic to the new class.
+- confirms run is not locked by another active engine instance,
+- loads current goal, prior summaries, pending instructions, and budgets,
+- checks whether stop or pause was requested,
+- creates a workspace snapshot if supported,
+- opens a new timestamped artifact set.
 
-## 7. API Contract (Console Server)
+### 7.2 Phase 1: Planning
 
-The internal REST API allows the Web Console and CLI to control the Engine asynchronously.
+Planner input:
 
-- `POST /api/loop/instruct`:
-  - **Payload:** `{ "message": "string" }`
-  - **Behavior:** Appends the message to the current human feedback queue. The Engine injects this into the Planner's prompt at the start of the next round.
-- `GET /api/status`:
-  - **Returns:** Current state, current round number, active budget consumption (Cost, Time, Actions).
+- goal,
+- current workspace state summary,
+- previous round outcome,
+- pending human instructions,
+- remaining round budget.
+
+Planner output is strict JSON matching the `SubTask` contract:
+
+```json
+{
+  "rationale": "why this is the best next step now",
+  "objective": "one atomic imperative task",
+  "expected_outcome": "observable signal of success",
+  "recommended_tools": ["read_file", "run_shell"]
+}
+```
+
+The planner must never emit multiple tasks in one round.
+
+### 7.3 Phase 2: Execution
+
+Executor behavior:
+
+- reads target state before mutation,
+- performs sequential tool actions by default,
+- reasons over tool results,
+- retries correctable errors up to the configured retry limit,
+- checks budgets before every mutating step,
+- verifies state after each write or external action,
+- returns a machine-readable `ToolResult`.
+
+### 7.4 Phase 3: Evaluation
+
+The evaluator compares the `SubTask.objective` and `expected_outcome` against observed changes.
+
+Possible decisions:
+
+- `pass`
+- `fail`
+
+If the evaluator fails the round:
+
+- the engine records evidence,
+- increments evaluator-failure history,
+- attempts rollback when policy requires it,
+- and pauses automatically if the configured failure threshold is reached.
+
+### 7.5 Phase 4: Persist and Transition
+
+The engine writes all artifacts, updates metrics, records the current state, and transitions to:
+
+- `cooldown` on success,
+- `paused` on recoverable safety interruption,
+- `stopping` if a stop request is pending,
+- `error` on unhandled engine failure.
+
+## 8. Core Contracts
+
+### 8.1 Planner Contract
+
+```ts
+type SubTask = {
+  rationale: string;
+  objective: string;
+  expected_outcome: string;
+  recommended_tools: string[];
+};
+```
+
+Requirements:
+
+- exactly one atomic task,
+- rationale references failure history when relevant,
+- JSON only,
+- no hidden multi-step plans.
+
+### 8.2 Executor Contract
+
+```ts
+type ToolResult = {
+  status: "success" | "failure";
+  summary: string;
+  artifacts: {
+    state_change_path: string;
+    log_path: string;
+  };
+  error: null | {
+    type: string;
+    message: string;
+  };
+  next_state_hint: "continue" | "pause" | "stop";
+};
+```
+
+Requirements:
+
+- success only when the sub-task is verified,
+- failure includes a concrete blocker,
+- logs and artifacts redact secrets before persistence,
+- next-state hint is advisory to the engine.
+
+### 8.3 Evaluator Contract
+
+```ts
+type EvaluationResult = {
+  decision: "pass" | "fail";
+  justification: string;
+  evidence?: string[];
+  recommended_next_action?: string;
+};
+```
+
+Evaluator requirements:
+
+- skeptical by default,
+- tied to the round objective rather than superficial activity,
+- explicit justification on fail,
+- safe to swap between deterministic and LLM-based modes.
+
+### 8.4 Tool Contract
+
+```ts
+type RegisteredTool = {
+  name: string;
+  description: string;
+  input_schema: unknown;
+  read_only?: boolean;
+  execute(args: unknown): Promise<unknown>;
+};
+```
+
+Tool design requirements:
+
+- consistent structured output,
+- clear mutation semantics,
+- budget/accounting metadata when relevant,
+- no assumption that a tool is available unless registered.
+
+## 9. Evaluator Modes
+
+The MVP supports pluggable evaluator implementations behind one interface.
+
+### 9.1 Shell Evaluator
+
+Use case: deterministic local validation such as test commands, typecheck, or bespoke scripts.
+
+- Input: command + expected exit semantics.
+- Pass condition: command output satisfies configured rule.
+- Best for: engineering tasks with executable checks.
+
+### 9.2 LLM Judge Evaluator
+
+Use case: assess whether artifacts and observed state satisfy a qualitative objective.
+
+- Input: sub-task, artifact summaries, execution logs, and state change.
+- Pass condition: the judge finds the objective completed.
+- Best for: documentation, synthesis, or tasks where pure shell assertions are insufficient.
+
+### 9.3 Webhook or API Evaluator
+
+Use case: validate external metrics or service state.
+
+- Input: HTTP request definition and expected response criteria.
+- Pass condition: external system returns target signal.
+- Best for: operational loops and integration checks.
+
+All evaluator modes must emit the same `EvaluationResult` shape so the engine can apply common pause and rollback policy.
+
+## 10. Budget Model and Guardrails
+
+Budgets are enforced per round, with optional run-level aggregation layered on top later.
+
+### 10.1 Tracked Dimensions
+
+- **Cost budget**: estimated or measured LLM/tool spend in USD.
+- **Time budget**: wall-clock minutes elapsed in the round.
+- **Action budget**: number of tool invocations attempted.
+
+Default MVP targets from the product specification:
+
+- `AILOOP_BUDGET_USD_PER_ROUND=0.5`
+- `AILOOP_BUDGET_TIME_MINUTES=15`
+- `AILOOP_BUDGET_ACTIONS=30`
+
+### 10.2 Enforcement Rules
+
+- Guardrails check remaining budget before each tool action.
+- If any dimension crosses its limit, execution stops immediately.
+- The engine records a `BudgetBreach` failure reason.
+- The engine attempts rollback when supported.
+- The run transitions to `paused` and requires explicit human approval to resume.
+
+Budget breach is therefore both a runtime error condition and a state transition trigger.
+
+## 11. Persistence and Artifact Model
+
+The MVP uses file-based persistence rooted at `AILOOP_HOME`, defaulting to `.ailoop/` in the workspace.
+
+### 11.1 Required Layout
+
+```text
+.ailoop/
+  state.json
+  loop.lock
+  goal.md
+  instructions.queue.json
+  runs/
+    <timestamp>.round.log
+    <timestamp>.round.summary.md
+    <timestamp>.round.metrics.json
+    <timestamp>.round.state_change.txt
+    <timestamp>.round.evaluation.json
+```
+
+### 11.2 Artifact Semantics
+
+- `state.json`: canonical persisted engine state, active run metadata, and counters.
+- `loop.lock`: lock owner and process metadata preventing concurrent engines.
+- `goal.md`: current high-level objective.
+- `instructions.queue.json`: operator feedback to inject at the next round boundary.
+- `*.round.log`: timestamped execution log with secret redaction.
+- `*.round.summary.md`: human-readable summary of the round.
+- `*.round.metrics.json`: budget use, duration, retries, and phase timings.
+- `*.round.state_change.txt`: unified diff or concise mutation log.
+- `*.round.evaluation.json`: evaluator decision and evidence.
+
+### 11.3 Secret Redaction
+
+Before any artifact is written, known secrets from environment variables containing `TOKEN`, `KEY`, or `SECRET` must be masked. Redaction happens automatically in log and artifact writers, not by relying on agent behavior alone.
+
+## 12. Crash Recovery and Rollback
+
+Crash recovery is mandatory because long-running loops can be interrupted.
+
+On engine startup:
+
+- detect whether the previous process died mid-round,
+- inspect lock file, persisted phase, and snapshot metadata,
+- mark the interrupted round as incomplete,
+- attempt rollback when policy and environment allow,
+- transition to `paused` for operator review.
+
+This prevents the engine from silently continuing on top of uncertain state.
+
+## 13. Control Interfaces
+
+The control plane must support these operations.
+
+- `start`: initialize a new run and move `idle -> starting`.
+- `pause`: request a pause at the next safe boundary or immediate guardrail boundary.
+- `resume`: continue a paused run.
+- `stop`: perform safe shutdown and move toward `idle`.
+- `status`: return current state, round number, and budget usage.
+- `instruct`: append human guidance for the next planning boundary.
+
+Representative API endpoints for the MVP:
+
+- `POST /api/loop/start`
+- `POST /api/loop/pause`
+- `POST /api/loop/resume`
+- `POST /api/loop/stop`
+- `POST /api/loop/instruct`
+- `GET /api/status`
+
+## 14. MVP Implementation Map
+
+Suggested module boundaries for implementation:
+
+- `src/engine/loop-engine.ts`
+- `src/engine/state-store.ts`
+- `src/engine/budget-guard.ts`
+- `src/engine/workspace-manager.ts`
+- `src/agent/planner.ts`
+- `src/agent/executor.ts`
+- `src/evaluation/evaluator.ts`
+- `src/tools/tool-registry.ts`
+- `src/server.ts`
+
+These file names are implementation guidance, not a public API guarantee, but they reflect the intended decomposition of the MVP.
+
+## 15. Definition of Done for This Architecture Contract
+
+The architecture is sufficient for MVP implementation when it clearly answers all of the following:
+
+- What runtime components exist and what each owns.
+- What states the loop can be in and why transitions occur.
+- How a round progresses from planning through evaluation.
+- How evaluator modes plug into the same contract.
+- Where artifacts live and what each artifact means.
+- What happens on budget breach, evaluator failure, crash recovery, and stop/pause commands.
+
+That contract is what subsequent implementation rounds should treat as the source of truth.
