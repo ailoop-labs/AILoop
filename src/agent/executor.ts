@@ -30,6 +30,9 @@ interface CodexExecutorResponse {
   actions: string[];
 }
 
+const RUN_ARTIFACT_REFERENCE_PATTERN =
+  /(?:[^\s'"`]*\.ailoop\/runs\/[^\s'"`]+|[^\s'"`]+\.round\.(?:log|summary\.md|metrics\.json|state_change\.txt))/g;
+
 export interface ExecutorPromptInput {
   round: number;
   goal: string;
@@ -58,12 +61,16 @@ const EXECUTOR_RESPONSE_SCHEMA: JsonSchema = {
   additionalProperties: false
 };
 
+export function sanitizeCodexActionDetail(detail: string): string {
+  return detail.replace(RUN_ARTIFACT_REFERENCE_PATTERN, ".ailoop/runs/<engine-managed-artifact>");
+}
+
 function normalizeActions(rawActions: string[], status: "success" | "failure", errorMessage: string): ActionRecord[] {
   const actions = rawActions.slice(0, 50).map((item, index) => ({
     tool: "codex_step",
     args: { index: index + 1 },
     ok: status === "success",
-    output: String(item),
+    output: sanitizeCodexActionDetail(String(item)),
     error: status === "success" ? undefined : errorMessage
   }));
 
@@ -118,6 +125,8 @@ export function buildExecutorPrompt(input: ExecutorPromptInput, executorRoleDefi
     "- create a git commit with a concise factual message",
     "- push the commit to origin on the current branch",
     "- restart production service with: bash scripts/prod.sh restart",
+    "- Do not create or claim `.ailoop/runs/*` artifacts in your response; those are engine-managed.",
+    "- The engine writes canonical round artifacts and populates `tool_result.artifacts` after your execution.",
     "- Include evidence in your final response for:",
     "- verification commands and outcomes",
     "- commit hash/message",
