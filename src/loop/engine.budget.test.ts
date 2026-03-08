@@ -122,4 +122,109 @@ describe("LoopEngine budget guard", () => {
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
+
+  test.each([
+    {
+      label: "action",
+      env: {
+        AILOOP_BUDGET_ACTIONS: "0"
+      },
+      message: "BudgetBreach: action budget exceeded",
+      breach: (recordAction: (costUsd?: number) => void) => recordAction(0)
+    },
+    {
+      label: "cost",
+      env: {
+        AILOOP_BUDGET_USD_PER_ROUND: "0"
+      },
+      message: "BudgetBreach: USD budget exceeded",
+      breach: (recordAction: (costUsd?: number) => void) => recordAction(0.01)
+    }
+  ])(
+    "pauses immediately and writes round artifacts when the $label budget is exceeded during executor execution",
+    async ({ env, message, breach }) => {
+      const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-phase-budget-test-"));
+      const config = loadConfig({
+        AILOOP_HOME: homeDir,
+        ...env
+      });
+      const engine = new LoopEngine(config);
+      const paths = (engine as unknown as { paths: LoopPaths }).paths;
+      await ensureLoopHome(paths);
+
+      const plan: SubTask = {
+        rationale: "test",
+        objective: "trigger executor-phase budget breach",
+        expected_outcome: "engine pauses with artifacts",
+        recommended_tools: ["run_shell"]
+      };
+
+      const mutable = engine as unknown as {
+        planner: { plan: () => Promise<SubTask> };
+        executor: {
+          execute: (options: {
+            guardrails: { recordAction: (costUsd?: number) => void };
+          }) => Promise<unknown>;
+        };
+        evaluator: { evaluate: () => Promise<unknown> };
+        runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+      };
+      mutable.planner = {
+        plan: async () => plan
+      };
+      mutable.executor = {
+        execute: async (options) => {
+          breach(options.guardrails.recordAction.bind(options.guardrails));
+          return {
+            actions: [],
+            toolResult: {
+              status: "success",
+              summary: "executor should have been interrupted by budget guard",
+              artifacts: {
+                log_path: "",
+                state_change_path: ""
+              },
+              error: null,
+              next_state_hint: "continue"
+            }
+          };
+        }
+      };
+      mutable.evaluator = {
+        evaluate: async () => {
+          throw new Error("evaluator should not run");
+        }
+      };
+
+      const outcome = await mutable.runRound(1);
+
+      expect(outcome.success).toBe(false);
+      expect(outcome.errorMessage).toBe(message);
+
+      const state = await readLoopState(paths);
+      expect(state.state).toBe("paused");
+      expect(state.previous_tool_result?.status).toBe("failure");
+      expect(state.previous_tool_result?.error?.type).toBe("BudgetBreach");
+      expect(state.previous_tool_result?.error?.message).toBe(message);
+      await expect(fs.access(paths.pauseFlagPath)).resolves.toBeNull();
+
+      const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+      const stateChangeFile = runArtifacts.find((entry) => entry.endsWith(".round.state_change.txt"));
+      const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
+      expect(stateChangeFile).toBeDefined();
+      expect(summaryFile).toBeDefined();
+
+      const stateChangeText = await fs.readFile(
+        path.join(homeDir, "runs", stateChangeFile as string),
+        "utf8"
+      );
+      expect(stateChangeText).toContain("Rollback: workspace snapshot restored after round error.");
+
+      const summaryText = await fs.readFile(path.join(homeDir, "runs", summaryFile as string), "utf8");
+      expect(summaryText).toContain(message);
+      expect(summaryText).toContain("## Next Round Recommendation\npause");
+
+      await fs.rm(homeDir, { recursive: true, force: true });
+    }
+  );
 });

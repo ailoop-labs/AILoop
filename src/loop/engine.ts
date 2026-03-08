@@ -671,6 +671,10 @@ export class LoopEngine {
         nextRecommendation: error instanceof BudgetBreachError ? "pause" : "continue"
       });
 
+      if (error instanceof BudgetBreachError) {
+        await setFlag(this.paths.pauseFlagPath);
+      }
+
       const nextState = error instanceof BudgetBreachError ? "paused" : "running";
 
       await updateLoopState(this.paths, (current) => ({
