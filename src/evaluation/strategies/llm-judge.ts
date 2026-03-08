@@ -7,6 +7,7 @@ import type {
 } from "../../types/contracts";
 import { CodexClient, type JsonSchema } from "../../agent/codex-client";
 import { loadProjectRoleDefinition } from "../../agent/role-definitions";
+import { redactSecretLikeText } from "../../secret-redaction";
 import type { Evaluator } from "../evaluator";
 
 const DIMENSION_SCHEMA: JsonSchema = {
@@ -121,14 +122,16 @@ function sanitizeDimensionAssessment(
     : "unknown";
   const score = typeof candidate?.score === "number" ? clamp(candidate.score, 0, 100) : 0;
   const confidence = typeof candidate?.confidence === "number" ? clamp(candidate.confidence, 0, 1) : 0;
-  const justification = typeof candidate?.justification === "string" ? candidate.justification.trim() : "";
-  const evidence = Array.isArray(candidate?.evidence) ? candidate.evidence.map((item) => String(item)).filter(Boolean) : [];
+  const justification = typeof candidate?.justification === "string" ? redactSecretLikeText(candidate.justification.trim()) : "";
+  const evidence = Array.isArray(candidate?.evidence)
+    ? candidate.evidence.map((item) => redactSecretLikeText(String(item).trim())).filter(Boolean)
+    : [];
   const blockingIssues = Array.isArray(candidate?.blocking_issues)
-    ? candidate.blocking_issues.map((item) => String(item)).filter(Boolean)
+    ? candidate.blocking_issues.map((item) => redactSecretLikeText(String(item).trim())).filter(Boolean)
     : [];
   const recommendedNextAction =
     typeof candidate?.recommended_next_action === "string" && candidate.recommended_next_action.trim()
-      ? candidate.recommended_next_action.trim()
+      ? redactSecretLikeText(candidate.recommended_next_action.trim())
       : decision === "pass"
         ? "continue"
         : "pause and gather additional evidence";

@@ -222,6 +222,40 @@ describe("aggregateDimensionAssessments", () => {
     expect(result.justification).toContain("Hard gate");
     expect(result.recommended_next_action).toContain("Policy violation");
   });
+
+  test("redacts secret-like values before surfacing detailed evidence and follow-up actions", () => {
+    const leakedApiKey = "sk-live-12345";
+    const leakedSessionSecret = "super-secret-value";
+    const leakedGithubToken = "ghp_secret_67890";
+
+    const result = aggregateDimensionAssessments(
+      [
+        makeAssessment({ dimension: "goal_alignment", score: 91 }),
+        makeAssessment({
+          dimension: "constraint_compliance",
+          decision: "fail",
+          score: 5,
+          justification: `Policy violation: OPENAI_API_KEY=${leakedApiKey} was written to evaluator output.`,
+          evidence: [
+            `artifact excerpt: SESSION_SECRET=${leakedSessionSecret}`,
+            `log excerpt: GITHUB_TOKEN=${leakedGithubToken}`
+          ],
+          blocking_issues: [`rotate OPENAI_API_KEY=${leakedApiKey} and purge exposed logs`],
+          recommended_next_action: `rotate SESSION_SECRET=${leakedSessionSecret} and GITHUB_TOKEN=${leakedGithubToken}`
+        })
+      ],
+      75
+    );
+
+    const serialized = [result.justification, ...result.evidence, result.recommended_next_action].join("\n");
+
+    expect(serialized).not.toContain(leakedApiKey);
+    expect(serialized).not.toContain(leakedSessionSecret);
+    expect(serialized).not.toContain(leakedGithubToken);
+    expect(serialized).toContain("OPENAI_API_KEY=[REDACTED]");
+    expect(serialized).toContain("SESSION_SECRET=[REDACTED]");
+    expect(serialized).toContain("GITHUB_TOKEN=[REDACTED]");
+  });
 });
 
 describe("buildDimensionPrompt", () => {
