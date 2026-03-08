@@ -88,7 +88,15 @@ describe("aggregateDimensionAssessments", () => {
     const result = aggregateDimensionAssessments(
       [
         makeAssessment({ dimension: "goal_alignment", score: 90 }),
-        makeAssessment({ dimension: "constraint_compliance", decision: "fail", score: 20, blocking_issues: ["policy violation"] }),
+        makeAssessment({
+          dimension: "constraint_compliance",
+          decision: "fail",
+          score: 20,
+          justification: "Secret leakage detected in round artifacts.",
+          evidence: ["Artifact log contains an unredacted API token."],
+          blocking_issues: ["policy violation"],
+          recommended_next_action: "rotate exposed token and redact stored artifacts"
+        }),
         makeAssessment({ dimension: "risk_externality", score: 85 })
       ],
       75
@@ -96,13 +104,22 @@ describe("aggregateDimensionAssessments", () => {
 
     expect(result.decision).toBe("fail");
     expect(result.justification).toContain("Hard gate");
-    expect(result.recommended_next_action).toContain("policy violation");
+    expect(result.evidence.some((line) => line.includes("constraint_compliance detail:"))).toBe(true);
+    expect(result.evidence.some((line) => line.includes("unredacted API token"))).toBe(true);
+    expect(result.recommended_next_action).toContain("rotate exposed token and redact stored artifacts");
   });
 
   test("fails with pause recommendation when key dimension is unknown", () => {
     const result = aggregateDimensionAssessments(
       [
-        makeAssessment({ dimension: "goal_alignment", decision: "unknown", score: 0, recommended_next_action: "collect KPI evidence" }),
+        makeAssessment({
+          dimension: "goal_alignment",
+          decision: "unknown",
+          score: 0,
+          justification: "No before/after KPI comparison was attached to the round.",
+          evidence: ["State change artifact shows file edits only; no KPI output was logged."],
+          recommended_next_action: "collect KPI evidence"
+        }),
         makeAssessment({ dimension: "causal_validity", score: 78 }),
         makeAssessment({ dimension: "constraint_compliance", score: 92 })
       ],
@@ -111,7 +128,36 @@ describe("aggregateDimensionAssessments", () => {
 
     expect(result.decision).toBe("fail");
     expect(result.justification).toContain("Insufficient evidence");
+    expect(result.evidence.some((line) => line.includes("goal_alignment detail:"))).toBe(true);
+    expect(result.evidence.some((line) => line.includes("no KPI output was logged"))).toBe(true);
+    expect(result.recommended_next_action).toContain("goal_alignment: collect KPI evidence");
     expect(result.recommended_next_action).toContain("pause");
+  });
+
+  test("surfaces concrete evidence and follow-up actions when a key dimension fails", () => {
+    const result = aggregateDimensionAssessments(
+      [
+        makeAssessment({ dimension: "goal_alignment", score: 88 }),
+        makeAssessment({
+          dimension: "causal_validity",
+          decision: "fail",
+          score: 35,
+          justification: "The claimed impact is not supported by observed command output.",
+          evidence: ["No test or metric output demonstrates the claimed behavior change."],
+          recommended_next_action: "rerun targeted verification with before and after output"
+        }),
+        makeAssessment({ dimension: "constraint_compliance", score: 93 })
+      ],
+      75
+    );
+
+    expect(result.decision).toBe("fail");
+    expect(result.justification).toContain("causal_validity");
+    expect(result.evidence.some((line) => line.includes("causal_validity detail:"))).toBe(true);
+    expect(result.evidence.some((line) => line.includes("No test or metric output demonstrates"))).toBe(true);
+    expect(result.recommended_next_action).toContain(
+      "causal_validity: rerun targeted verification with before and after output"
+    );
   });
 
   test("passes when weighted score meets threshold and no blockers", () => {

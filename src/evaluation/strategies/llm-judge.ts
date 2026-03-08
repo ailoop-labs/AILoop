@@ -152,6 +152,39 @@ function toEvidenceLines(assessments: DimensionAssessment[]): string[] {
   );
 }
 
+function toDetailedEvidenceLines(assessments: DimensionAssessment[]): string[] {
+  return assessments.map((assessment) => {
+    const details = [assessment.justification, ...assessment.evidence, ...assessment.blocking_issues]
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    return `${assessment.dimension} detail: ${details.join(" | ") || "No concrete evidence provided."}`;
+  });
+}
+
+function toFollowUpActions(assessments: DimensionAssessment[]): string {
+  const actions = assessments
+    .map((assessment) => {
+      const recommendedAction = assessment.recommended_next_action.trim();
+      const action = recommendedAction && (assessment.decision === "pass" || recommendedAction !== "continue")
+        ? recommendedAction
+        : assessment.blocking_issues[0] ?? assessment.justification;
+
+      return action ? `${assessment.dimension}: ${action}` : "";
+    })
+    .filter(Boolean);
+
+  return actions.join("; ");
+}
+
+function withDetailedEvidence(baseEvidence: string[], assessments: DimensionAssessment[]): string[] {
+  if (assessments.length === 0) {
+    return baseEvidence;
+  }
+
+  return [...baseEvidence, ...toDetailedEvidenceLines(assessments)];
+}
+
 function choosePriorityAction(assessments: DimensionAssessment[]): string {
   const withBlocking = assessments.find((assessment) => assessment.blocking_issues.length > 0);
   if (withBlocking) {
@@ -287,11 +320,12 @@ export function aggregateDimensionAssessments(
   );
   if (hardGateFailure) {
     const hardGateReason = hardGateFailure.blocking_issues[0] ?? hardGateFailure.justification;
+    const followUpActions = toFollowUpActions([hardGateFailure]) || hardGateReason;
     return {
       decision: "fail",
-      justification: `Hard gate failed in ${hardGateFailure.dimension}.`,
-      evidence: [...evidence, hardGateReason],
-      recommended_next_action: hardGateReason,
+      justification: `Hard gate failed in ${hardGateFailure.dimension}. ${hardGateReason}`,
+      evidence: withDetailedEvidence([...evidence, hardGateReason], [hardGateFailure]),
+      recommended_next_action: followUpActions,
       aggregateScore: score
     };
   }
@@ -301,33 +335,42 @@ export function aggregateDimensionAssessments(
   );
   if (unknownKeyDimensions.length > 0) {
     const missing = unknownKeyDimensions.map((assessment) => assessment.dimension).join(", ");
+    const followUpActions = toFollowUpActions(unknownKeyDimensions);
     return {
       decision: "fail",
       justification: `Insufficient evidence for key dimensions: ${missing}.`,
-      evidence,
-      recommended_next_action: `pause and gather evidence: ${choosePriorityAction(unknownKeyDimensions)}`,
+      evidence: withDetailedEvidence(evidence, unknownKeyDimensions),
+      recommended_next_action: followUpActions
+        ? `pause and gather evidence: ${followUpActions}`
+        : `pause and gather evidence: ${choosePriorityAction(unknownKeyDimensions)}`,
       aggregateScore: score
     };
   }
 
+  const keyDimensionsWithBlockingIssues = adjusted.filter(
+    (assessment) => KEY_DIMENSIONS.has(assessment.dimension) && assessment.blocking_issues.length > 0
+  );
   const blockingIssue = adjusted.flatMap((assessment) => assessment.blocking_issues).find(Boolean);
   if (blockingIssue) {
+    const followUpActions = toFollowUpActions(keyDimensionsWithBlockingIssues);
     return {
       decision: "fail",
       justification: "Blocking issues were reported by dimension evaluators.",
-      evidence: [...evidence, blockingIssue],
-      recommended_next_action: blockingIssue,
+      evidence: withDetailedEvidence([...evidence, blockingIssue], keyDimensionsWithBlockingIssues),
+      recommended_next_action: followUpActions || blockingIssue,
       aggregateScore: score
     };
   }
 
   const failedDimensions = adjusted.filter((assessment) => assessment.decision === "fail");
   if (failedDimensions.length > 0) {
+    const failedKeyDimensions = failedDimensions.filter((assessment) => KEY_DIMENSIONS.has(assessment.dimension));
+    const followUpActions = toFollowUpActions(failedKeyDimensions);
     return {
       decision: "fail",
       justification: `One or more dimensions failed: ${failedDimensions.map((item) => item.dimension).join(", ")}.`,
-      evidence,
-      recommended_next_action: choosePriorityAction(failedDimensions),
+      evidence: withDetailedEvidence(evidence, failedKeyDimensions),
+      recommended_next_action: followUpActions || choosePriorityAction(failedDimensions),
       aggregateScore: score
     };
   }
