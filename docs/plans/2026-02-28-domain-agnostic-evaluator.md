@@ -64,8 +64,8 @@
 
 **Step 3: Write minimal implementation**
 - Add env parsing:
-  - `AUTOLOOP_LLM_EVALUATOR_DIMENSIONS`
-  - `AUTOLOOP_LLM_EVALUATOR_MIN_PASS_SCORE`
+  - `AILOOP_LLM_EVALUATOR_DIMENSIONS`
+  - `AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE`
 
 **Step 4: Run test to verify it passes**
 - Run tests.

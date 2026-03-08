@@ -235,9 +235,9 @@ Within each round, agents should adapt behavior to remaining budget:
 - **Low Cost Remaining:** Minimize additional LLM turns; use direct tool verification.
 
 Default round budget targets (from README MVP defaults):
-- Cost: `AUTOLOOP_BUDGET_USD_PER_ROUND=0.5`
-- Time: `AUTOLOOP_BUDGET_TIME_MINUTES=15`
-- Actions: `AUTOLOOP_BUDGET_ACTIONS=30`
+- Cost: `AILOOP_BUDGET_USD_PER_ROUND=0.5`
+- Time: `AILOOP_BUDGET_TIME_MINUTES=15`
+- Actions: `AILOOP_BUDGET_ACTIONS=30`
 
 If any budget is exhausted:
 - Immediately stop execution.

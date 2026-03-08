@@ -146,7 +146,7 @@ stateDiagram-v2
 ```
 
 ### 4.2 Data Persistence (Artifacts)
-All state is file-based (MVP) under `AUTOLOOP_HOME` (default `.ailoop/`).
+All state is file-based (MVP) under `AILOOP_HOME` (default `.ailoop/`).
 - `loop.lock`: PID and current state.
 - `runs/`: Directory for historical data.
   - `[timestamp].round.log`: Raw execution logs (with silent secret redaction).
@@ -172,7 +172,7 @@ To add new capabilities to AILoop, developers will primarily interact with two i
 Implement the `Tool` interface. Register it in the `ToolRegistry` during Engine boot. The Executor will automatically expose its schema to the LLM.
 
 **2. Adding a New Evaluator (e.g., Visual Regression):**
-Implement the `Evaluator` interface. Update the configuration (`AUTOLOOP_EVALUATOR_TYPE=visual`) to route validation logic to the new class.
+Implement the `Evaluator` interface. Update the configuration (`AILOOP_EVALUATOR_TYPE=visual`) to route validation logic to the new class.
 
 ## 7. API Contract (Console Server)
 

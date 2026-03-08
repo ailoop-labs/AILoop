@@ -248,23 +248,23 @@ export function applyRuntimeLoopConfig(baseConfig: AppConfig, runtime: RuntimeLo
 
 export function runtimeLoopConfigToEnv(runtime: RuntimeLoopConfig): Record<string, string> {
   return {
-    AUTOLOOP_INTERVAL_SECONDS: String(runtime.intervalSeconds),
-    AUTOLOOP_MAX_CYCLES: String(runtime.maxCycles),
-    AUTOLOOP_EXIT_ON_ERROR: runtime.exitOnError ? "1" : "0",
-    AUTOLOOP_EVAL_REWORK_MAX_ATTEMPTS: String(runtime.evaluatorReworkMaxAttempts),
-    AUTOLOOP_BUDGET_USD_PER_ROUND: String(runtime.budget.usdPerRound),
-    AUTOLOOP_BUDGET_TIME_MINUTES: String(runtime.budget.timeMinutes),
-    AUTOLOOP_BUDGET_ACTIONS: String(runtime.budget.actions),
-    AUTOLOOP_EVALUATOR_TYPE: runtime.evaluatorType,
-    AUTOLOOP_EVALUATOR_CMD: runtime.evaluatorCmd,
-    AUTOLOOP_WEBHOOK_EVALUATOR_URL: runtime.webhookEvaluatorUrl,
-    AUTOLOOP_CODEX_MODEL: runtime.codex.model,
-    AUTOLOOP_CODEX_PROFILE: runtime.codex.profile,
-    AUTOLOOP_CODEX_PLANNER_SANDBOX: runtime.codex.plannerSandbox,
-    AUTOLOOP_CODEX_EXECUTOR_SANDBOX: runtime.codex.executorSandbox,
-    AUTOLOOP_CODEX_EVALUATOR_SANDBOX: runtime.codex.evaluatorSandbox,
-    AUTOLOOP_CODEX_TIMEOUT_MS: String(runtime.codex.timeoutMs),
-    AUTOLOOP_LLM_EVALUATOR_DIMENSIONS: runtime.codex.llmEvaluatorDimensions.join(","),
-    AUTOLOOP_LLM_EVALUATOR_MIN_PASS_SCORE: String(runtime.codex.llmEvaluatorMinPassScore)
+    AILOOP_INTERVAL_SECONDS: String(runtime.intervalSeconds),
+    AILOOP_MAX_CYCLES: String(runtime.maxCycles),
+    AILOOP_EXIT_ON_ERROR: runtime.exitOnError ? "1" : "0",
+    AILOOP_EVAL_REWORK_MAX_ATTEMPTS: String(runtime.evaluatorReworkMaxAttempts),
+    AILOOP_BUDGET_USD_PER_ROUND: String(runtime.budget.usdPerRound),
+    AILOOP_BUDGET_TIME_MINUTES: String(runtime.budget.timeMinutes),
+    AILOOP_BUDGET_ACTIONS: String(runtime.budget.actions),
+    AILOOP_EVALUATOR_TYPE: runtime.evaluatorType,
+    AILOOP_EVALUATOR_CMD: runtime.evaluatorCmd,
+    AILOOP_WEBHOOK_EVALUATOR_URL: runtime.webhookEvaluatorUrl,
+    AILOOP_CODEX_MODEL: runtime.codex.model,
+    AILOOP_CODEX_PROFILE: runtime.codex.profile,
+    AILOOP_CODEX_PLANNER_SANDBOX: runtime.codex.plannerSandbox,
+    AILOOP_CODEX_EXECUTOR_SANDBOX: runtime.codex.executorSandbox,
+    AILOOP_CODEX_EVALUATOR_SANDBOX: runtime.codex.evaluatorSandbox,
+    AILOOP_CODEX_TIMEOUT_MS: String(runtime.codex.timeoutMs),
+    AILOOP_LLM_EVALUATOR_DIMENSIONS: runtime.codex.llmEvaluatorDimensions.join(","),
+    AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE: String(runtime.codex.llmEvaluatorMinPassScore)
   };
 }

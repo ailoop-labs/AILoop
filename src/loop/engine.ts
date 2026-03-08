@@ -163,19 +163,18 @@ export class LoopEngine {
   }
 
   async run(): Promise<void> {
-    const exists = await fileExists(this.paths.goalPath);
+    const exists = await fileExists(this.paths.taskPath);
     let shouldGenerate = !exists;
     if (exists) {
-      const content = await fs.readFile(this.paths.goalPath, "utf8");
+      const content = await fs.readFile(this.paths.taskPath, "utf8");
       if (content.trim() === "# AILoop Goal\n\nDescribe the top-level goal this autonomous loop should pursue. Keep it outcome-focused and measurable.") {
         shouldGenerate = true;
       }
     }
 
+    await ensureLoopHome(this.paths);
     if (shouldGenerate) {
-      await ensureLoopHome(this.paths, await buildDeterministicGoal(process.cwd()));
-    } else {
-      await ensureLoopHome(this.paths);
+      await fs.writeFile(this.paths.taskPath, await buildDeterministicGoal(process.cwd()), "utf8");
     }
     await this.acquireLock();
     await this.setState("running");
@@ -531,7 +530,7 @@ export class LoopEngine {
       } else if (evaluation.decision === "pass") {
         // Executor succeeded AND Evaluator passed -> We are ready to commit!
         await log("Evaluation passed. Engine is committing and pushing changes.");
-        const commitMessage = `AutoLoop Round ${round}: ${subTask.objective}\n\n${subTask.expected_outcome}`;
+        const commitMessage = `AILoop Round ${round}: ${subTask.objective}\n\n${subTask.expected_outcome}`;
         
         try {
           await this.tools.getTool("run_shell")?.execute(

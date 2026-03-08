@@ -4,7 +4,7 @@ This checklist maps the MVP success criteria from `README.md` and `ARCHITECTURE.
 
 ## Preconditions
 - Use workspace root: `/root/projects/AILoop`
-- Use clean runtime home for repeatability: `export AUTOLOOP_HOME=.ailoop`
+- Use clean runtime home for repeatability: `export AILOOP_HOME=.ailoop`
 - Start from dependencies installed and env configured.
 
 ## 1) Core Loop End-to-End
@@ -30,7 +30,7 @@ This checklist maps the MVP success criteria from `README.md` and `ARCHITECTURE.
 
 | ID | Verification check (executable) | Pass evidence | Fail evidence |
 |---|---|---|---|
-| GR-1 | Budget breaker test with tiny limits (e.g., `AUTOLOOP_BUDGET_ACTIONS=1`) and run one round | Loop pauses on breach; reason indicates budget breach; no unsafe continuation | Loop keeps running after breach or reason absent |
+| GR-1 | Budget breaker test with tiny limits (e.g., `AILOOP_BUDGET_ACTIONS=1`) and run one round | Loop pauses on breach; reason indicates budget breach; no unsafe continuation | Loop keeps running after breach or reason absent |
 | GR-2 | Evaluator-failure pause test: configure failing evaluator command and run rounds | After repeated failures (target: 3), state becomes `paused` automatically | Failures continue indefinitely without pause |
 | GR-3 | Secret redaction test: set env var containing `TOKEN`/`SECRET`, trigger logs/artifacts | Raw secret never appears in `.ailoop/runs/*`; redacted token marker present | Secret value appears unredacted on disk |
 

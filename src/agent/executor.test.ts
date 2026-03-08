@@ -19,7 +19,7 @@ describe("buildExecutorPrompt", () => {
         subTask: sampleSubTask,
         ailoopHome: "/tmp/.ailoop",
         workspaceRoot: "/tmp/workspace",
-        availableTools: [{ name: "run_shell", description: "Execute shell command" }]
+        availableTools: [{ name: "run_shell", description: "Execute shell command" }], availableSkills: []
       },
       "# Executor Role\n\nProject-specific executor instructions."
     );
@@ -37,7 +37,7 @@ describe("buildExecutorPrompt", () => {
         subTask: sampleSubTask,
         ailoopHome: "/tmp/.ailoop",
         workspaceRoot: "/tmp/workspace",
-        availableTools: [{ name: "run_shell", description: "Execute shell command" }]
+        availableTools: [{ name: "run_shell", description: "Execute shell command" }], availableSkills: []
       },
       "# Executor Role\n\nProject-specific executor instructions."
     );

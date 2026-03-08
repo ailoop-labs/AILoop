@@ -1,27 +1,11 @@
 const fs = require('fs');
-const file = 'src/loop/control.ts';
-let content = fs.readFileSync(file, 'utf8');
+let content = fs.readFileSync('src/loop/engine.ts', 'utf8');
+content = content.replace(
+  /if \(shouldGenerate\) \{\s*await ensureLoopHome\(this\.paths, await buildDeterministicGoal\(process\.cwd\(\)\)\);\s*\} else \{\s*await ensureLoopHome\(this\.paths\);\s*\}/,
+  `await ensureLoopHome(this.paths);\n    if (shouldGenerate) {\n      await fs.writeFile(this.paths.taskPath, await buildDeterministicGoal(process.cwd()), "utf8");\n    }`
+);
+fs.writeFileSync('src/loop/engine.ts', content);
 
-const helper = `
-export async function ensureLoopHomeWithGoal(config: AppConfig): Promise<LoopPaths> {
-  const paths = buildLoopPaths(config.homeDir);
-  if (!(await fileExists(paths.goalPath))) {
-    await ensureLoopHome(paths, await generateProjectGoal(config));
-  } else {
-    await ensureLoopHome(paths);
-  }
-  return paths;
-}
-`;
-
-content = content.replace("export async function listProjectRoles", helper + "\nexport async function listProjectRoles");
-
-const pattern = /const paths = buildLoopPaths\(config\.homeDir\);\n\s+await ensureLoopHome\(paths\);/g;
-const replacement = "const paths = await ensureLoopHomeWithGoal(config);";
-
-content = content.replace(pattern, replacement);
-
-const startBgPattern = /const paths = buildLoopPaths\(config\.homeDir\);\n\s+if \(!\(await fileExists\(paths\.goalPath\)\)\) \{\n\s+await ensureLoopHome\(paths, await generateProjectGoal\(config\)\);\n\s+\} else \{\n\s+await ensureLoopHome\(paths\);\n\s+\}/g;
-content = content.replace(startBgPattern, replacement);
-
-fs.writeFileSync(file, content);
+let execContent = fs.readFileSync('src/agent/executor.test.ts', 'utf8');
+execContent = execContent.replace(/availableTools: \[.*?\]/g, '$&, availableSkills: []');
+fs.writeFileSync('src/agent/executor.test.ts', execContent);

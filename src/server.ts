@@ -20,7 +20,7 @@ import {
 const config = loadConfig();
 const adminToken = config.consoleAdminToken.trim();
 const tokenAuthEnabled = adminToken.length > 0;
-const adminTokenIssuedDate = (process.env.AUTOLOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE ?? "").trim();
+const adminTokenIssuedDate = (process.env.AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE ?? "").trim();
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data, null, 2), {

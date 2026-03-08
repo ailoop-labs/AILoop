@@ -9,7 +9,7 @@ export class WebhookEvaluator implements Evaluator {
       return {
         decision: "fail",
         justification: "Webhook evaluator URL is not configured.",
-        evidence: ["Set AUTOLOOP_WEBHOOK_EVALUATOR_URL to enable webhook checks."],
+        evidence: ["Set AILOOP_WEBHOOK_EVALUATOR_URL to enable webhook checks."],
         recommended_next_action: "configure webhook evaluator URL"
       };
     }
