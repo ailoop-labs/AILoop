@@ -46,7 +46,7 @@ describe("buildExecutorPrompt", () => {
     expect(prompt).toContain("The engine writes canonical round artifacts and populates `tool_result.artifacts`");
   });
 
-  test("requires deployment evidence whenever executor performs verification or production actions", () => {
+  test("forbids executor from performing commits, pushes, and restarts", () => {
     const prompt = buildExecutorPrompt(
       {
         round: 1,
@@ -60,12 +60,8 @@ describe("buildExecutorPrompt", () => {
       "# Executor Role\n\nProject-specific executor instructions."
     );
 
-    expect(prompt).toContain("If you run verification, commit, push, restart, deploy, rollback, or health/smoke checks");
-    expect(prompt).toContain("verification commands and outcomes");
-    expect(prompt).toContain("commit hash/message");
-    expect(prompt).toContain("restart result with PID/log path");
-    expect(prompt).toContain("health or smoke check result");
-    expect(prompt).toContain("rollback command or recovery evidence");
+    expect(prompt).toContain("Do NOT commit, push, restart, or deploy. The engine handles these operational steps automatically after evaluation passes.");
+    expect(prompt).toContain("If you run local verifications or test commands, capture the concrete evidence in both `summary` and `actions`.");
   });
 });
 
