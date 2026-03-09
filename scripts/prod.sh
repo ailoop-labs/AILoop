@@ -8,7 +8,19 @@ RUN_DIR=".ailoop"
 PID_FILE="$RUN_DIR/prod.server.pid"
 LOG_FILE="$RUN_DIR/prod.server.log"
 TOKEN_CACHE_FILE="$RUN_DIR/console.admin.token.cache"
+LAUNCHCTL_LABEL="com.ailoop.prod.server"
 STOP_TIMEOUT_SECONDS="${AILOOP_PROD_STOP_TIMEOUT_SECONDS:-20}"
+BUN_BIN="$(command -v bun)"
+
+if [[ -z "$BUN_BIN" ]]; then
+  echo "bun is required but was not found in PATH."
+  exit 1
+fi
+
+USE_LAUNCHCTL=0
+if [[ "$(uname -s)" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
+  USE_LAUNCHCTL=1
+fi
 
 if ! [[ "$STOP_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
   echo "AILOOP_PROD_STOP_TIMEOUT_SECONDS must be a non-negative integer."
@@ -17,6 +29,9 @@ fi
 
 graceful_stop_server() {
   if [[ ! -f "$PID_FILE" ]]; then
+    if [[ "$USE_LAUNCHCTL" == "1" ]]; then
+      launchctl remove "$LAUNCHCTL_LABEL" >/dev/null 2>&1 || true
+    fi
     echo "AILoop Production server is not running (PID file not found)."
     return 0
   fi
@@ -47,6 +62,9 @@ graceful_stop_server() {
   done
 
   rm -f "$PID_FILE"
+  if [[ "$USE_LAUNCHCTL" == "1" ]]; then
+    launchctl remove "$LAUNCHCTL_LABEL" >/dev/null 2>&1 || true
+  fi
   echo "Stopped AILoop Production server (PID: $existing_pid)."
 }
 
@@ -163,11 +181,25 @@ echo "AILoop Production server is running at http://127.0.0.1:3090"
 echo "Use the web console for all loop operations and parameter settings."
 
 if [[ "$MODE" == "daemon" ]]; then
-  nohup bun run src/server.ts >>"$LOG_FILE" 2>&1 < /dev/null &
-  server_pid="$!"
-  echo "$server_pid" >"$PID_FILE"
+  if [[ "$USE_LAUNCHCTL" == "1" ]]; then
+    launchctl remove "$LAUNCHCTL_LABEL" >/dev/null 2>&1 || true
+    launchctl submit -l "$LAUNCHCTL_LABEL" -- /bin/bash -lc "cd '$ROOT_DIR'; echo \$\$ > '$PID_FILE'; exec '$BUN_BIN' run src/server.ts >> '$LOG_FILE' 2>&1"
+    for _ in {1..20}; do
+      if [[ -f "$PID_FILE" ]]; then
+        break
+      fi
+      sleep 0.1
+    done
+    server_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+    echo "Started in launchctl daemon mode."
+    echo "Launchd Label: $LAUNCHCTL_LABEL"
+  else
+    nohup bun run src/server.ts >>"$LOG_FILE" 2>&1 < /dev/null &
+    server_pid="$!"
+    echo "$server_pid" >"$PID_FILE"
+    echo "Started in daemon mode."
+  fi
 
-  echo "Started in daemon mode."
   echo "PID: $server_pid"
   echo "Log: $LOG_FILE"
   exit 0
