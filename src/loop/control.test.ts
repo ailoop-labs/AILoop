@@ -34,6 +34,7 @@ function makeTestConfig(homeDir: string): AppConfig {
     evaluatorType: "shell",
     evaluatorCmd: "",
     webhookEvaluatorUrl: "",
+    enableLeader: false,
     codex: {
       bin: "codex",
       model: "",
@@ -150,7 +151,8 @@ describe("getLoopStatus", () => {
     expect(status.pid).toBeNull();
     expect(status.pid_alive).toBe(false);
     expect(status.current_budget).toEqual(staleState.current_budget);
-    expect(status.last_error).toContain("Process was not alive");
+    expect(status.last_error).toContain("during status check");
+    expect(status.last_error).toContain("process 999999 was not alive");
 
     const persisted = await readLoopState(paths);
     expect(persisted.state).toBe("paused");

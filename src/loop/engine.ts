@@ -36,6 +36,7 @@ import {
   ensureLoopHome,
   hasFlag,
   readLoopState,
+  recoverInterruptedLoopState,
   setFlag,
   updateLoopState,
   writeLoopState,
@@ -384,8 +385,15 @@ export class LoopEngine {
       await fs.writeFile(this.paths.taskPath, await buildDeterministicGoal(process.cwd()), "utf8");
     }
     await this.acquireLock();
-    await this.setState("running");
     await writePid(this.paths, process.pid);
+
+    const recoveredState = await recoverInterruptedLoopState(this.paths, "startup");
+    if (recoveredState) {
+      await setFlag(this.paths.pauseFlagPath);
+      await this.setState("paused", recoveredState.last_error);
+    } else {
+      await this.setState("running");
+    }
 
     try {
       const currentState = await readLoopState(this.paths);

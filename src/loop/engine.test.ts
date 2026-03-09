@@ -12,6 +12,20 @@ import {
   resolveNextLastError
 } from "./engine";
 
+async function waitForPausedState(paths: LoopPaths, timeoutMs = 6_000): Promise<Awaited<ReturnType<typeof readLoopState>>> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const state = await readLoopState(paths);
+    if (state.state === "paused") {
+      return state;
+    }
+    await Bun.sleep(50);
+  }
+
+  throw new Error("Timed out waiting for paused state.");
+}
+
 function makeToolResult(summary: string): ToolResult {
   return {
     status: "success",
@@ -336,5 +350,83 @@ describe("LoopEngine round error handling", () => {
     expect(state.consecutive_evaluator_failures).toBe(9);
 
     await fs.rm(homeDir, { recursive: true, force: true });
+  });
+});
+
+describe("LoopEngine crash recovery on startup", () => {
+  test("pauses before starting a new round when persisted state shows an interrupted run", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-crash-recovery-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir,
+      AILOOP_MAX_CYCLES: "1"
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const seededState = await readLoopState(paths);
+    await writeLoopState(paths, {
+      ...seededState,
+      round: 4,
+      state: "running",
+      pid: 999999,
+      current_budget: {
+        limits: {
+          usdPerRound: 0.5,
+          timeMinutes: 15,
+          actions: 30
+        },
+        usage: {
+          usdUsed: 0.2,
+          actionsUsed: 7,
+          elapsedMs: 12_000
+        }
+      }
+    });
+
+    let runRoundCalls = 0;
+    const mutable = engine as unknown as {
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+      run: () => Promise<void>;
+    };
+    mutable.runRound = async () => {
+      runRoundCalls += 1;
+      return { success: true };
+    };
+
+    let runPromise: Promise<void> | null = null;
+    try {
+      runPromise = mutable.run();
+      const pausedState = await waitForPausedState(paths);
+
+      expect(runRoundCalls).toBe(0);
+      expect(pausedState.state).toBe("paused");
+      expect(pausedState.round).toBe(4);
+      expect(pausedState.current_budget).toEqual({
+        limits: {
+          usdPerRound: 0.5,
+          timeMinutes: 15,
+          actions: 30
+        },
+        usage: {
+          usdUsed: 0.2,
+          actionsUsed: 7,
+          elapsedMs: 12_000
+        }
+      });
+      expect(pausedState.last_error || "").toContain("Interrupted");
+      expect(pausedState.last_error || "").toContain("startup");
+    } finally {
+      await fs.writeFile(paths.stopFlagPath, "1\n", "utf8");
+      if (runPromise) {
+        await Promise.race([
+          runPromise,
+          Bun.sleep(6_000).then(() => {
+            throw new Error("Timed out stopping loop engine.");
+          })
+        ]);
+      }
+      await fs.rm(homeDir, { recursive: true, force: true });
+    }
   });
 });

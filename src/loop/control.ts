@@ -32,21 +32,14 @@ import {
   clearFlag,
   defaultLoopState,
   ensureLoopHome,
+  isPidAlive,
   readLoopState,
   readPid,
+  recoverInterruptedLoopState,
   setFlag,
   writeLoopState
 } from "./state";
 import type { LoopPaths } from "./state";
-
-function isPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export async function ensureProjectRoles(
   config: AppConfig,
@@ -180,23 +173,14 @@ export async function instructLoop(config: AppConfig, message: string): Promise<
 export async function getLoopStatus(config: AppConfig): Promise<LoopStateData & { pid_alive: boolean }> {
   const paths = await ensureLoopHomeAndGetPaths(config);
 
+  const recovered = await recoverInterruptedLoopState(paths, "status check");
+  if (recovered) {
+    return { ...recovered, pid_alive: false };
+  }
+
   const state = await readLoopState(paths);
   const pid = state.pid ?? (await readPid(paths));
   const pidAlive = pid ? isPidAlive(pid) : false;
-
-  if ((state.state === "running" || state.state === "cooldown") && !pidAlive) {
-    const recovered = {
-      ...state,
-      state: "paused" as const,
-      pid: null,
-      last_error: pid
-        ? `Interrupted: Process was not alive during status check (pid ${pid})`
-        : "Interrupted: Process was missing during status check"
-    };
-    await clearPid(paths);
-    await writeLoopState(paths, recovered);
-    return { ...recovered, pid_alive: false };
-  }
 
   if (!pidAlive && state.state !== "running") {
     if (pid) {

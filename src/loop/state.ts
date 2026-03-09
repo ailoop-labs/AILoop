@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { LoopStateData } from "../types/contracts";
+import type { LoopStateData, LoopStateName } from "../types/contracts";
 import { ensureDir, ensureRegularFile, fileExists, readJsonFile, readTextFile, writeJsonFile } from "../utils/fs";
 
 export interface LoopPaths {
@@ -18,6 +18,8 @@ export interface LoopPaths {
   pauseFlagPath: string;
   lockPath: string;
 }
+
+const INTERRUPTED_LOOP_STATES = new Set<LoopStateName>(["running", "cooldown", "stopping"]);
 
 export function buildLoopPaths(homeDir: string): LoopPaths {
   return {
@@ -134,6 +136,52 @@ export async function clearPid(paths: LoopPaths): Promise<void> {
       throw error;
     }
   }
+}
+
+export function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function buildInterruptedRecoveryMessage(
+  state: LoopStateName,
+  pid: number | null,
+  source: "startup" | "status check"
+): string {
+  if (pid) {
+    return `Interrupted: recovered unfinished ${state} state during ${source} because process ${pid} was not alive`;
+  }
+
+  return `Interrupted: recovered unfinished ${state} state during ${source} because no live process was found`;
+}
+
+export async function recoverInterruptedLoopState(
+  paths: LoopPaths,
+  source: "startup" | "status check"
+): Promise<LoopStateData | null> {
+  const state = await readLoopState(paths);
+  const pid = state.pid ?? (await readPid(paths));
+  const pidAlive = pid ? isPidAlive(pid) : false;
+
+  if (!INTERRUPTED_LOOP_STATES.has(state.state) || pidAlive) {
+    return null;
+  }
+
+  await clearPid(paths);
+
+  const recovered = {
+    ...state,
+    state: "paused" as const,
+    pid: null,
+    last_error: buildInterruptedRecoveryMessage(state.state, pid ?? null, source)
+  };
+
+  await writeLoopState(paths, recovered);
+  return recovered;
 }
 
 export async function appendInstruction(paths: LoopPaths, message: string): Promise<void> {
