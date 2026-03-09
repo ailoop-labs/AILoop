@@ -1,4 +1,5 @@
 import type { BudgetLimits, BudgetUsage } from "../types/contracts";
+import { evaluateRoundBudget } from "../engine/budget";
 
 export class BudgetBreachError extends Error {
   constructor(public readonly dimension: "cost" | "time" | "actions", message: string) {
@@ -17,17 +18,9 @@ export class Guardrails {
   }
 
   checkBudget(): void {
-    const elapsedMs = Date.now() - this.startedAt;
-    if (this.usdUsed > this.limits.usdPerRound) {
-      throw new BudgetBreachError("cost", "BudgetBreach: USD budget exceeded");
-    }
-
-    if (elapsedMs > this.limits.timeMinutes * 60_000) {
-      throw new BudgetBreachError("time", "BudgetBreach: time budget exceeded");
-    }
-
-    if (this.actionsUsed > this.limits.actions) {
-      throw new BudgetBreachError("actions", "BudgetBreach: action budget exceeded");
+    const result = evaluateRoundBudget(this.limits, this.usage());
+    if (result.breach) {
+      throw new BudgetBreachError(result.breach.dimension, result.breach.message);
     }
   }
 
