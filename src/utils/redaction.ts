@@ -1,3 +1,5 @@
+import { redactSecretLikeText } from "../secret-redaction";
+
 export class SecretRedactor {
   private readonly secrets: string[];
 
@@ -9,7 +11,7 @@ export class SecretRedactor {
   }
 
   redact(input: string): string {
-    let output = input;
+    let output = redactSecretLikeText(input);
     for (const secret of this.secrets) {
       output = output.split(secret).join("[REDACTED]");
     }

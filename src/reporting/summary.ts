@@ -3,6 +3,7 @@ import path from "node:path";
 import type { ActionRecord, EvaluationResult, RoundArtifacts, SubTask, ToolResult } from "../types/contracts";
 import type { RoundMetrics } from "./metrics";
 import { ensureDir, readTextFile } from "../utils/fs";
+import { SecretRedactor } from "../utils/redaction";
 
 export interface SummaryInput {
   goal: string;
@@ -24,19 +25,23 @@ export interface RunRecord {
   stateChangePath: string;
 }
 
+function redactArtifactText(content: string): string {
+  return new SecretRedactor(process.env).redact(content);
+}
+
 export async function writeLogFile(logPath: string, logLines: string[]): Promise<void> {
   await ensureDir(path.dirname(logPath));
-  await fs.writeFile(logPath, `${logLines.join("\n")}\n`, "utf8");
+  await fs.writeFile(logPath, `${redactArtifactText(logLines.join("\n"))}\n`, "utf8");
 }
 
 export async function appendLogLine(logPath: string, line: string): Promise<void> {
   await ensureDir(path.dirname(logPath));
-  await fs.appendFile(logPath, `${line}\n`, "utf8");
+  await fs.appendFile(logPath, `${redactArtifactText(line)}\n`, "utf8");
 }
 
 export async function writeStateChangeFile(stateChangePath: string, content: string): Promise<void> {
   await ensureDir(path.dirname(stateChangePath));
-  await fs.writeFile(stateChangePath, content, "utf8");
+  await fs.writeFile(stateChangePath, redactArtifactText(content), "utf8");
 }
 
 export async function writeSummaryFile(summaryPath: string, input: SummaryInput): Promise<void> {
@@ -91,7 +96,7 @@ export async function writeSummaryFile(summaryPath: string, input: SummaryInput)
     input.nextRecommendation
   ].join("\n");
 
-  await fs.writeFile(summaryPath, `${markdown}\n`, "utf8");
+  await fs.writeFile(summaryPath, `${redactArtifactText(markdown)}\n`, "utf8");
 }
 
 export async function listRunRecords(runsDir: string, limit = 20): Promise<RunRecord[]> {

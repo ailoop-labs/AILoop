@@ -2,7 +2,7 @@ export const SECRET_ENV_KEY_PATTERN = /TOKEN|KEY|SECRET/i;
 
 export const REDACTED_SECRET_VALUE = "[REDACTED]";
 
-const SECRET_ASSIGNMENT_PATTERN = /\b([A-Z][A-Z0-9_]*(?:TOKEN|KEY|SECRET)[A-Z0-9_]*)\s*=\s*([^\s|;,:]+)/gi;
+const SECRET_ASSIGNMENT_PATTERN = /\b([A-Z][A-Z0-9_]*(?:TOKEN|KEY|SECRET)[A-Z0-9_]*)\s*=\s*([^\s|;,:]+)/g;
 
 export function isSecretEnvKey(key: string): boolean {
   return SECRET_ENV_KEY_PATTERN.test(key);
