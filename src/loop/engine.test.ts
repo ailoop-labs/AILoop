@@ -120,11 +120,27 @@ describe("LoopEngine auto rework", () => {
       planner: { plan: () => Promise<SubTask> };
       executor: { execute: typeof execute };
       evaluator: { evaluate: typeof evaluate };
+      collectOperationalEvidence: () => Promise<{
+        summaryNote: string;
+        lines: string[];
+        stateChangeNotes: string[];
+      }>;
       runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
     };
     mutable.planner = { plan: async () => plan };
     mutable.executor = { execute };
     mutable.evaluator = { evaluate };
+    mutable.collectOperationalEvidence = async () => ({
+      summaryNote: "commit abc1234, push ok, restart ok, health check ok",
+      lines: [
+        "Commit: abc1234 test",
+        "Push: Everything up-to-date",
+        "Restart: PID 4242, log .ailoop/prod.server.log",
+        "Health Check: GET /api/health -> 200 OK",
+        "Rollback: git revert --no-edit abc1234 && bash scripts/prod.sh restart"
+      ],
+      stateChangeNotes: ["Shell: git push origin HEAD -> ok (Everything up-to-date)"]
+    });
 
     const outcome = await mutable.runRound(1);
 

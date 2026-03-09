@@ -348,6 +348,10 @@ export class LoopEngine {
     this.evaluator = createEvaluator(config);
   }
 
+  protected async collectOperationalEvidence(context: OperationalEvidenceContext): Promise<OperationalEvidence> {
+    return collectOperationalEvidence(context);
+  }
+
   async run(): Promise<void> {
     const exists = await fileExists(this.paths.taskPath);
     let shouldGenerate = !exists;
@@ -718,7 +722,7 @@ export class LoopEngine {
         await log("Evaluation passed. Engine is committing and pushing changes.");
 
         try {
-          const operationalEvidence = await collectOperationalEvidence(
+          const operationalEvidence = await this.collectOperationalEvidence(
             {
               round,
               objective: subTask.objective,
