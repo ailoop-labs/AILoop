@@ -64,6 +64,11 @@ export async function writeSummaryFile(summaryPath: string, input: SummaryInput)
     `- Work Summary: ${input.toolResult.summary}`,
     `- Error: ${input.toolResult.error?.message ?? "none"}`,
     "",
+    "## Operational Evidence",
+    input.toolResult.operational_evidence && input.toolResult.operational_evidence.length > 0
+      ? input.toolResult.operational_evidence.map((item) => `- ${item}`).join("\n")
+      : "- None recorded.",
+    "",
     "## Evaluation Result",
     `- Decision: ${input.evaluation.decision}`,
     `- Justification: ${input.evaluation.justification}`,

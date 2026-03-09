@@ -11,6 +11,7 @@ export type ToolResultNextStateHint = "continue" | "pause" | "stop";
 export interface ToolResult {
   status: ToolResultStatus;
   summary: string;
+  operational_evidence?: string[];
   artifacts: {
     state_change_path: string;
     log_path: string;

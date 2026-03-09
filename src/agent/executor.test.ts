@@ -45,6 +45,28 @@ describe("buildExecutorPrompt", () => {
     expect(prompt).toContain("Do not create or claim `.ailoop/runs/*` artifacts");
     expect(prompt).toContain("The engine writes canonical round artifacts and populates `tool_result.artifacts`");
   });
+
+  test("requires deployment evidence whenever executor performs verification or production actions", () => {
+    const prompt = buildExecutorPrompt(
+      {
+        round: 1,
+        goal: "Ship feature",
+        instructions: ["Keep scope minimal"],
+        subTask: sampleSubTask,
+        ailoopHome: "/tmp/.ailoop",
+        workspaceRoot: "/tmp/workspace",
+        availableTools: [{ name: "run_shell", description: "Execute shell command" }], availableSkills: []
+      },
+      "# Executor Role\n\nProject-specific executor instructions."
+    );
+
+    expect(prompt).toContain("If you run verification, commit, push, restart, deploy, rollback, or health/smoke checks");
+    expect(prompt).toContain("verification commands and outcomes");
+    expect(prompt).toContain("commit hash/message");
+    expect(prompt).toContain("restart result with PID/log path");
+    expect(prompt).toContain("health or smoke check result");
+    expect(prompt).toContain("rollback command or recovery evidence");
+  });
 });
 
 describe("sanitizeCodexActionDetail", () => {

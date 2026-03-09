@@ -18,7 +18,9 @@ import {
   writeSummaryFile
 } from "../reporting/summary";
 import type { EvaluationResult, LoopStateName, SubTask, ToolResult } from "../types/contracts";
+import type { ExecResult } from "../utils/exec";
 import { fileExists } from "../utils/fs";
+import { runShellCommand } from "../utils/exec";
 import { SecretRedactor } from "../utils/redaction";
 import { runTimestamp } from "../utils/time";
 import { buildDeterministicGoal } from "./control";
@@ -40,6 +42,29 @@ import {
 
 const INSUFFICIENT_EVIDENCE_PREFIX = "Insufficient evidence for key dimensions:";
 const CONSECUTIVE_EVALUATOR_FAILURE_LIMIT = 3;
+
+interface OperationalEvidenceContext {
+  round: number;
+  objective: string;
+  expectedOutcome: string;
+  consolePort: number;
+  log?: (message: string) => void | Promise<void>;
+}
+
+interface HealthCheckResult {
+  ok: boolean;
+  status: number;
+  body: string;
+}
+
+interface OperationalEvidence {
+  summaryNote: string;
+  lines: string[];
+  stateChangeNotes: string[];
+}
+
+type CommandRunner = (command: string) => Promise<ExecResult>;
+type HealthChecker = () => Promise<HealthCheckResult>;
 
 function extractMissingKeyDimensions(justification: string): string[] {
   const trimmed = justification.trim();
@@ -141,6 +166,167 @@ function sanitizeReworkNote(value: string | undefined | null): string {
 
 function buildEvaluatorFailureLimitMessage(count: number): string {
   return `EvaluatorFailureLimit: consecutive evaluator failures reached limit (${count}/${CONSECUTIVE_EVALUATOR_FAILURE_LIMIT}).`;
+}
+
+function normalizeCommandOutput(result: ExecResult): string {
+  const text = [result.stdout, result.stderr]
+    .filter(Boolean)
+    .join("\n")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text || `exit code ${result.code}`;
+}
+
+function extractOutputField(output: string, prefix: string): string | null {
+  const line = output
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .find((entry) => entry.startsWith(prefix));
+  return line ? line.slice(prefix.length).trim() : null;
+}
+
+async function emitOperationalLog(
+  log: OperationalEvidenceContext["log"],
+  message: string
+): Promise<void> {
+  if (!log) {
+    return;
+  }
+
+  await Promise.resolve(log(message));
+}
+
+async function runOperationalCommand(
+  command: string,
+  runner: CommandRunner,
+  stateChangeNotes: string[],
+  log?: OperationalEvidenceContext["log"]
+): Promise<ExecResult> {
+  const result = await runner(command);
+  const summary = normalizeCommandOutput(result);
+  stateChangeNotes.push(`Shell: ${command} -> ${result.code === 0 ? "ok" : "failed"} (${summary})`);
+  await emitOperationalLog(log, `Operational command ${result.code === 0 ? "succeeded" : "failed"}: ${command} -> ${summary}`);
+  return result;
+}
+
+async function checkConsoleHealth(consolePort: number): Promise<HealthCheckResult> {
+  const url = `http://127.0.0.1:${consolePort}/api/health`;
+  let lastStatus = 0;
+  let lastBody = "";
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      const response = await fetch(url);
+      const body = await response.text();
+      lastStatus = response.status;
+      lastBody = body;
+      if (response.ok) {
+        return {
+          ok: true,
+          status: response.status,
+          body
+        };
+      }
+    } catch (error) {
+      lastBody = (error as Error).message;
+    }
+
+    await Bun.sleep(500);
+  }
+
+  return {
+    ok: false,
+    status: lastStatus,
+    body: lastBody
+  };
+}
+
+function buildRoundCommitMessage(round: number, objective: string, expectedOutcome: string): string {
+  return `AILoop Round ${round}: ${objective}\n\n${expectedOutcome}`;
+}
+
+export async function collectOperationalEvidence(
+  context: OperationalEvidenceContext,
+  runner: CommandRunner = (command) => runShellCommand(command, process.cwd()),
+  healthChecker: HealthChecker = () => checkConsoleHealth(context.consolePort)
+): Promise<OperationalEvidence> {
+  const lines: string[] = [];
+  const stateChangeNotes: string[] = [];
+  const summaryNotes: string[] = [];
+  const commitMessage = buildRoundCommitMessage(context.round, context.objective, context.expectedOutcome);
+
+  await runOperationalCommand("git add .", runner, stateChangeNotes, context.log);
+  const stagedDiff = await runOperationalCommand("git diff --cached --quiet", runner, stateChangeNotes, context.log);
+
+  if (stagedDiff.code === 0) {
+    lines.push("Commit: none created (no staged changes after git add)");
+    lines.push("Push: skipped (no new commit)");
+    lines.push("Restart: skipped (no new commit)");
+    lines.push("Health Check: skipped (no restart)");
+    lines.push("Rollback: none required (no new commit)");
+    return {
+      summaryNote: "no new commit to deploy",
+      lines,
+      stateChangeNotes
+    };
+  }
+
+  if (stagedDiff.code !== 1) {
+    throw new Error(`Unable to determine staged changes: ${normalizeCommandOutput(stagedDiff)}`);
+  }
+
+  const escapedCommitMessage = commitMessage.replace(/"/g, '\\"');
+  const commitResult = await runOperationalCommand(
+    `git commit -m "${escapedCommitMessage}"`,
+    runner,
+    stateChangeNotes,
+    context.log
+  );
+  if (commitResult.code !== 0) {
+    throw new Error(`git commit failed: ${normalizeCommandOutput(commitResult)}`);
+  }
+
+  const commitHashResult = await runOperationalCommand("git rev-parse --short HEAD", runner, stateChangeNotes, context.log);
+  const commitSubjectResult = await runOperationalCommand("git log -1 --pretty=%s", runner, stateChangeNotes, context.log);
+  const commitHash = commitHashResult.stdout.trim() || "unknown";
+  const commitSubject = commitSubjectResult.stdout.trim() || `AILoop Round ${context.round}`;
+  lines.push(`Commit: ${commitHash} ${commitSubject}`);
+  summaryNotes.push(`commit ${commitHash}`);
+
+  const pushResult = await runOperationalCommand("git push origin HEAD", runner, stateChangeNotes, context.log);
+  if (pushResult.code !== 0) {
+    throw new Error(`git push failed: ${normalizeCommandOutput(pushResult)}`);
+  }
+  lines.push(`Push: ${normalizeCommandOutput(pushResult)}`);
+  summaryNotes.push("push ok");
+
+  const restartResult = await runOperationalCommand("bash scripts/prod.sh restart", runner, stateChangeNotes, context.log);
+  if (restartResult.code !== 0) {
+    throw new Error(`production restart failed: ${normalizeCommandOutput(restartResult)}`);
+  }
+  const restartOutput = [restartResult.stdout, restartResult.stderr].filter(Boolean).join("\n");
+  const restartPid = extractOutputField(restartOutput, "PID:");
+  const restartLog = extractOutputField(restartOutput, "Log:");
+  const restartLine = restartPid || restartLog
+    ? `Restart: ${restartPid ? `PID ${restartPid}` : "ok"}${restartLog ? `, log ${restartLog}` : ""}`
+    : `Restart: ${normalizeCommandOutput(restartResult)}`;
+  lines.push(restartLine);
+  summaryNotes.push("restart ok");
+
+  const health = await healthChecker();
+  if (!health.ok) {
+    throw new Error(`health check failed: HTTP ${health.status || 0} ${health.body}`.trim());
+  }
+  stateChangeNotes.push(`HTTP: GET /api/health -> ${health.status} (${health.body.replace(/\s+/g, " ").trim()})`);
+  lines.push(`Health Check: GET /api/health -> ${health.status} OK`);
+  lines.push(`Rollback: git revert --no-edit ${commitHash} && bash scripts/prod.sh restart`);
+  summaryNotes.push("health check ok");
+
+  return {
+    summaryNote: summaryNotes.join(", "),
+    lines,
+    stateChangeNotes
+  };
 }
 
 export class LoopEngine {
@@ -530,15 +716,32 @@ export class LoopEngine {
       } else if (evaluation.decision === "pass") {
         // Executor succeeded AND Evaluator passed -> We are ready to commit!
         await log("Evaluation passed. Engine is committing and pushing changes.");
-        const commitMessage = `AILoop Round ${round}: ${subTask.objective}\n\n${subTask.expected_outcome}`;
-        
+
         try {
-          await this.tools.getTool("run_shell")?.execute(
-            { command: `git add . && git commit -m "${commitMessage.replace(/"/g, '\\"')}" && git push origin HEAD` },
-            { onLog: log } as any
+          const operationalEvidence = await collectOperationalEvidence(
+            {
+              round,
+              objective: subTask.objective,
+              expectedOutcome: subTask.expected_outcome,
+              consolePort: this.config.consolePort,
+              log
+            }
           );
+          finalToolResult.operational_evidence = [
+            ...(finalToolResult.operational_evidence ?? []),
+            ...operationalEvidence.lines
+          ];
+          if (operationalEvidence.summaryNote) {
+            finalToolResult.summary = `${finalToolResult.summary} Post-pass ops: ${operationalEvidence.summaryNote}.`;
+          }
+          stateChange = `${stateChange}\n${operationalEvidence.stateChangeNotes.join("\n")}\n`;
         } catch (e) {
-          await log(`Failed to push changes: ${(e as Error).message}`);
+          const message = (e as Error).message;
+          finalToolResult.operational_evidence = [
+            ...(finalToolResult.operational_evidence ?? []),
+            `Operational Follow-up Error: ${message}`
+          ];
+          await log(`Failed to collect operational evidence: ${message}`);
         }
       } else {
         await log("Evaluation failed. Draft changes preserved in workspace for future auto-rework.");

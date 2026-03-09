@@ -81,6 +81,7 @@ export interface ActionRecord {
 export interface ToolResult {
   status: "success" | "failure";
   summary: string;
+  operational_evidence?: string[];
   artifacts: {
     state_change_path: string;
     log_path: string;

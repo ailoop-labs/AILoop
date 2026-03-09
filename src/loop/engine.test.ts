@@ -5,7 +5,12 @@ import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../config/env";
 import type { ActionRecord, EvaluationResult, SubTask, ToolResult } from "../types/contracts";
 import { ensureLoopHome, readLoopState, type LoopPaths, writeLoopState } from "./state";
-import { LoopEngine, extractSnapshotTargetsFromSubTask, resolveNextLastError } from "./engine";
+import {
+  LoopEngine,
+  collectOperationalEvidence,
+  extractSnapshotTargetsFromSubTask,
+  resolveNextLastError
+} from "./engine";
 
 function makeToolResult(summary: string): ToolResult {
   return {
@@ -138,6 +143,80 @@ describe("LoopEngine auto rework", () => {
     expect(summaryText).toContain("evaluation=pass");
 
     await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("collectOperationalEvidence records commit, push, restart, health, and rollback details", async () => {
+    const commands: string[] = [];
+    const evidence = await collectOperationalEvidence(
+      {
+        round: 5,
+        objective: "tighten deploy evidence",
+        expectedOutcome: "summary includes deploy evidence",
+        consolePort: 3090,
+        log: async () => {
+          // no-op
+        }
+      },
+      async (command) => {
+        commands.push(command);
+        if (command === "git add .") {
+          return { code: 0, stdout: "", stderr: "" };
+        }
+        if (command === "git diff --cached --quiet") {
+          return { code: 1, stdout: "", stderr: "" };
+        }
+        if (command.startsWith("git commit -m ")) {
+          return { code: 0, stdout: "[main abc1234] AILoop Round 5: tighten deploy evidence", stderr: "" };
+        }
+        if (command === "git rev-parse --short HEAD") {
+          return { code: 0, stdout: "abc1234\n", stderr: "" };
+        }
+        if (command === "git log -1 --pretty=%s") {
+          return { code: 0, stdout: "AILoop Round 5: tighten deploy evidence\n", stderr: "" };
+        }
+        if (command === "git push origin HEAD") {
+          return { code: 0, stdout: "Everything up-to-date", stderr: "" };
+        }
+        if (command === "bash scripts/prod.sh restart") {
+          return {
+            code: 0,
+            stdout: [
+              "Restart requested: stopping current server gracefully.",
+              "Started in daemon mode.",
+              "PID: 4242",
+              "Log: .ailoop/prod.server.log"
+            ].join("\n"),
+            stderr: ""
+          };
+        }
+        throw new Error(`Unexpected command: ${command}`);
+      },
+      async () => ({
+        ok: true,
+        status: 200,
+        body: '{"ok":true,"service":"ailoop-console"}'
+      })
+    );
+
+    expect(commands).toEqual([
+      "git add .",
+      "git diff --cached --quiet",
+      expect.stringContaining("git commit -m \"AILoop Round 5: tighten deploy evidence"),
+      "git rev-parse --short HEAD",
+      "git log -1 --pretty=%s",
+      "git push origin HEAD",
+      "bash scripts/prod.sh restart"
+    ]);
+    expect(evidence.summaryNote).toContain("commit abc1234");
+    expect(evidence.summaryNote).toContain("push ok");
+    expect(evidence.summaryNote).toContain("restart ok");
+    expect(evidence.summaryNote).toContain("health check ok");
+    expect(evidence.lines).toContain("Commit: abc1234 AILoop Round 5: tighten deploy evidence");
+    expect(evidence.lines).toContain("Push: Everything up-to-date");
+    expect(evidence.lines).toContain("Restart: PID 4242, log .ailoop/prod.server.log");
+    expect(evidence.lines).toContain("Health Check: GET /api/health -> 200 OK");
+    expect(evidence.lines).toContain("Rollback: git revert --no-edit abc1234 && bash scripts/prod.sh restart");
+    expect(evidence.stateChangeNotes).toContain("Shell: git push origin HEAD -> ok (Everything up-to-date)");
   });
 });
 

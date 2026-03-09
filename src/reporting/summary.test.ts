@@ -18,6 +18,7 @@ function makeSummaryInput(autoReworkAttempts: string[]): SummaryInput {
     toolResult: {
       status: "success",
       summary: "done",
+      operational_evidence: [],
       artifacts: {
         state_change_path: ".ailoop/runs/example.round.state_change.txt",
         log_path: ".ailoop/runs/example.round.log"
@@ -75,6 +76,31 @@ describe("writeSummaryFile auto rework section", () => {
 
     expect(text).toContain("## Auto Rework Attempts");
     expect(text).toContain("- No auto rework attempts were executed.");
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test("renders operational evidence when provided", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-summary-test-"));
+    const summaryPath = path.join(dir, "round.summary.md");
+    const input = makeSummaryInput([]);
+    input.toolResult.operational_evidence = [
+      "Verification: bun test src/evaluation/strategies/llm-judge.test.ts -> 9 passed",
+      "Commit: abc1234 AILoop Round 5: tighten deploy evidence",
+      "Restart: PID 4242, log .ailoop/prod.server.log",
+      "Health Check: GET /api/health -> 200 OK",
+      "Rollback: git revert --no-edit abc1234 && bash scripts/prod.sh restart"
+    ];
+
+    await writeSummaryFile(summaryPath, input);
+    const text = await fs.readFile(summaryPath, "utf8");
+
+    expect(text).toContain("## Operational Evidence");
+    expect(text).toContain("- Verification: bun test src/evaluation/strategies/llm-judge.test.ts -> 9 passed");
+    expect(text).toContain("- Commit: abc1234 AILoop Round 5: tighten deploy evidence");
+    expect(text).toContain("- Restart: PID 4242, log .ailoop/prod.server.log");
+    expect(text).toContain("- Health Check: GET /api/health -> 200 OK");
+    expect(text).toContain("- Rollback: git revert --no-edit abc1234 && bash scripts/prod.sh restart");
 
     await fs.rm(dir, { recursive: true, force: true });
   });
