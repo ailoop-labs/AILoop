@@ -17,6 +17,7 @@ export interface RuntimeLoopConfig {
   evaluatorCmd: string;
   webhookEvaluatorUrl: string;
   codex: {
+    bin: string;
     model: string;
     profile: string;
     plannerSandbox: CodexSandboxMode;
@@ -126,6 +127,7 @@ export function extractRuntimeLoopConfig(config: AppConfig): RuntimeLoopConfig {
     evaluatorCmd: config.evaluatorCmd,
     webhookEvaluatorUrl: config.webhookEvaluatorUrl,
     codex: {
+      bin: config.codex.bin,
       model: config.codex.model,
       profile: config.codex.profile,
       plannerSandbox: config.codex.plannerSandbox,
@@ -162,6 +164,7 @@ function normalizeRuntimeLoopConfig(candidate: unknown, fallback: RuntimeLoopCon
     evaluatorCmd: asString(root.evaluatorCmd, fallback.evaluatorCmd),
     webhookEvaluatorUrl: asString(root.webhookEvaluatorUrl, fallback.webhookEvaluatorUrl),
     codex: {
+      bin: asString(codex.bin, fallback.codex.bin),
       model: asString(codex.model, fallback.codex.model),
       profile: asString(codex.profile, fallback.codex.profile),
       plannerSandbox: asSandbox(codex.plannerSandbox, fallback.codex.plannerSandbox),
@@ -234,6 +237,7 @@ export function applyRuntimeLoopConfig(baseConfig: AppConfig, runtime: RuntimeLo
     webhookEvaluatorUrl: runtime.webhookEvaluatorUrl,
     codex: {
       ...baseConfig.codex,
+      bin: runtime.codex.bin,
       model: runtime.codex.model,
       profile: runtime.codex.profile,
       plannerSandbox: runtime.codex.plannerSandbox,
@@ -258,6 +262,7 @@ export function runtimeLoopConfigToEnv(runtime: RuntimeLoopConfig): Record<strin
     AILOOP_EVALUATOR_TYPE: runtime.evaluatorType,
     AILOOP_EVALUATOR_CMD: runtime.evaluatorCmd,
     AILOOP_WEBHOOK_EVALUATOR_URL: runtime.webhookEvaluatorUrl,
+    AILOOP_CODEX_BIN: runtime.codex.bin,
     AILOOP_CODEX_MODEL: runtime.codex.model,
     AILOOP_CODEX_PROFILE: runtime.codex.profile,
     AILOOP_CODEX_PLANNER_SANDBOX: runtime.codex.plannerSandbox,
