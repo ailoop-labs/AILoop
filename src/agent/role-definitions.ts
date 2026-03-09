@@ -4,7 +4,7 @@ import { buildLoopPaths, ensureLoopHome } from "../loop/state";
 import { fileExists, readTextFile, writeTextFile } from "../utils/fs";
 import { CodexClient, type JsonSchema } from "./codex-client";
 
-export type ProjectRole = "planner" | "executor" | "evaluator";
+export type ProjectRole = "planner" | "executor" | "evaluator" | "leader";
 
 export interface EnsureProjectRoleDefinitionsOptions {
   workspaceRoot?: string;
@@ -22,6 +22,7 @@ interface GeneratedRolePayload {
   planner_role_md: string;
   executor_role_md: string;
   evaluator_role_md: string;
+  leader_role_md: string;
 }
 
 const GENERATED_ROLE_SCHEMA: JsonSchema = {
@@ -29,9 +30,10 @@ const GENERATED_ROLE_SCHEMA: JsonSchema = {
   properties: {
     planner_role_md: { type: "string" },
     executor_role_md: { type: "string" },
-    evaluator_role_md: { type: "string" }
+    evaluator_role_md: { type: "string" },
+    leader_role_md: { type: "string" }
   },
-  required: ["planner_role_md", "executor_role_md", "evaluator_role_md"],
+  required: ["planner_role_md", "executor_role_md", "evaluator_role_md", "leader_role_md"],
   additionalProperties: false
 };
 
@@ -96,12 +98,34 @@ Constraints:
 This file is project-scoped and editable. Update it to customize evaluator behavior.`);
 }
 
+function defaultLeaderRoleDefinition(): string {
+  return normalizeMarkdown(`# Project Leader Role
+
+You are the Leader role for this project.
+The autonomous loop has entered a 'paused' state due to repeated errors, budget breaches, or continuous evaluation failures.
+
+Responsibilities:
+- Analyze the provided error messages, failure history, and previous round artifacts.
+- Identify the root cause of why the Planner and Executor are stuck.
+- Provide explicit, strategic instructions to unblock the system.
+
+Constraints:
+- If the issue is a simple operational blocker (e.g., missing dependency, port in use, type error), provide instructions to fix it and return "resume".
+- If the overall project goal is fundamentally impossible or structurally broken, return "stop" to escalate to the human owner.
+- You can read all files, but you may ONLY write to directional documents (README.md, GOAL.md, ARCHITECTURE.md, instructions.json).
+
+This file is project-scoped and editable. Update it to customize leader behavior.`);
+}
+
 function defaultRoleDefinition(role: ProjectRole): string {
   if (role === "planner") {
     return defaultPlannerRoleDefinition();
   }
   if (role === "executor") {
     return defaultExecutorRoleDefinition();
+  }
+  if (role === "leader") {
+    return defaultLeaderRoleDefinition();
   }
   return defaultEvaluatorRoleDefinition();
 }
@@ -118,6 +142,7 @@ function buildRoleGenerationPrompt(input: { projectGoal: string; readme: string 
     "- planner_role_md",
     "- executor_role_md",
     "- evaluator_role_md",
+    "- leader_role_md",
     "",
     "Requirements:",
     "- Make definitions specific to project context from readme.",
@@ -144,6 +169,9 @@ function rolePathFor(paths: ReturnType<typeof buildLoopPaths>, role: ProjectRole
   if (role === "executor") {
     return paths.executorRolePath;
   }
+  if (role === "leader") {
+    return paths.leaderRolePath;
+  }
   return paths.evaluatorRolePath;
 }
 
@@ -156,6 +184,9 @@ function rolePayloadFor(payload: GeneratedRolePayload | null, role: ProjectRole)
   }
   if (role === "executor") {
     return payload.executor_role_md;
+  }
+  if (role === "leader") {
+    return payload.leader_role_md;
   }
   return payload.evaluator_role_md;
 }
@@ -180,7 +211,7 @@ export async function ensureProjectRoleDefinitions(
   const paths = buildLoopPaths(config.homeDir);
   await ensureLoopHome(paths);
 
-  const allRoles: ProjectRole[] = ["planner", "executor", "evaluator"];
+  const allRoles: ProjectRole[] = ["planner", "executor", "evaluator", "leader"];
   const generated: ProjectRole[] = [];
   const skipped: ProjectRole[] = [];
   const targets: ProjectRole[] = [];

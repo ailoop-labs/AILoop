@@ -107,6 +107,22 @@ export class ToolRegistry {
           const requestedPath = toStringArg(args, "path");
           const content = toStringArg(args, "content");
           const fullPath = normalizePath(context.homeDir, requestedPath);
+          const relPath = path.relative(process.cwd(), fullPath);
+
+          if (context.role === "evaluator" || context.role === "planner") {
+            return fail(`Permission denied: The '${context.role}' role is read-only and cannot modify files.`);
+          }
+
+          const isDirectionalDoc = ["README.md", "GOAL.md", "ARCHITECTURE.md"].includes(relPath) || relPath.endsWith('instructions.json');
+
+          if (context.role === "leader" && !isDirectionalDoc) {
+            return fail(`Permission denied: Leader should only modify directional documents, not actual source code (${relPath}).`);
+          }
+
+          if (context.role === "executor" && isDirectionalDoc) {
+            return fail(`Permission denied: Executor cannot modify core directional documents (${relPath}). If the goal or architecture is wrong, ask the Leader to change it.`);
+          }
+
           await writeTextFile(fullPath, content);
           return ok(`Wrote ${fullPath}`);
         } catch (error) {
@@ -121,6 +137,13 @@ export class ToolRegistry {
       costEstimate: () => 0,
       execute: async (args: Record<string, unknown>, context: ToolContext) => {
         try {
+          if (context.role === "planner") {
+            return fail(`Permission denied: The 'planner' role cannot execute shell commands.`);
+          }
+          if (context.role === "leader") {
+            return fail(`Permission denied: The 'leader' role cannot execute shell commands. It should only adjust directional documents and provide instructions.`);
+          }
+
           const cmd = toStringArg(args, "cmd");
           const cwdRaw = typeof args.cwd === "string" ? args.cwd : context.homeDir;
           const cwd = normalizePath(context.homeDir, cwdRaw);

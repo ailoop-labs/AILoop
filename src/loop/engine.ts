@@ -5,7 +5,9 @@ import type { AppConfig } from "../config/env";
 import { ExecutorAgent } from "../agent/executor";
 import { Guardrails, BudgetBreachError } from "../agent/guardrails";
 import { PlannerAgent } from "../agent/planner";
+import { LeaderAgent } from "../agent/leader";
 import { ToolRegistry } from "../agent/tool-registry";
+import { appendInstruction } from "./state";
 import { WorkspaceManager } from "../environment/workspace";
 import { createEvaluator } from "../evaluation/evaluator";
 import { writeMetricsFile, type RoundMetrics } from "../reporting/metrics";
@@ -107,6 +109,19 @@ function extractPathTokens(text: string): string[] {
   }
 
   return tokens;
+}
+
+export function detectUnauthorizedModifications(stateChange: string): string[] {
+  const forbiddenDocs = ["README.md", "GOAL.md", "ARCHITECTURE.md"];
+  const found: string[] = [];
+  for (const doc of forbiddenDocs) {
+    const escapedDoc = doc.replace(/\./g, "\\.");
+    const regex = new RegExp(`(?:^|\\n)(?:\\+\\+\\+ b\\/|\\+\\+\\+ |diff --git a\\/)${escapedDoc}(?:$|\\n|\\s)`);
+    if (regex.test(stateChange)) {
+      found.push(doc);
+    }
+  }
+  return found;
 }
 
 export function extractSnapshotTargetsFromSubTask(subTask: SubTask, workspaceRoot: string): string[] {
@@ -334,6 +349,7 @@ export class LoopEngine {
   private readonly planner: PlannerAgent;
   private readonly tools: ToolRegistry;
   private readonly executor: ExecutorAgent;
+  private readonly leader: LeaderAgent;
   private readonly evaluator;
   private readonly redactor = new SecretRedactor(process.env);
   private previousToolResult: ToolResult | null = null;
@@ -345,6 +361,7 @@ export class LoopEngine {
     this.tools = new ToolRegistry();
     this.planner = new PlannerAgent(config);
     this.executor = new ExecutorAgent(this.tools, config);
+    this.leader = new LeaderAgent(config);
     this.evaluator = createEvaluator(config);
   }
 
@@ -383,12 +400,56 @@ export class LoopEngine {
 
         if (await hasFlag(this.paths.pauseFlagPath)) {
           await this.setState("paused");
-          const pausedResult = await waitWhilePaused(this.paths);
-          if (pausedResult === "stopped") {
-            await this.setState("stopping");
-            break;
+          
+          if (this.config.enableLeader) {
+            const currentStateData = await readLoopState(this.paths);
+            const goalContent = await fs.readFile(this.paths.taskPath, "utf8");
+            
+            try {
+              const decision = await this.leader.execute({
+                context: {
+                  goal: goalContent,
+                  lastError: currentStateData.last_error,
+                  previousEvaluationJustification: currentStateData.previous_tool_result?.status === "failure" ? null : currentStateData.last_error,
+                  stateChange: null // Can be populated if needed, but omitted for simplicity across boundaries
+                },
+                paths: this.paths,
+                onLog: async (msg) => {
+                  console.log(`[LEADER] ${msg}`);
+                }
+              });
+
+              if (decision.action === "resume") {
+                if (decision.instructions && decision.instructions.length > 0) {
+                  for (const inst of decision.instructions) {
+                    await appendInstruction(this.paths, inst);
+                  }
+                }
+                await clearFlag(this.paths.pauseFlagPath);
+                await this.setState("running");
+                continue;
+              } else {
+                await this.setState("stopping");
+                break;
+              }
+            } catch (err) {
+              console.error("[LEADER ERROR]", err);
+              // Fallback to manual pause if Leader crashes
+              const pausedResult = await waitWhilePaused(this.paths);
+              if (pausedResult === "stopped") {
+                await this.setState("stopping");
+                break;
+              }
+              await this.setState("running");
+            }
+          } else {
+            const pausedResult = await waitWhilePaused(this.paths);
+            if (pausedResult === "stopped") {
+              await this.setState("stopping");
+              break;
+            }
+            await this.setState("running");
           }
-          await this.setState("running");
         }
 
         const stateBeforeRound = await readLoopState(this.paths);
@@ -543,6 +604,13 @@ export class LoopEngine {
       await log(`Executor finished with status: ${finalToolResult.status}.`);
 
       stateChange = await workspace.buildStateChange(snapshot);
+      
+      const unauthorizedDocs = detectUnauthorizedModifications(stateChange);
+      if (unauthorizedDocs.length > 0) {
+        const errorMsg = `SecurityBreachError: Unauthorized file modification detected. The executor attempted to modify directional documents (${unauthorizedDocs.join(", ")}).`;
+        throw new Error(errorMsg);
+      }
+      
       finalToolResult.artifacts.log_path = artifacts.logPath;
       finalToolResult.artifacts.state_change_path = artifacts.stateChangePath;
 
@@ -610,6 +678,13 @@ export class LoopEngine {
                 : finalToolResult.next_state_hint
           };
           stateChange = await workspace.buildStateChange(snapshot);
+          
+          const remediationUnauthorizedDocs = detectUnauthorizedModifications(stateChange);
+          if (remediationUnauthorizedDocs.length > 0) {
+            const errorMsg = `SecurityBreachError: Unauthorized file modification detected. The executor attempted to modify directional documents (${remediationUnauthorizedDocs.join(", ")}).`;
+            throw new Error(errorMsg);
+          }
+
           finalToolResult.artifacts.log_path = artifacts.logPath;
           finalToolResult.artifacts.state_change_path = artifacts.stateChangePath;
           await enforceBudgetBeforeAction("evaluator.evaluate remediation");
@@ -691,6 +766,13 @@ export class LoopEngine {
           }
 
           stateChange = await workspace.buildStateChange(snapshot);
+          
+          const reworkUnauthorizedDocs = detectUnauthorizedModifications(stateChange);
+          if (reworkUnauthorizedDocs.length > 0) {
+            const errorMsg = `SecurityBreachError: Unauthorized file modification detected. The executor attempted to modify directional documents (${reworkUnauthorizedDocs.join(", ")}).`;
+            throw new Error(errorMsg);
+          }
+          
           await enforceBudgetBeforeAction(`evaluator.evaluate auto-rework ${attempt}`);
           evaluation = await this.evaluator.evaluate({
             subTask,

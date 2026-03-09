@@ -59,7 +59,10 @@ export interface ToolCallResult {
   error?: string;
 }
 
+export type AgentRole = "planner" | "executor" | "evaluator" | "leader";
+
 export interface ToolContext {
+  role: AgentRole;
   homeDir: string;
 }
 
@@ -111,6 +114,19 @@ export interface DimensionAssessment {
   evidence: string[];
   blocking_issues: string[];
   recommended_next_action: string;
+}
+
+export interface LeaderContext {
+  goal: string;
+  lastError: string | null;
+  previousEvaluationJustification: string | null;
+  stateChange: string | null;
+}
+
+export interface LeaderDecision {
+  rationale: string;
+  action: "resume" | "stop";
+  instructions: string[];
 }
 
 export interface RoundArtifacts {

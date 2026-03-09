@@ -11,6 +11,7 @@ function makeConfig(homeDir: string): AppConfig {
     intervalSeconds: 1,
     maxCycles: 1,
     exitOnError: false,
+    enableLeader: false,
     evaluatorReworkMaxAttempts: 1,
     consoleHost: "127.0.0.1",
     consolePort: 3090,
@@ -60,7 +61,8 @@ describe("ensureProjectRoleDefinitions", () => {
           data: {
             planner_role_md: "# Planner Role\n\nAI planner role",
             executor_role_md: "# Executor Role\n\nAI executor role",
-            evaluator_role_md: "# Evaluator Role\n\nAI evaluator role"
+            evaluator_role_md: "# Evaluator Role\n\nAI evaluator role",
+            leader_role_md: "# Leader Role\n\nAI leader role"
           } as T,
           rawMessage: "{}",
           stdout: "",
@@ -90,6 +92,7 @@ describe("ensureProjectRoleDefinitions", () => {
     await fs.writeFile(path.join(homeDir, "PLANNER_ROLE.md"), "# Planner Role\n\nEXISTING", "utf8");
     await fs.writeFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "# Executor Role\n\nEXISTING", "utf8");
     await fs.writeFile(path.join(homeDir, "EVALUATOR_ROLE.md"), "# Evaluator Role\n\nEXISTING", "utf8");
+    await fs.writeFile(path.join(homeDir, "LEADER_ROLE.md"), "# Leader Role\n\nEXISTING", "utf8");
 
     let calls = 0;
     const mockCodex = {
@@ -124,6 +127,7 @@ describe("ensureProjectRoleDefinitions", () => {
     await fs.writeFile(path.join(homeDir, "PLANNER_ROLE.md"), "# Planner Role\n\nOLD", "utf8");
     await fs.writeFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "# Executor Role\n\nOLD", "utf8");
     await fs.writeFile(path.join(homeDir, "EVALUATOR_ROLE.md"), "# Evaluator Role\n\nOLD", "utf8");
+    await fs.writeFile(path.join(homeDir, "LEADER_ROLE.md"), "# Leader Role\n\nOLD", "utf8");
 
     const mockCodex = {
       async runJson<T>() {
@@ -132,7 +136,8 @@ describe("ensureProjectRoleDefinitions", () => {
           data: {
             planner_role_md: "# Planner Role\n\nNEW",
             executor_role_md: "# Executor Role\n\nNEW",
-            evaluator_role_md: "# Evaluator Role\n\nNEW"
+            evaluator_role_md: "# Evaluator Role\n\nNEW",
+            leader_role_md: "# Leader Role\n\nNEW"
           } as T,
           rawMessage: "{}",
           stdout: "",
