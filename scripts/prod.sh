@@ -163,11 +163,7 @@ echo "AILoop Production server is running at http://127.0.0.1:3090"
 echo "Use the web console for all loop operations and parameter settings."
 
 if [[ "$MODE" == "daemon" ]]; then
-  if command -v setsid >/dev/null 2>&1; then
-    nohup setsid bun run src/server.ts >>"$LOG_FILE" 2>&1 < /dev/null &
-  else
-    nohup bun run src/server.ts >>"$LOG_FILE" 2>&1 < /dev/null &
-  fi
+  nohup bun run src/server.ts >>"$LOG_FILE" 2>&1 < /dev/null &
   server_pid="$!"
   echo "$server_pid" >"$PID_FILE"
 
