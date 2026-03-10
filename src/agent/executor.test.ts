@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { resolveCodexBin } from "../config/env";
 import type { SubTask } from "../types/contracts";
-import { buildExecutorPrompt, resolveExecutorCodexBin, sanitizeCodexActionDetail } from "./executor";
+import { buildExecutorPrompt, sanitizeCodexActionDetail } from "./executor";
 
 const sampleSubTask: SubTask = {
   assignee: "executor",
@@ -78,10 +79,10 @@ describe("sanitizeCodexActionDetail", () => {
   });
 });
 
-describe("resolveExecutorCodexBin", () => {
+describe("resolveCodexBin", () => {
   test("prefers explicit env override when codex is unavailable on PATH", () => {
     expect(
-      resolveExecutorCodexBin(
+      resolveCodexBin(
         {
           bin: "codex",
           model: "",
@@ -94,8 +95,7 @@ describe("resolveExecutorCodexBin", () => {
           llmEvaluatorMinPassScore: 75
         },
         {
-          AILOOP_EXECUTOR_CODEX_BIN: "/Users/test/.bun/bin/codex",
-          AILOOP_CODEX_BIN: "/opt/codex/bin/codex",
+          AILOOP_CODEX_BIN: "/Users/test/.bun/bin/codex",
           PATH: ""
         }
       )

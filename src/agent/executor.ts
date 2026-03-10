@@ -1,4 +1,5 @@
 import type { AppConfig } from "../config/env";
+import { resolveCodexBin } from "../config/env";
 import type { LoopPaths } from "../loop/state";
 import type { ActionRecord, SubTask, ToolResult } from "../types/contracts";
 import type { Guardrails } from "./guardrails";
@@ -32,7 +33,6 @@ interface CodexExecutorResponse {
 
 const RUN_ARTIFACT_REFERENCE_PATTERN =
   /(?:[^\s'"`]*\.ailoop\/runs\/[^\s'"`]+|[^\s'"`]+\.round\.(?:log|summary\.md|metrics\.json|state_change\.txt))/g;
-const DEFAULT_CODEX_BIN = "codex";
 
 export interface ExecutorPromptInput {
   round: number;
@@ -64,28 +64,6 @@ const EXECUTOR_RESPONSE_SCHEMA: JsonSchema = {
 
 export function sanitizeCodexActionDetail(detail: string): string {
   return detail.replace(RUN_ARTIFACT_REFERENCE_PATTERN, ".ailoop/runs/<engine-managed-artifact>");
-}
-
-export function resolveExecutorCodexBin(
-  config: AppConfig["codex"],
-  env: NodeJS.ProcessEnv = process.env
-): string {
-  const executorOverride = env.AILOOP_EXECUTOR_CODEX_BIN?.trim();
-  if (executorOverride) {
-    return executorOverride;
-  }
-
-  const sharedOverride = env.AILOOP_CODEX_BIN?.trim();
-  if (sharedOverride) {
-    return sharedOverride;
-  }
-
-  const configuredBin = config.bin.trim();
-  if (configuredBin && configuredBin !== DEFAULT_CODEX_BIN) {
-    return configuredBin;
-  }
-
-  return configuredBin || DEFAULT_CODEX_BIN;
 }
 
 function normalizeActions(rawActions: string[], status: "success" | "failure", errorMessage: string): ActionRecord[] {
@@ -190,7 +168,7 @@ export class ExecutorAgent {
   ) {
     this.codex = new CodexClient({
       ...config.codex,
-      bin: resolveExecutorCodexBin(config.codex)
+      bin: resolveCodexBin(config.codex)
     });
     this.sandbox = config.codex.executorSandbox;
     this.homeDir = config.homeDir;

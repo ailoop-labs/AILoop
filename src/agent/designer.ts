@@ -1,4 +1,5 @@
 import type { AppConfig } from "../config/env";
+import { resolveCodexBin } from "../config/env";
 import type { LoopPaths } from "../loop/state";
 import type { ActionRecord, SubTask, ToolResult } from "../types/contracts";
 import type { Guardrails } from "./guardrails";
@@ -164,7 +165,10 @@ export class DesignerAgent {
     private readonly tools: ToolRegistry,
     config: AppConfig
   ) {
-    this.codex = new CodexClient(config.codex);
+    this.codex = new CodexClient({
+      ...config.codex,
+      bin: resolveCodexBin(config.codex)
+    });
     this.sandbox = config.codex.executorSandbox;
     this.homeDir = config.homeDir;
   }

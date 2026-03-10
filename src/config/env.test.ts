@@ -1,5 +1,16 @@
-import { describe, expect, test } from "bun:test";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, test } from "bun:test";
 import { loadConfig } from "./env";
+
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    tempDirs.splice(0).map((dirPath) => fs.rm(dirPath, { recursive: true, force: true }))
+  );
+});
 
 describe("loadConfig llm evaluator options", () => {
   test("uses defaults for domain-agnostic evaluator controls", () => {
@@ -31,5 +42,30 @@ describe("loadConfig llm evaluator options", () => {
     ]);
     expect(config.codex.llmEvaluatorMinPassScore).toBe(81);
     expect(config.evaluatorReworkMaxAttempts).toBe(3);
+  });
+
+  test("reads codex bin from .env when process env does not provide it", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-env-test-"));
+    tempDirs.push(cwd);
+    await fs.writeFile(path.join(cwd, ".env"), "AILOOP_CODEX_BIN=/tmp/test-codex\n", "utf8");
+
+    const config = loadConfig({}, { cwd });
+
+    expect(config.codex.bin).toBe("/tmp/test-codex");
+  });
+
+  test("prefers process env over .env codex settings", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-env-test-"));
+    tempDirs.push(cwd);
+    await fs.writeFile(path.join(cwd, ".env"), "AILOOP_CODEX_BIN=/tmp/test-codex\n", "utf8");
+
+    const config = loadConfig(
+      {
+        AILOOP_CODEX_BIN: "/tmp/override-codex"
+      },
+      { cwd }
+    );
+
+    expect(config.codex.bin).toBe("/tmp/override-codex");
   });
 });

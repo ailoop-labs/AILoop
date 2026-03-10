@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import type { BudgetLimits, EvaluationDimension, EvaluatorType } from "../types/contracts";
 
@@ -42,6 +43,57 @@ export interface AppConfig {
   codex: CodexConfig;
 }
 
+interface LoadConfigOptions {
+  cwd?: string;
+}
+
+function readDotEnvFile(cwd: string): Record<string, string> {
+  const envPath = path.join(cwd, ".env");
+  if (!fs.existsSync(envPath)) {
+    return {};
+  }
+
+  const parsed: Record<string, string> = {};
+  const raw = fs.readFileSync(envPath, "utf8");
+
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    const separatorIndex = trimmed.indexOf("=");
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    if (!key) {
+      continue;
+    }
+
+    const value = trimmed
+      .slice(separatorIndex + 1)
+      .trim()
+      .replace(/^(['"])(.*)\1$/, "$2");
+    parsed[key] = value;
+  }
+
+  return parsed;
+}
+
+function resolveEnvValue(
+  env: NodeJS.ProcessEnv,
+  fileEnv: Record<string, string>,
+  key: string
+): string | undefined {
+  const runtimeValue = env[key];
+  if (runtimeValue !== undefined) {
+    return runtimeValue;
+  }
+  return fileEnv[key];
+}
+
 function parseNumber(value: string | undefined, fallback: number): number {
   if (!value) {
     return fallback;
@@ -79,19 +131,43 @@ function parseLlmEvaluatorDimensions(value: string | undefined): EvaluationDimen
   return Array.from(new Set(parsed));
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const homeDir = path.resolve(env.AILOOP_HOME ?? "./.ailoop");
-  const intervalSeconds = parseNumber(env.AILOOP_INTERVAL_SECONDS, 1200);
-  const maxCycles = parseNumber(env.AILOOP_MAX_CYCLES, 0);
-  const exitOnError = (env.AILOOP_EXIT_ON_ERROR ?? "0") === "1";
-  const enableLeader = (env.AILOOP_ENABLE_LEADER ?? "0") === "1";
-  const evaluatorReworkMaxAttempts = Math.max(0, Math.min(5, Math.round(parseNumber(env.AILOOP_EVAL_REWORK_MAX_ATTEMPTS, 1))));
-  const consoleHost = env.AILOOP_CONSOLE_HOST ?? "0.0.0.0";
-  const consolePort = parseNumber(env.AILOOP_CONSOLE_PORT, 3090);
-  const consoleAdminToken = env.AILOOP_CONSOLE_ADMIN_TOKEN ?? "";
-  const maxRetainRuns = parseNumber(env.AILOOP_MAX_RETAIN_RUNS, 50);
+export function resolveCodexBin(
+  config: CodexConfig,
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  const sharedOverride = env.AILOOP_CODEX_BIN?.trim();
+  if (sharedOverride) {
+    return sharedOverride;
+  }
 
-  const evaluatorTypeRaw = (env.AILOOP_EVALUATOR_TYPE ?? "llm") as EvaluatorType;
+  const configuredBin = config.bin.trim();
+  const defaultBin = "codex";
+  if (configuredBin && configuredBin !== defaultBin) {
+    return configuredBin;
+  }
+
+  return configuredBin || defaultBin;
+}
+
+export function loadConfig(env: NodeJS.ProcessEnv = process.env, options: LoadConfigOptions = {}): AppConfig {
+  const fileEnv = readDotEnvFile(options.cwd ?? process.cwd());
+  const get = (key: string): string | undefined => resolveEnvValue(env, fileEnv, key);
+
+  const homeDir = path.resolve(get("AILOOP_HOME") ?? "./.ailoop");
+  const intervalSeconds = parseNumber(get("AILOOP_INTERVAL_SECONDS"), 1200);
+  const maxCycles = parseNumber(get("AILOOP_MAX_CYCLES"), 0);
+  const exitOnError = (get("AILOOP_EXIT_ON_ERROR") ?? "0") === "1";
+  const enableLeader = (get("AILOOP_ENABLE_LEADER") ?? "0") === "1";
+  const evaluatorReworkMaxAttempts = Math.max(
+    0,
+    Math.min(5, Math.round(parseNumber(get("AILOOP_EVAL_REWORK_MAX_ATTEMPTS"), 1)))
+  );
+  const consoleHost = get("AILOOP_CONSOLE_HOST") ?? "0.0.0.0";
+  const consolePort = parseNumber(get("AILOOP_CONSOLE_PORT"), 3090);
+  const consoleAdminToken = get("AILOOP_CONSOLE_ADMIN_TOKEN") ?? "";
+  const maxRetainRuns = parseNumber(get("AILOOP_MAX_RETAIN_RUNS"), 50);
+
+  const evaluatorTypeRaw = (get("AILOOP_EVALUATOR_TYPE") ?? "llm") as EvaluatorType;
   const evaluatorType: EvaluatorType = ["shell", "llm", "webhook"].includes(evaluatorTypeRaw)
     ? evaluatorTypeRaw
     : "shell";
@@ -108,23 +184,26 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     consoleAdminToken,
     maxRetainRuns,
     budget: {
-      usdPerRound: parseNumber(env.AILOOP_BUDGET_USD_PER_ROUND, 0.5),
-      timeMinutes: parseNumber(env.AILOOP_BUDGET_TIME_MINUTES, 60),
-      actions: parseNumber(env.AILOOP_BUDGET_ACTIONS, 30)
+      usdPerRound: parseNumber(get("AILOOP_BUDGET_USD_PER_ROUND"), 0.5),
+      timeMinutes: parseNumber(get("AILOOP_BUDGET_TIME_MINUTES"), 60),
+      actions: parseNumber(get("AILOOP_BUDGET_ACTIONS"), 30)
     },
     evaluatorType,
-    evaluatorCmd: env.AILOOP_EVALUATOR_CMD ?? "",
-    webhookEvaluatorUrl: env.AILOOP_WEBHOOK_EVALUATOR_URL ?? "",
+    evaluatorCmd: get("AILOOP_EVALUATOR_CMD") ?? "",
+    webhookEvaluatorUrl: get("AILOOP_WEBHOOK_EVALUATOR_URL") ?? "",
     codex: {
-      bin: env.AILOOP_CODEX_BIN ?? "codex",
-      model: env.AILOOP_CODEX_MODEL ?? "",
-      profile: env.AILOOP_CODEX_PROFILE ?? "",
-      plannerSandbox: parseSandboxMode(env.AILOOP_CODEX_PLANNER_SANDBOX, "read-only"),
-      executorSandbox: parseSandboxMode(env.AILOOP_CODEX_EXECUTOR_SANDBOX, "danger-full-access"),
-      evaluatorSandbox: parseSandboxMode(env.AILOOP_CODEX_EVALUATOR_SANDBOX, "danger-full-access"),
-      timeoutMs: parseNumber(env.AILOOP_CODEX_TIMEOUT_MS, 180_000),
-      llmEvaluatorDimensions: parseLlmEvaluatorDimensions(env.AILOOP_LLM_EVALUATOR_DIMENSIONS),
-      llmEvaluatorMinPassScore: Math.max(0, Math.min(100, parseNumber(env.AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE, 75)))
+      bin: get("AILOOP_CODEX_BIN") ?? "codex",
+      model: get("AILOOP_CODEX_MODEL") ?? "",
+      profile: get("AILOOP_CODEX_PROFILE") ?? "",
+      plannerSandbox: parseSandboxMode(get("AILOOP_CODEX_PLANNER_SANDBOX"), "read-only"),
+      executorSandbox: parseSandboxMode(get("AILOOP_CODEX_EXECUTOR_SANDBOX"), "danger-full-access"),
+      evaluatorSandbox: parseSandboxMode(get("AILOOP_CODEX_EVALUATOR_SANDBOX"), "danger-full-access"),
+      timeoutMs: parseNumber(get("AILOOP_CODEX_TIMEOUT_MS"), 180_000),
+      llmEvaluatorDimensions: parseLlmEvaluatorDimensions(get("AILOOP_LLM_EVALUATOR_DIMENSIONS")),
+      llmEvaluatorMinPassScore: Math.max(
+        0,
+        Math.min(100, parseNumber(get("AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE"), 75))
+      )
     }
   };
 }
