@@ -3,6 +3,7 @@ import path from "node:path";
 import type { FileHandle } from "node:fs/promises";
 import type { AppConfig } from "../config/env";
 import { ExecutorAgent } from "../agent/executor";
+import { DesignerAgent } from "../agent/designer";
 import { Guardrails, BudgetBreachError } from "../agent/guardrails";
 import { PlannerAgent } from "../agent/planner";
 import { LeaderAgent } from "../agent/leader";
@@ -148,7 +149,7 @@ function buildEvaluatorReworkSubTask(
 ): SubTask {
   return {
     rationale: `Evaluator returned fail. Execute auto-rework attempt ${attempt}/${maxAttempts} with minimal scope to satisfy evaluator blockers.`,
-    assignee: "executor",
+    assignee: originalTask.assignee || "executor",
     objective: `Revise the current round output to resolve evaluator failure for objective '${originalTask.objective}'.`,
     expected_outcome:
       "Updated code/tests plus explicit verification evidence address evaluator feedback and produce a pass decision.",
@@ -351,6 +352,7 @@ export class LoopEngine {
   private readonly planner: PlannerAgent;
   private readonly tools: ToolRegistry;
   private readonly executor: ExecutorAgent;
+  private readonly designer: DesignerAgent;
   private readonly leader: LeaderAgent;
   private readonly evaluator;
   private readonly redactor = new SecretRedactor(process.env);
@@ -363,6 +365,7 @@ export class LoopEngine {
     this.tools = new ToolRegistry();
     this.planner = new PlannerAgent(this.tools, config);
     this.executor = new ExecutorAgent(this.tools, config);
+    this.designer = new DesignerAgent(this.tools, config);
     this.leader = new LeaderAgent(config);
     this.evaluator = createEvaluator(config);
   }
@@ -597,8 +600,10 @@ export class LoopEngine {
       snapshot = await workspace.createSnapshot(snapshotTargets);
 
       await log(`Planner objective: ${subTask.objective}`);
-      await enforceBudgetBeforeAction("executor.execute");
-      const execution = await this.executor.execute({
+      const agentType = subTask.assignee === "designer" ? "designer" : "executor";
+      const activeAgent = subTask.assignee === "designer" ? this.designer : this.executor;
+      await enforceBudgetBeforeAction(`${agentType}.execute`);
+      const execution = await activeAgent.execute({
         subTask,
         round,
         goal,
@@ -611,7 +616,7 @@ export class LoopEngine {
       let finalToolResult: ToolResult = {
         ...execution.toolResult
       };
-      await log(`Executor finished with status: ${finalToolResult.status}.`);
+      await log(`${agentType === "designer" ? "Designer" : "Executor"} finished with status: ${finalToolResult.status}.`);
 
       stateChange = await workspace.buildStateChange(snapshot);
       
@@ -667,8 +672,10 @@ export class LoopEngine {
           "Collect concrete evidence from commands/files and persist it in workspace artifacts so evaluator can verify compliance."
         ];
 
-        await enforceBudgetBeforeAction("executor.execute remediation");
-        const remediation = await this.executor.execute({
+        const remediationAgentType = remediationTask.assignee === "designer" ? "designer" : "executor";
+        const remediationAgent = remediationTask.assignee === "designer" ? this.designer : this.executor;
+        await enforceBudgetBeforeAction(`${remediationAgentType}.execute remediation`);
+        const remediation = await remediationAgent.execute({
           subTask: remediationTask,
           round,
           goal,
@@ -737,8 +744,10 @@ export class LoopEngine {
             attempt,
             this.config.evaluatorReworkMaxAttempts
           );
-          await enforceBudgetBeforeAction(`executor.execute auto-rework ${attempt}`);
-          const rework = await this.executor.execute({
+          const reworkAgentType = reworkTask.assignee === "designer" ? "designer" : "executor";
+          const reworkAgent = reworkTask.assignee === "designer" ? this.designer : this.executor;
+          await enforceBudgetBeforeAction(`${reworkAgentType}.execute auto-rework ${attempt}`);
+          const rework = await reworkAgent.execute({
             subTask: reworkTask,
             round,
             goal,
