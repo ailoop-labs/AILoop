@@ -148,6 +148,7 @@ function buildEvaluatorReworkSubTask(
 ): SubTask {
   return {
     rationale: `Evaluator returned fail. Execute auto-rework attempt ${attempt}/${maxAttempts} with minimal scope to satisfy evaluator blockers.`,
+    assignee: "executor",
     objective: `Revise the current round output to resolve evaluator failure for objective '${originalTask.objective}'.`,
     expected_outcome:
       "Updated code/tests plus explicit verification evidence address evaluator feedback and produce a pass decision.",
@@ -562,6 +563,7 @@ export class LoopEngine {
 
     let subTask: SubTask = {
       rationale: "Round initialization",
+      assignee: "executor",
       objective: "Initialize round context",
       expected_outcome: "Context initialized",
       recommended_tools: []
@@ -650,6 +652,7 @@ export class LoopEngine {
         const remediationTask: SubTask = {
           rationale:
             "Evaluator failed due to insufficient key-dimension evidence. Collect explicit, verifiable proof from workspace state and run outputs.",
+          assignee: "executor",
           objective: `Collect and persist explicit evidence for these missing key dimensions: ${missingKeyDimensions.join(
             ", "
           )}.`,

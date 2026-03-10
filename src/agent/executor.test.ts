@@ -3,6 +3,7 @@ import type { SubTask } from "../types/contracts";
 import { buildExecutorPrompt, sanitizeCodexActionDetail } from "./executor";
 
 const sampleSubTask: SubTask = {
+  assignee: "executor",
   rationale: "test rationale",
   objective: "Update one file",
   expected_outcome: "tests pass",

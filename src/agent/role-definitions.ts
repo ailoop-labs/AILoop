@@ -4,7 +4,7 @@ import { buildLoopPaths, ensureLoopHome } from "../loop/state";
 import { fileExists, readTextFile, writeTextFile } from "../utils/fs";
 import { CodexClient, type JsonSchema } from "./codex-client";
 
-export type ProjectRole = "planner" | "executor" | "evaluator" | "leader";
+export type ProjectRole = "planner" | "executor" | "evaluator" | "leader" | "designer";
 
 export interface EnsureProjectRoleDefinitionsOptions {
   workspaceRoot?: string;
@@ -23,6 +23,7 @@ interface GeneratedRolePayload {
   executor_role_md: string;
   evaluator_role_md: string;
   leader_role_md: string;
+  designer_role_md: string;
 }
 
 const GENERATED_ROLE_SCHEMA: JsonSchema = {
@@ -31,9 +32,10 @@ const GENERATED_ROLE_SCHEMA: JsonSchema = {
     planner_role_md: { type: "string" },
     executor_role_md: { type: "string" },
     evaluator_role_md: { type: "string" },
-    leader_role_md: { type: "string" }
+    leader_role_md: { type: "string" },
+    designer_role_md: { type: "string" }
   },
-  required: ["planner_role_md", "executor_role_md", "evaluator_role_md", "leader_role_md"],
+  required: ["planner_role_md", "executor_role_md", "evaluator_role_md", "leader_role_md", "designer_role_md"],
   additionalProperties: false
 };
 
@@ -53,6 +55,7 @@ Responsibilities:
 - Write clear, structured requirements using professional product frameworks (e.g., Why-What-Acceptance).
 - Include explicit expected outcomes with re-runnable verification.
 - [SELF-HEALING]: If \`previous_round_error\` is present and indicates a system, infrastructure, test framework, or tool bug, your HIGHEST priority is to generate a SubTask to investigate and fix that specific bug immediately. You must suspend the previous business objective until the infrastructure bug is resolved.
+- Assign tasks appropriately: use "designer" for UI/UX, visual design, responsive layouts, or CSS architecture. Use "executor" for logic, API, infrastructure, or general coding.
 
 Skills & Frameworks:
 - You have access to professional product management skills (e.g., \`wwas\`, \`create-prd\`). 
@@ -64,6 +67,25 @@ Constraints:
 - Do not weaken budget, safety, or schema guardrails.
 
 This file is project-scoped and editable. Update it to customize Product Manager behavior.`);
+}
+
+function defaultDesignerRoleDefinition(): string {
+  return normalizeMarkdown(`# UI/UX Designer Role
+
+You are the Designer role for this project.
+
+Responsibilities:
+- Focus strictly on UI/UX best practices, responsive layouts, typography, spacing, and visual harmony.
+- Implement UI components using Tailwind CSS or Vanilla CSS, ensuring modularity and reusability.
+- Provide comprehensive design specs or high-fidelity code for the executor to integrate.
+- Ensure accessibility (a11y) standards are met across all interfaces.
+
+Constraints:
+- Do not modify complex backend business logic or database schemas unless strictly required for UI rendering.
+- Maintain consistency with the project's existing design system and styling approach.
+- Always provide verifiable visual or structural outcomes.
+
+This file is project-scoped and editable. Update it to customize designer behavior.`);
 }
 
 function defaultExecutorRoleDefinition(): string {
@@ -126,6 +148,9 @@ function defaultRoleDefinition(role: ProjectRole): string {
   if (role === "planner") {
     return defaultPlannerRoleDefinition();
   }
+  if (role === "designer") {
+    return defaultDesignerRoleDefinition();
+  }
   if (role === "executor") {
     return defaultExecutorRoleDefinition();
   }
@@ -145,6 +170,7 @@ function buildRoleGenerationPrompt(input: { projectGoal: string; readme: string 
     "",
     "Output fields:",
     "- planner_role_md",
+    "- designer_role_md",
     "- executor_role_md",
     "- evaluator_role_md",
     "- leader_role_md",
@@ -171,6 +197,9 @@ function rolePathFor(paths: ReturnType<typeof buildLoopPaths>, role: ProjectRole
   if (role === "planner") {
     return paths.plannerRolePath;
   }
+  if (role === "designer") {
+    return paths.designerRolePath;
+  }
   if (role === "executor") {
     return paths.executorRolePath;
   }
@@ -186,6 +215,9 @@ function rolePayloadFor(payload: GeneratedRolePayload | null, role: ProjectRole)
   }
   if (role === "planner") {
     return payload.planner_role_md;
+  }
+  if (role === "designer") {
+    return payload.designer_role_md;
   }
   if (role === "executor") {
     return payload.executor_role_md;
@@ -216,7 +248,7 @@ export async function ensureProjectRoleDefinitions(
   const paths = buildLoopPaths(config.homeDir);
   await ensureLoopHome(paths);
 
-  const allRoles: ProjectRole[] = ["planner", "executor", "evaluator", "leader"];
+  const allRoles: ProjectRole[] = ["planner", "designer", "executor", "evaluator", "leader"];
   const generated: ProjectRole[] = [];
   const skipped: ProjectRole[] = [];
   const targets: ProjectRole[] = [];

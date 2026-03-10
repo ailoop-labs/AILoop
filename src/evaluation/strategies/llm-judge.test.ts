@@ -19,7 +19,8 @@ function makeAssessment(partial: Partial<DimensionAssessment> & Pick<DimensionAs
 function makeRoundContext(): RoundEvaluationContext {
   return {
     subTask: {
-      rationale: "test rationale",
+      assignee: "executor",
+  rationale: "test rationale",
       objective: "Update workspace snapshot handling",
       expected_outcome: "workspace snapshot tests pass",
       recommended_tools: ["read_file", "write_file", "run_shell"]

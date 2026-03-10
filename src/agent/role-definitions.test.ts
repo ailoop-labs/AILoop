@@ -93,6 +93,7 @@ describe("ensureProjectRoleDefinitions", () => {
     await fs.writeFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "# Executor Role\n\nEXISTING", "utf8");
     await fs.writeFile(path.join(homeDir, "EVALUATOR_ROLE.md"), "# Evaluator Role\n\nEXISTING", "utf8");
     await fs.writeFile(path.join(homeDir, "LEADER_ROLE.md"), "# Leader Role\n\nEXISTING", "utf8");
+    await fs.writeFile(path.join(homeDir, "DESIGNER_ROLE.md"), "# Designer Role\n\nEXISTING", "utf8");
 
     let calls = 0;
     const mockCodex = {
@@ -182,7 +183,8 @@ describe("ensureProjectRoleDefinitions", () => {
       codexClient: mockCodex as never
     });
 
-    expect(await fs.readFile(path.join(homeDir, "PLANNER_ROLE.md"), "utf8")).toContain("Project Planner Role");
+    expect(await fs.readFile(path.join(homeDir, "PLANNER_ROLE.md"), "utf8")).toContain("Product Manager (Planner) Role");
+    expect(await fs.readFile(path.join(homeDir, "DESIGNER_ROLE.md"), "utf8")).toContain("UI/UX Designer Role");
     expect(await fs.readFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "utf8")).toContain("Project Executor Role");
     expect(await fs.readFile(path.join(homeDir, "EVALUATOR_ROLE.md"), "utf8")).toContain("Project Evaluator Role");
 

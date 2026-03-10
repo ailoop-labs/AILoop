@@ -8,6 +8,7 @@ const SUBTASK_SCHEMA: JsonSchema = {
   type: "object",
   properties: {
     rationale: { type: "string" },
+    assignee: { type: "string", enum: ["executor", "designer"] },
     objective: { type: "string" },
     expected_outcome: { type: "string" },
     recommended_tools: {
@@ -15,7 +16,7 @@ const SUBTASK_SCHEMA: JsonSchema = {
       items: { type: "string" }
     }
   },
-  required: ["rationale", "objective", "expected_outcome", "recommended_tools"],
+  required: ["rationale", "assignee", "objective", "expected_outcome", "recommended_tools"],
   additionalProperties: false
 };
 
@@ -108,6 +109,7 @@ function fallbackPlan(context: PlannerContext): SubTask {
   if (!goal) {
     return {
       rationale: "Missing required context: README.md is empty, so the safest next action is clarification.",
+      assignee: "executor",
       objective: "Request clarification from the operator to populate .ailoop/README.md before continuing execution.",
       expected_outcome: "A human instruction is queued with concrete goal details.",
       recommended_tools: ["read_file"]
@@ -123,6 +125,7 @@ function fallbackPlan(context: PlannerContext): SubTask {
     const cleanedInstruction = sanitizeInstruction(latestInstruction);
     return {
       rationale: `${blockerNote} Human instruction was supplied and is highest-priority input for this round.`,
+      assignee: "executor",
       objective: `Execute one atomic, verifiable step that applies instruction '${cleanedInstruction}' and advances the goal.`,
       expected_outcome: "A concrete state change or validation result demonstrates measurable progress tied to the instruction.",
       recommended_tools: ["read_file", "write_file", "run_shell", "http_request"]
@@ -132,6 +135,7 @@ function fallbackPlan(context: PlannerContext): SubTask {
   if (context.consecutive_evaluator_failures > 0 && !hasExplicitDocumentationRequest(context.instructions)) {
     return {
       rationale: `${blockerNote} Prior evaluator failures require an implementation-first recovery task with concrete, verifiable code change.`,
+      assignee: "executor",
       objective: "Implement one minimal code or test change in tracked project files that addresses the latest failure signal.",
       expected_outcome:
         "At least one file under src/, scripts/, or web/src/ changes and a re-runnable verification command confirms progress.",
@@ -141,6 +145,7 @@ function fallbackPlan(context: PlannerContext): SubTask {
 
   return {
     rationale: `${blockerNote} The round should produce one clear, outcome-oriented change without broad scope expansion.`,
+    assignee: "executor",
     objective: `Complete one atomic, verifiable step for round ${context.round} that advances the goal in README.md.`,
     expected_outcome: "Evidence in workspace state or checks shows measurable progress toward the goal.",
     recommended_tools: ["read_file", "write_file", "run_shell"]
@@ -150,6 +155,7 @@ function fallbackPlan(context: PlannerContext): SubTask {
 function normalizeSubTask(candidate: SubTask): SubTask {
   return {
     rationale: String(candidate.rationale ?? "").trim(),
+    assignee: candidate.assignee === "designer" ? "designer" : "executor",
     objective: String(candidate.objective ?? "").trim(),
     expected_outcome: String(candidate.expected_outcome ?? "").trim(),
     recommended_tools: Array.isArray(candidate.recommended_tools)

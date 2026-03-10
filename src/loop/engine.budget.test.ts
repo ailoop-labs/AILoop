@@ -19,7 +19,8 @@ describe("LoopEngine budget guard", () => {
     await ensureLoopHome(paths);
 
     const plan: SubTask = {
-      rationale: "test",
+      assignee: "executor",
+  rationale: "test",
       objective: "should not execute",
       expected_outcome: "should not execute",
       recommended_tools: ["read_file"]
@@ -153,7 +154,8 @@ describe("LoopEngine budget guard", () => {
       await ensureLoopHome(paths);
 
       const plan: SubTask = {
-        rationale: "test",
+        assignee: "executor",
+  rationale: "test",
         objective: "trigger executor-phase budget breach",
         expected_outcome: "engine pauses with artifacts",
         recommended_tools: ["run_shell"]

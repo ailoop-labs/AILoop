@@ -37,6 +37,7 @@ export interface LoopStateData {
 
 export interface SubTask {
   rationale: string;
+  assignee: "executor" | "designer";
   objective: string;
   expected_outcome: string;
   recommended_tools: string[];
@@ -59,7 +60,7 @@ export interface ToolCallResult {
   error?: string;
 }
 
-export type AgentRole = "planner" | "executor" | "evaluator" | "leader";
+export type AgentRole = "planner" | "executor" | "evaluator" | "leader" | "designer";
 
 export interface ToolContext {
   role: AgentRole;

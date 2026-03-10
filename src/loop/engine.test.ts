@@ -61,7 +61,8 @@ describe("extractSnapshotTargetsFromSubTask", () => {
   test("extracts backticked file paths from objective and outcome", () => {
     const workspaceRoot = "/tmp/workspace";
     const subTask: SubTask = {
-      rationale: "test",
+      assignee: "executor",
+  rationale: "test",
       objective: "Create `.ailoop/plans/round-7.md` with checklist.",
       expected_outcome: "File `src/loop/engine.ts` updated and `.ailoop/runs/report.txt` written.",
       recommended_tools: ["write_file"]
@@ -100,7 +101,8 @@ describe("LoopEngine auto rework", () => {
     await ensureLoopHome(paths);
 
     const plan: SubTask = {
-      rationale: "test rationale",
+      assignee: "executor",
+  rationale: "test rationale",
       objective: "Implement one change",
       expected_outcome: "one verification passes",
       recommended_tools: ["read_file", "write_file", "run_shell"]
@@ -262,7 +264,8 @@ describe("LoopEngine time budget guard", () => {
     await ensureLoopHome(paths);
 
     const plan: SubTask = {
-      rationale: "test rationale",
+      assignee: "executor",
+  rationale: "test rationale",
       objective: "Execute bounded task",
       expected_outcome: "executor runs after planning",
       recommended_tools: ["read_file", "run_shell"]

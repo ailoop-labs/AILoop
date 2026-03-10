@@ -33,7 +33,8 @@ function makeSummaryInput(autoReworkAttempts: string[]): SummaryInput {
   return {
     goal: "Test goal",
     subTask: {
-      rationale: "test rationale",
+      assignee: "executor",
+  rationale: "test rationale",
       objective: "test objective",
       expected_outcome: "test outcome",
       recommended_tools: ["read_file"]

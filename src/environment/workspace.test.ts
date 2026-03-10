@@ -20,6 +20,7 @@ function createLoopPaths(homeDir: string): LoopPaths {
     taskPath: path.join(homeDir, "task.md"),
     plannerRolePath: path.join(homeDir, "PLANNER_ROLE.md"),
     executorRolePath: path.join(homeDir, "EXECUTOR_ROLE.md"),
+    designerRolePath: path.join(homeDir, "DESIGNER_ROLE.md"),
     evaluatorRolePath: path.join(homeDir, "EVALUATOR_ROLE.md"),
     leaderRolePath: path.join(homeDir, "LEADER_ROLE.md"),
     instructionsPath: path.join(homeDir, "instructions.json"),    statePath: path.join(homeDir, "loop.state"),
