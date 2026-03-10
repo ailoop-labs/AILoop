@@ -23,6 +23,7 @@ export interface RunRecord {
   metricsPath: string;
   logPath: string;
   stateChangePath: string;
+  evaluationPath?: string;
 }
 
 function redactArtifactText(content: string): string {
@@ -42,6 +43,12 @@ export async function appendLogLine(logPath: string, line: string): Promise<void
 export async function writeStateChangeFile(stateChangePath: string, content: string): Promise<void> {
   await ensureDir(path.dirname(stateChangePath));
   await fs.writeFile(stateChangePath, redactArtifactText(content), "utf8");
+}
+
+export async function writeEvaluationFile(evaluationPath: string, evaluation: EvaluationResult): Promise<void> {
+  await ensureDir(path.dirname(evaluationPath));
+  const payload = `${JSON.stringify(evaluation, null, 2)}\n`;
+  await fs.writeFile(evaluationPath, redactArtifactText(payload), "utf8");
 }
 
 export async function writeSummaryFile(summaryPath: string, input: SummaryInput): Promise<void> {
@@ -121,6 +128,8 @@ export async function listRunRecords(runsDir: string, limit = 20): Promise<RunRe
       record.logPath = fullPath;
     } else if (entry.endsWith(".round.state_change.txt")) {
       record.stateChangePath = fullPath;
+    } else if (entry.endsWith(".round.evaluation.json")) {
+      record.evaluationPath = fullPath;
     }
 
     grouped.set(timestamp, record);
@@ -145,7 +154,8 @@ export function buildRoundArtifactPaths(runsDir: string, timestamp: string): Rou
     logPath: path.join(runsDir, `${timestamp}.round.log`),
     summaryPath: path.join(runsDir, `${timestamp}.round.summary.md`),
     metricsPath: path.join(runsDir, `${timestamp}.round.metrics.json`),
-    stateChangePath: path.join(runsDir, `${timestamp}.round.state_change.txt`)
+    stateChangePath: path.join(runsDir, `${timestamp}.round.state_change.txt`),
+    evaluationPath: path.join(runsDir, `${timestamp}.round.evaluation.json`)
   };
 }
 
@@ -161,7 +171,8 @@ export async function trimOldRuns(runsDir: string, keepLimit: number): Promise<v
       fs.rm(item.logPath, { force: true }),
       fs.rm(item.summaryPath, { force: true }),
       fs.rm(item.metricsPath, { force: true }),
-      fs.rm(item.stateChangePath, { force: true })
+      fs.rm(item.stateChangePath, { force: true }),
+      item.evaluationPath ? fs.rm(item.evaluationPath, { force: true }) : Promise.resolve()
     ]);
   }
 }

@@ -90,6 +90,66 @@ describe("resolveNextLastError", () => {
 });
 
 describe("LoopEngine auto rework", () => {
+  test("writes an evaluation artifact for each completed round", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-evaluation-artifact-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const plan: SubTask = {
+      assignee: "executor",
+      rationale: "test rationale",
+      objective: "Persist evaluator output",
+      expected_outcome: "round evaluation artifact exists",
+      recommended_tools: ["read_file", "write_file"]
+    };
+
+    const execute = async () => ({
+      actions: [makeAction("read_file")],
+      toolResult: makeToolResult("persisted evaluation artifact")
+    });
+    const evaluate = async (): Promise<EvaluationResult> => makeEvaluation("pass", "All checks satisfied.");
+
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      executor: { execute: typeof execute };
+      evaluator: { evaluate: typeof evaluate };
+      collectOperationalEvidence: () => Promise<{
+        summaryNote: string;
+        lines: string[];
+        stateChangeNotes: string[];
+      }>;
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+    mutable.planner = { plan: async () => plan };
+    mutable.executor = { execute };
+    mutable.evaluator = { evaluate };
+    mutable.collectOperationalEvidence = async () => ({
+      summaryNote: "",
+      lines: [],
+      stateChangeNotes: []
+    });
+
+    const outcome = await mutable.runRound(1);
+
+    expect(outcome.success).toBe(true);
+    const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+    const evaluationFile = runArtifacts.find((entry) => entry.endsWith(".round.evaluation.json"));
+    expect(evaluationFile).toBeDefined();
+
+    const evaluation = JSON.parse(
+      await fs.readFile(path.join(homeDir, "runs", evaluationFile as string), "utf8")
+    ) as Record<string, unknown>;
+    expect(evaluation.decision).toBe("pass");
+    expect(evaluation.justification).toBe("All checks satisfied.");
+    expect(evaluation.evidence).toEqual(["test-evidence"]);
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
   test("retries once after evaluator fail by feeding failure reason back to executor", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-rework-test-"));
     const config = loadConfig({

@@ -17,6 +17,7 @@ import {
   appendLogLine,
   buildRoundArtifactPaths,
   trimOldRuns,
+  writeEvaluationFile,
   writeLogFile,
   writeStateChangeFile,
   writeSummaryFile
@@ -881,6 +882,7 @@ export class LoopEngine {
       await writeStateChangeFile(artifacts.stateChangePath, stateChange);
       await writeLogFile(artifacts.logPath, logLines);
       await writeMetricsFile(artifacts.metricsPath, metrics);
+      await writeEvaluationFile(artifacts.evaluationPath, evaluation);
       await writeSummaryFile(artifacts.summaryPath, {
         goal,
         subTask,
@@ -969,6 +971,12 @@ export class LoopEngine {
       await log(`Round error: ${message}`);
       await writeLogFile(artifacts.logPath, logLines);
       await writeMetricsFile(artifacts.metricsPath, metrics);
+      await writeEvaluationFile(artifacts.evaluationPath, {
+        decision: "fail",
+        justification: message,
+        evidence: [message],
+        recommended_next_action: "pause and inspect round error"
+      });
       await writeSummaryFile(artifacts.summaryPath, {
         goal: "",
         subTask,

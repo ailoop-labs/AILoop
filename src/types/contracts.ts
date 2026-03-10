@@ -135,6 +135,7 @@ export interface RoundArtifacts {
   summaryPath: string;
   metricsPath: string;
   stateChangePath: string;
+  evaluationPath: string;
 }
 
 export interface RoundEvaluationContext {
