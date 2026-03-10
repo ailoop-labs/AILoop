@@ -90,6 +90,71 @@ describe("resolveNextLastError", () => {
 });
 
 describe("LoopEngine auto rework", () => {
+  test("writes a markdown summary artifact with core round details after a successful round", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-summary-artifact-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const plan: SubTask = {
+      assignee: "executor",
+      rationale: "test rationale",
+      objective: "Persist markdown round summary",
+      expected_outcome: "round summary artifact exists with core sections",
+      recommended_tools: ["read_file", "run_shell"]
+    };
+
+    const execute = async () => ({
+      actions: [makeAction("read_file"), makeAction("run_shell")],
+      toolResult: makeToolResult("Created markdown summary artifact")
+    });
+    const evaluate = async (): Promise<EvaluationResult> => makeEvaluation("pass", "All checks satisfied.");
+
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      executor: { execute: typeof execute };
+      evaluator: { evaluate: typeof evaluate };
+      collectOperationalEvidence: () => Promise<{
+        summaryNote: string;
+        lines: string[];
+        stateChangeNotes: string[];
+      }>;
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+    mutable.planner = { plan: async () => plan };
+    mutable.executor = { execute };
+    mutable.evaluator = { evaluate };
+    mutable.collectOperationalEvidence = async () => ({
+      summaryNote: "",
+      lines: [],
+      stateChangeNotes: []
+    });
+
+    const outcome = await mutable.runRound(1);
+
+    expect(outcome.success).toBe(true);
+    const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+    const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
+    expect(summaryFile).toBeDefined();
+
+    const summaryText = await fs.readFile(path.join(homeDir, "runs", summaryFile as string), "utf8");
+    expect(summaryText).toContain("# AILoop Round Summary");
+    expect(summaryText).toContain("## Round Metadata");
+    expect(summaryText).toContain("- Round: 1");
+    expect(summaryText).toMatch(/- Timestamp: \d{4}-\d{2}-\d{2}T/);
+    expect(summaryText).toContain("## Planned Sub-task");
+    expect(summaryText).toContain("- Objective: Persist markdown round summary");
+    expect(summaryText).toContain("## Execution Result");
+    expect(summaryText).toContain("- Work Summary: Created markdown summary artifact");
+    expect(summaryText).toContain("## Evaluation Result");
+    expect(summaryText).toContain("- Decision: pass");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
   test("writes an evaluation artifact for each completed round", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-evaluation-artifact-test-"));
     const config = loadConfig({

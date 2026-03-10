@@ -60,6 +60,10 @@ export async function writeSummaryFile(summaryPath: string, input: SummaryInput)
   const markdown = [
     "# AILoop Round Summary",
     "",
+    "## Round Metadata",
+    `- Round: ${input.metrics.round}`,
+    `- Timestamp: ${input.metrics.run_timestamp}`,
+    "",
     "## Goal Alignment",
     input.goal.trim() || "Goal was empty.",
     "",
