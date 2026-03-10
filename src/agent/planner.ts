@@ -2,6 +2,7 @@ import type { AppConfig } from "../config/env";
 import type { PlannerContext, SubTask } from "../types/contracts";
 import { CodexClient, type JsonSchema } from "./codex-client";
 import { loadProjectRoleDefinition } from "./role-definitions";
+import type { ToolRegistry } from "./tool-registry";
 
 const SUBTASK_SCHEMA: JsonSchema = {
   type: "object",
@@ -51,8 +52,16 @@ export function buildAdaptivePlannerDirectives(context: PlannerContext): string[
 export function buildPlannerPrompt(
   context: PlannerContext,
   adaptiveDirectives: string[],
-  plannerRoleDefinition: string
+  plannerRoleDefinition: string,
+  availableSkills: { name: string; description: string }[] = []
 ): string {
+  const skillsContext = availableSkills.length > 0
+    ? [
+        "Available Skills (the Executor can load these if you recommend 'activate_skill'):",
+        ...availableSkills.map((s) => `- ${s.name}: ${s.description}`)
+      ]
+    : [];
+
   return [
     "You are the AILoop Planner agent.",
     "Project-specific Planner Role Definition:",
@@ -68,10 +77,11 @@ export function buildPlannerPrompt(
     "- Keep the plan domain-agnostic and derived only from provided goal/instructions; do not inject scenario-specific assumptions.",
     "- objective and expected_outcome must be observable and verifiable (workspace change, command output, API check, or evaluator evidence).",
     "- If required context is missing for safe execution, choose a clarification sub-task instead of guessing.",
-    "- Keep recommended_tools realistic from: read_file, write_file, run_shell, http_request.",
+    "- Keep recommended_tools realistic from: read_file, write_file, run_shell, http_request, activate_skill.",
     ...(adaptiveDirectives.length > 0
       ? ["- Additional adaptive constraints from prior failures:", ...adaptiveDirectives.map((line) => `  - ${line}`)]
       : []),
+    ...(skillsContext.length > 0 ? ["", ...skillsContext] : []),
     "",
     "Planner input:",
     JSON.stringify(
@@ -152,8 +162,10 @@ export class PlannerAgent {
   private readonly codex: CodexClient;
   private readonly sandbox: AppConfig["codex"]["plannerSandbox"];
   private readonly homeDir: string;
+  private readonly tools: ToolRegistry;
 
-  constructor(config: AppConfig) {
+  constructor(tools: ToolRegistry, config: AppConfig) {
+    this.tools = tools;
     this.codex = new CodexClient(config.codex);
     this.sandbox = config.codex.plannerSandbox;
     this.homeDir = config.homeDir;
@@ -181,7 +193,10 @@ export class PlannerAgent {
 
     const adaptiveDirectives = buildAdaptivePlannerDirectives(context);
     const plannerRoleDefinition = await loadProjectRoleDefinition(this.homeDir, "planner");
-    const prompt = buildPlannerPrompt(context, adaptiveDirectives, plannerRoleDefinition);
+    
+    await this.tools.initialize();
+    const availableSkills = this.tools.getSkillManager().getAvailableSkills();
+    const prompt = buildPlannerPrompt(context, adaptiveDirectives, plannerRoleDefinition, availableSkills);
 
     emitLog("Planner started Codex planning.");
     const heartbeatStartedAt = Date.now();

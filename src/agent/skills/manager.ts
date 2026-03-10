@@ -9,21 +9,21 @@ export interface SkillMetadata {
 }
 
 export class SkillManager {
-  private readonly userSkillsDir: string;
+  private readonly builtInSkillsDir: string;
   private readonly projectSkillsDir: string;
   private readonly skills = new Map<string, SkillMetadata>();
   private initialized = false;
 
   constructor(workspaceRoot: string) {
-    this.userSkillsDir = path.join(os.homedir(), ".agents", "skills");
-    this.projectSkillsDir = path.join(workspaceRoot, ".agents", "skills");
+    this.builtInSkillsDir = path.join(__dirname, "built-in");
+    this.projectSkillsDir = path.join(workspaceRoot, "skills");
   }
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
-    await this.scanDir(this.userSkillsDir);
-    await this.scanDir(this.projectSkillsDir); // Project overrides user
+    await this.scanDir(this.builtInSkillsDir);
+    await this.scanDir(this.projectSkillsDir); // Project overrides built-in
     
     this.initialized = true;
   }

@@ -360,7 +360,7 @@ export class LoopEngine {
   constructor(private readonly config: AppConfig) {
     this.paths = buildLoopPaths(config.homeDir);
     this.tools = new ToolRegistry();
-    this.planner = new PlannerAgent(config);
+    this.planner = new PlannerAgent(this.tools, config);
     this.executor = new ExecutorAgent(this.tools, config);
     this.leader = new LeaderAgent(config);
     this.evaluator = createEvaluator(config);
