@@ -1,4 +1,4 @@
-const fs = require('fs');
+import fs from 'fs';
 
 let content = fs.readFileSync('src/loop/engine.ts', 'utf8');
 
