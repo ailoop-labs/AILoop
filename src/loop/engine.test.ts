@@ -155,6 +155,86 @@ describe("LoopEngine auto rework", () => {
     await fs.rm(homeDir, { recursive: true, force: true });
   });
 
+  test("writes a metrics artifact with round metadata, retry counts, and phase timings after a successful round", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-metrics-artifact-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const plan: SubTask = {
+      assignee: "executor",
+      rationale: "test rationale",
+      objective: "Persist metrics artifact",
+      expected_outcome: "round metrics artifact exists with core fields",
+      recommended_tools: ["read_file", "run_shell"]
+    };
+
+    const execute = async () => ({
+      actions: [makeAction("read_file"), makeAction("run_shell")],
+      toolResult: makeToolResult("Created metrics artifact")
+    });
+    const evaluate = async (): Promise<EvaluationResult> => makeEvaluation("pass", "All checks satisfied.");
+
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      executor: { execute: typeof execute };
+      evaluator: { evaluate: typeof evaluate };
+      collectOperationalEvidence: () => Promise<{
+        summaryNote: string;
+        lines: string[];
+        stateChangeNotes: string[];
+      }>;
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+    mutable.planner = { plan: async () => plan };
+    mutable.executor = { execute };
+    mutable.evaluator = { evaluate };
+    mutable.collectOperationalEvidence = async () => ({
+      summaryNote: "",
+      lines: [],
+      stateChangeNotes: []
+    });
+
+    const outcome = await mutable.runRound(1);
+
+    expect(outcome.success).toBe(true);
+    const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+    const metricsFile = runArtifacts.find((entry) => entry.endsWith(".round.metrics.json"));
+    expect(metricsFile).toBeDefined();
+
+    const metrics = JSON.parse(
+      await fs.readFile(path.join(homeDir, "runs", metricsFile as string), "utf8")
+    ) as Record<string, unknown>;
+    expect(metrics.round).toBe(1);
+    expect(metrics.run_timestamp).toEqual(expect.any(String));
+    expect(metrics.duration_ms).toEqual(expect.any(Number));
+    expect(metrics.budget_usage).toEqual(
+      expect.objectContaining({
+        usdUsed: expect.any(Number),
+        actionsUsed: expect.any(Number),
+        elapsedMs: expect.any(Number)
+      })
+    );
+    expect(metrics.retries).toEqual({
+      evidence_remediation_attempts: 0,
+      auto_rework_attempts: 0,
+      auto_rework_limit: config.evaluatorReworkMaxAttempts
+    });
+    expect(metrics.phase_timings_ms).toEqual(
+      expect.objectContaining({
+        planning: expect.any(Number),
+        execution: expect.any(Number),
+        evaluation: expect.any(Number),
+        operational_followup: expect.any(Number)
+      })
+    );
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
   test("writes an evaluation artifact for each completed round", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-evaluation-artifact-test-"));
     const config = loadConfig({

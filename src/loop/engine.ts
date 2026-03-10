@@ -12,7 +12,12 @@ import { ToolRegistry } from "../agent/tool-registry";
 import { appendInstruction } from "./state";
 import { WorkspaceManager } from "../environment/workspace";
 import { createEvaluator } from "../evaluation/evaluator";
-import { writeMetricsFile, type RoundMetrics } from "../reporting/metrics";
+import {
+  writeMetricsFile,
+  type RoundMetrics,
+  type RoundPhaseTimings,
+  type RoundRetryCounts
+} from "../reporting/metrics";
 import {
   appendLogLine,
   buildRoundArtifactPaths,
@@ -577,6 +582,39 @@ export class LoopEngine {
     };
     let stateChange = "No state changes detected.\n";
     const autoReworkAttempts: string[] = [];
+    const retryCounts: RoundRetryCounts = {
+      evidence_remediation_attempts: 0,
+      auto_rework_attempts: 0,
+      auto_rework_limit: this.config.evaluatorReworkMaxAttempts
+    };
+    const phaseTimingsMs: RoundPhaseTimings = {
+      planning: 0,
+      execution: 0,
+      evaluation: 0,
+      operational_followup: 0
+    };
+    const timePhase = async <T>(phase: keyof RoundPhaseTimings, run: () => Promise<T>): Promise<T> => {
+      const phaseStartedAt = Date.now();
+      try {
+        return await run();
+      } finally {
+        phaseTimingsMs[phase] += Date.now() - phaseStartedAt;
+      }
+    };
+    const buildRoundMetrics = (
+      evaluationDecision: RoundMetrics["evaluator_decision"],
+      toolStatus: RoundMetrics["tool_status"]
+    ): RoundMetrics => ({
+      round,
+      run_timestamp: runId,
+      duration_ms: Date.now() - startedAt,
+      budget_limits: guardrails.limitsSnapshot(),
+      budget_usage: guardrails.usage(),
+      evaluator_decision: evaluationDecision,
+      tool_status: toolStatus,
+      retries: retryCounts,
+      phase_timings_ms: phaseTimingsMs
+    });
 
     try {
       await enforceBudgetBeforeAction("round.bootstrap");
@@ -586,19 +624,21 @@ export class LoopEngine {
       const plannerPreviousToolResult = this.previousToolResult ?? priorState.previous_tool_result;
 
       await enforceBudgetBeforeAction("planner.plan");
-      subTask = await this.planner.plan(
-        {
-          goal,
-          instructions,
-          round,
-          budget: this.config.budget,
-          previous_tool_result: plannerPreviousToolResult,
-          previous_round_error: priorState.last_error,
-          consecutive_evaluator_failures: priorState.consecutive_evaluator_failures
-        },
-        {
-          onLog: log
-        }
+      subTask = await timePhase("planning", () =>
+        this.planner.plan(
+          {
+            goal,
+            instructions,
+            round,
+            budget: this.config.budget,
+            previous_tool_result: plannerPreviousToolResult,
+            previous_round_error: priorState.last_error,
+            consecutive_evaluator_failures: priorState.consecutive_evaluator_failures
+          },
+          {
+            onLog: log
+          }
+        )
       );
       const snapshotTargets = extractSnapshotTargetsFromSubTask(subTask, process.cwd());
       snapshot = await workspace.createSnapshot(snapshotTargets);
@@ -607,15 +647,17 @@ export class LoopEngine {
       const agentType = subTask.assignee === "designer" ? "designer" : "executor";
       const activeAgent = subTask.assignee === "designer" ? this.designer : this.executor;
       await enforceBudgetBeforeAction(`${agentType}.execute`);
-      const execution = await activeAgent.execute({
-        subTask,
-        round,
-        goal,
-        instructions,
-        guardrails,
-        paths: this.paths,
-        onLog: log
-      });
+      const execution = await timePhase("execution", () =>
+        activeAgent.execute({
+          subTask,
+          round,
+          goal,
+          instructions,
+          guardrails,
+          paths: this.paths,
+          onLog: log
+        })
+      );
       const actions = [...execution.actions];
       let finalToolResult: ToolResult = {
         ...execution.toolResult
@@ -635,16 +677,18 @@ export class LoopEngine {
 
       await enforceBudgetBeforeAction("evaluator.evaluate");
       const activeEvaluator = subTask.assignee === "designer" ? this.uiEvaluator : this.evaluator;
-      let evaluation: EvaluationResult = await activeEvaluator.evaluate({
-        subTask,
-        toolResult: finalToolResult,
-        stateChange,
-        logLines,
-        runTimestamp: runId,
-        budgetLimits: guardrails.limitsSnapshot(),
-        budgetUsage: guardrails.usage(),
-        onLog: log
-      });
+      let evaluation: EvaluationResult = await timePhase("evaluation", () =>
+        activeEvaluator.evaluate({
+          subTask,
+          toolResult: finalToolResult,
+          stateChange,
+          logLines,
+          runTimestamp: runId,
+          budgetLimits: guardrails.limitsSnapshot(),
+          budgetUsage: guardrails.usage(),
+          onLog: log
+        })
+      );
       await log(`Evaluator decision: ${evaluation.decision}.`);
 
       const missingKeyDimensions = extractMissingKeyDimensions(evaluation.justification);
@@ -679,16 +723,19 @@ export class LoopEngine {
 
         const remediationAgentType = remediationTask.assignee === "designer" ? "designer" : "executor";
         const remediationAgent = remediationTask.assignee === "designer" ? this.designer : this.executor;
+        retryCounts.evidence_remediation_attempts += 1;
         await enforceBudgetBeforeAction(`${remediationAgentType}.execute remediation`);
-        const remediation = await remediationAgent.execute({
-          subTask: remediationTask,
-          round,
-          goal,
-          instructions: remediationInstructions,
-          guardrails,
-          paths: this.paths,
-          onLog: log
-        });
+        const remediation = await timePhase("execution", () =>
+          remediationAgent.execute({
+            subTask: remediationTask,
+            round,
+            goal,
+            instructions: remediationInstructions,
+            guardrails,
+            paths: this.paths,
+            onLog: log
+          })
+        );
 
         actions.push(...remediation.actions);
         if (remediation.toolResult.status === "success") {
@@ -712,16 +759,18 @@ export class LoopEngine {
           finalToolResult.artifacts.state_change_path = artifacts.stateChangePath;
           await enforceBudgetBeforeAction("evaluator.evaluate remediation");
           const remediationEvaluator = remediationTask.assignee === "designer" ? this.uiEvaluator : this.evaluator;
-          evaluation = await remediationEvaluator.evaluate({
-            subTask,
-            toolResult: finalToolResult,
-            stateChange,
-            logLines,
-            runTimestamp: runId,
-            budgetLimits: guardrails.limitsSnapshot(),
-            budgetUsage: guardrails.usage(),
-            onLog: log
-          });
+          evaluation = await timePhase("evaluation", () =>
+            remediationEvaluator.evaluate({
+              subTask,
+              toolResult: finalToolResult,
+              stateChange,
+              logLines,
+              runTimestamp: runId,
+              budgetLimits: guardrails.limitsSnapshot(),
+              budgetUsage: guardrails.usage(),
+              onLog: log
+            })
+          );
           await log(`Post-remediation evaluation decision: ${evaluation.decision}.`);
         } else {
           finalToolResult = {
@@ -752,22 +801,25 @@ export class LoopEngine {
           );
           const reworkAgentType = reworkTask.assignee === "designer" ? "designer" : "executor";
           const reworkAgent = reworkTask.assignee === "designer" ? this.designer : this.executor;
+          retryCounts.auto_rework_attempts += 1;
           await enforceBudgetBeforeAction(`${reworkAgentType}.execute auto-rework ${attempt}`);
-          const rework = await reworkAgent.execute({
-            subTask: reworkTask,
-            round,
-            goal,
-            instructions: buildEvaluatorReworkInstructions(
-              instructions,
-              evaluation,
-              attempt,
-              this.config.evaluatorReworkMaxAttempts,
-              stateChange
-            ),
-            guardrails,
-            paths: this.paths,
-            onLog: log
-          });
+          const rework = await timePhase("execution", () =>
+            reworkAgent.execute({
+              subTask: reworkTask,
+              round,
+              goal,
+              instructions: buildEvaluatorReworkInstructions(
+                instructions,
+                evaluation,
+                attempt,
+                this.config.evaluatorReworkMaxAttempts,
+                stateChange
+              ),
+              guardrails,
+              paths: this.paths,
+              onLog: log
+            })
+          );
 
           actions.push(...rework.actions);
           finalToolResult = {
@@ -801,16 +853,18 @@ export class LoopEngine {
           
           const reworkEvaluator = reworkTask.assignee === "designer" ? this.uiEvaluator : this.evaluator;
           await enforceBudgetBeforeAction(`evaluator.evaluate auto-rework ${attempt}`);
-          evaluation = await reworkEvaluator.evaluate({
-            subTask,
-            toolResult: finalToolResult,
-            stateChange,
-            logLines,
-            runTimestamp: runId,
-            budgetLimits: guardrails.limitsSnapshot(),
-            budgetUsage: guardrails.usage(),
-            onLog: log
-          });
+          evaluation = await timePhase("evaluation", () =>
+            reworkEvaluator.evaluate({
+              subTask,
+              toolResult: finalToolResult,
+              stateChange,
+              logLines,
+              runTimestamp: runId,
+              budgetLimits: guardrails.limitsSnapshot(),
+              budgetUsage: guardrails.usage(),
+              onLog: log
+            })
+          );
           await log(`Post-auto-rework evaluation decision: ${evaluation.decision}.`);
           autoReworkAttempts.push(
             `Attempt ${attempt}/${this.config.evaluatorReworkMaxAttempts}: trigger='${triggerReason}', executor_status=success, evaluation=${evaluation.decision}, justification='${sanitizeReworkNote(
@@ -831,14 +885,16 @@ export class LoopEngine {
         await log("Evaluation passed. Engine is committing and pushing changes.");
 
         try {
-          const operationalEvidence = await this.collectOperationalEvidence(
-            {
-              round,
-              objective: subTask.objective,
-              expectedOutcome: subTask.expected_outcome,
-              consolePort: this.config.consolePort,
-              log
-            }
+          const operationalEvidence = await timePhase("operational_followup", () =>
+            this.collectOperationalEvidence(
+              {
+                round,
+                objective: subTask.objective,
+                expectedOutcome: subTask.expected_outcome,
+                consolePort: this.config.consolePort,
+                log
+              }
+            )
           );
           finalToolResult.operational_evidence = [
             ...(finalToolResult.operational_evidence ?? []),
@@ -861,15 +917,7 @@ export class LoopEngine {
       }
 
       const usage = guardrails.usage();
-      const metrics: RoundMetrics = {
-        round,
-        run_timestamp: runId,
-        duration_ms: Date.now() - startedAt,
-        budget_limits: guardrails.limitsSnapshot(),
-        budget_usage: usage,
-        evaluator_decision: evaluation.decision,
-        tool_status: finalToolResult.status
-      };
+      const metrics = buildRoundMetrics(evaluation.decision, finalToolResult.status);
 
       const risks: string[] = [];
       if (finalToolResult.status === "failure") {
@@ -957,15 +1005,7 @@ export class LoopEngine {
       stateChange = `${stateChange}\nRollback: workspace snapshot restored after round error.\n`;
 
       const usage = guardrails.usage();
-      const metrics: RoundMetrics = {
-        round,
-        run_timestamp: runId,
-        duration_ms: Date.now() - startedAt,
-        budget_limits: guardrails.limitsSnapshot(),
-        budget_usage: usage,
-        evaluator_decision: "fail",
-        tool_status: "failure"
-      };
+      const metrics = buildRoundMetrics("fail", "failure");
 
       await writeStateChangeFile(artifacts.stateChangePath, stateChange);
       await log(`Round error: ${message}`);

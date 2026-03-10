@@ -71,7 +71,18 @@ function makeSummaryInput(autoReworkAttempts: string[]): SummaryInput {
         elapsedMs: 1000
       },
       evaluator_decision: "pass",
-      tool_status: "success"
+      tool_status: "success",
+      retries: {
+        evidence_remediation_attempts: 0,
+        auto_rework_attempts: 0,
+        auto_rework_limit: 1
+      },
+      phase_timings_ms: {
+        planning: 100,
+        execution: 300,
+        evaluation: 200,
+        operational_followup: 400
+      }
     },
     risks: [],
     autoReworkAttempts,
