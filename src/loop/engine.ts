@@ -7,6 +7,7 @@ import { DesignerAgent } from "../agent/designer";
 import { Guardrails, BudgetBreachError } from "../agent/guardrails";
 import { PlannerAgent } from "../agent/planner";
 import { LeaderAgent } from "../agent/leader";
+import { UIEvaluator } from "../evaluation/strategies/ui-evaluator";
 import { ToolRegistry } from "../agent/tool-registry";
 import { appendInstruction } from "./state";
 import { WorkspaceManager } from "../environment/workspace";
@@ -355,6 +356,7 @@ export class LoopEngine {
   private readonly designer: DesignerAgent;
   private readonly leader: LeaderAgent;
   private readonly evaluator;
+  private readonly uiEvaluator: UIEvaluator;
   private readonly redactor = new SecretRedactor(process.env);
   private previousToolResult: ToolResult | null = null;
 
@@ -368,6 +370,7 @@ export class LoopEngine {
     this.designer = new DesignerAgent(this.tools, config);
     this.leader = new LeaderAgent(config);
     this.evaluator = createEvaluator(config);
+    this.uiEvaluator = new UIEvaluator(config.homeDir);
   }
 
   protected async collectOperationalEvidence(context: OperationalEvidenceContext): Promise<OperationalEvidence> {
@@ -630,7 +633,8 @@ export class LoopEngine {
       finalToolResult.artifacts.state_change_path = artifacts.stateChangePath;
 
       await enforceBudgetBeforeAction("evaluator.evaluate");
-      let evaluation: EvaluationResult = await this.evaluator.evaluate({
+      const activeEvaluator = subTask.assignee === "designer" ? this.uiEvaluator : this.evaluator;
+      let evaluation: EvaluationResult = await activeEvaluator.evaluate({
         subTask,
         toolResult: finalToolResult,
         stateChange,
@@ -706,7 +710,8 @@ export class LoopEngine {
           finalToolResult.artifacts.log_path = artifacts.logPath;
           finalToolResult.artifacts.state_change_path = artifacts.stateChangePath;
           await enforceBudgetBeforeAction("evaluator.evaluate remediation");
-          evaluation = await this.evaluator.evaluate({
+          const remediationEvaluator = remediationTask.assignee === "designer" ? this.uiEvaluator : this.evaluator;
+          evaluation = await remediationEvaluator.evaluate({
             subTask,
             toolResult: finalToolResult,
             stateChange,
@@ -793,8 +798,9 @@ export class LoopEngine {
             throw new Error(errorMsg);
           }
           
+          const reworkEvaluator = reworkTask.assignee === "designer" ? this.uiEvaluator : this.evaluator;
           await enforceBudgetBeforeAction(`evaluator.evaluate auto-rework ${attempt}`);
-          evaluation = await this.evaluator.evaluate({
+          evaluation = await reworkEvaluator.evaluate({
             subTask,
             toolResult: finalToolResult,
             stateChange,
