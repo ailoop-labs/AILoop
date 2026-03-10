@@ -131,7 +131,9 @@ describe("LoopEngine budget guard", () => {
         AILOOP_BUDGET_ACTIONS: "0"
       },
       message: "BudgetBreach: action budget exceeded",
-      breach: (recordAction: (costUsd?: number) => void) => recordAction(0)
+      breach: async (recordAction: (costUsd?: number) => void) => {
+        recordAction(0);
+      }
     },
     {
       label: "cost",
@@ -139,7 +141,25 @@ describe("LoopEngine budget guard", () => {
         AILOOP_BUDGET_USD_PER_ROUND: "0"
       },
       message: "BudgetBreach: USD budget exceeded",
-      breach: (recordAction: (costUsd?: number) => void) => recordAction(0.01)
+      breach: async (recordAction: (costUsd?: number) => void) => {
+        recordAction(0.01);
+      }
+    },
+    {
+      label: "time",
+      env: {
+        AILOOP_BUDGET_TIME_MINUTES: "0.001"
+      },
+      message: "BudgetBreach: time budget exceeded",
+      breach: async (recordAction: (costUsd?: number) => void) => {
+        const originalDateNow = Date.now;
+        try {
+          Date.now = () => originalDateNow() + 61;
+          recordAction(0);
+        } finally {
+          Date.now = originalDateNow;
+        }
+      }
     }
   ])(
     "pauses immediately and writes round artifacts when the $label budget is exceeded during executor execution",
@@ -176,7 +196,7 @@ describe("LoopEngine budget guard", () => {
       };
       mutable.executor = {
         execute: async (options) => {
-          breach(options.guardrails.recordAction.bind(options.guardrails));
+          await breach(options.guardrails.recordAction.bind(options.guardrails));
           return {
             actions: [],
             toolResult: {
