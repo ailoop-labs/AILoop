@@ -41,6 +41,7 @@ export interface SubTask {
   assignee: "executor" | "designer";
   objective: string;
   expected_outcome: string;
+  impacted_files: string[];
   recommended_tools: string[];
 }
 

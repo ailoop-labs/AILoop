@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { lstatSync } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import type { AppConfig } from "../config/env";
 import { ExecutorAgent } from "../agent/executor";
@@ -120,6 +121,31 @@ function extractPathTokens(text: string): string[] {
   return tokens;
 }
 
+function resolveSnapshotToken(token: string, workspaceRoot: string): string {
+  return path.isAbsolute(token) ? token : path.resolve(workspaceRoot, token);
+}
+
+function isConcreteSnapshotFileToken(token: string, workspaceRoot: string): boolean {
+  if (!token || token.includes("://")) {
+    return false;
+  }
+
+  if (/^\d+$/.test(token) || /\s/.test(token) || token.endsWith("/")) {
+    return false;
+  }
+
+  const candidate = resolveSnapshotToken(token, workspaceRoot);
+  if (!isPathInside(workspaceRoot, candidate)) {
+    return false;
+  }
+
+  try {
+    return lstatSync(candidate).isFile();
+  } catch {
+    return false;
+  }
+}
+
 export function detectUnauthorizedModifications(stateChange: string): string[] {
   const forbiddenDocs = ["README.md", "GOAL.md", "ARCHITECTURE.md"];
   const found: string[] = [];
@@ -136,9 +162,8 @@ export function detectUnauthorizedModifications(stateChange: string): string[] {
 export function extractSnapshotTargetsFromSubTask(subTask: SubTask, workspaceRoot: string): string[] {
   const tokens = [...extractPathTokens(subTask.objective), ...extractPathTokens(subTask.expected_outcome)];
   const normalized = tokens
-    .filter((token) => !token.includes("://"))
-    .map((token) => (path.isAbsolute(token) ? token : path.resolve(workspaceRoot, token)))
-    .filter((candidate) => isPathInside(workspaceRoot, candidate));
+    .filter((token) => isConcreteSnapshotFileToken(token, workspaceRoot))
+    .map((token) => resolveSnapshotToken(token, workspaceRoot));
   return Array.from(new Set(normalized));
 }
 
@@ -649,7 +674,9 @@ export class LoopEngine {
           }
         )
       );
-      const snapshotTargets = extractSnapshotTargetsFromSubTask(subTask, process.cwd());
+      const snapshotTargets = subTask.impacted_files.length > 0 
+        ? subTask.impacted_files 
+        : extractSnapshotTargetsFromSubTask(subTask, process.cwd());
       snapshot = await workspace.createSnapshot(snapshotTargets);
 
       await log(`Planner objective: ${subTask.objective}`);

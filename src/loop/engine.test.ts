@@ -58,11 +58,25 @@ function makeAction(tool: string): ActionRecord {
 }
 
 describe("extractSnapshotTargetsFromSubTask", () => {
-  test("extracts backticked file paths from objective and outcome", () => {
-    const workspaceRoot = "/tmp/workspace";
+  async function createWorkspace(files: string[]): Promise<string> {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-snapshot-targets-"));
+    for (const file of files) {
+      const fullPath = path.join(workspaceRoot, file);
+      await fs.mkdir(path.dirname(fullPath), { recursive: true });
+      await fs.writeFile(fullPath, `${file}\n`, "utf8");
+    }
+    return workspaceRoot;
+  }
+
+  test("extracts backticked file paths from objective and outcome", async () => {
+    const workspaceRoot = await createWorkspace([
+      ".ailoop/plans/round-7.md",
+      "src/loop/engine.ts",
+      ".ailoop/runs/report.txt"
+    ]);
     const subTask: SubTask = {
       assignee: "executor",
-  rationale: "test",
+      rationale: "test",
       objective: "Create `.ailoop/plans/round-7.md` with checklist.",
       expected_outcome: "File `src/loop/engine.ts` updated and `.ailoop/runs/report.txt` written.",
       recommended_tools: ["write_file"]
@@ -72,6 +86,51 @@ describe("extractSnapshotTargetsFromSubTask", () => {
     expect(targets).toContain(path.join(workspaceRoot, ".ailoop/plans/round-7.md"));
     expect(targets).toContain(path.join(workspaceRoot, "src/loop/engine.ts"));
     expect(targets).toContain(path.join(workspaceRoot, ".ailoop/runs/report.txt"));
+
+    await fs.rm(workspaceRoot, { recursive: true, force: true });
+  });
+
+  test("ignores numeric literals, commands, directories, and error strings in backticks", async () => {
+    const workspaceRoot = await createWorkspace(["src/loop/engine.ts", "src/loop/engine.test.ts"]);
+    const subTask: SubTask = {
+      assignee: "executor",
+      rationale: "test",
+      objective:
+        "Update `src/loop/engine.ts`, investigate `EISDIR: illegal operation on a directory, read`, avoid `src/loop`, and rerun `bun test src/loop/engine.test.ts` for round `23`.",
+      expected_outcome:
+        "Only `src/loop/engine.test.ts` is snapshotted while ignoring `src/loop`, `bun test src/loop/engine.test.ts`, and `123`.",
+      recommended_tools: ["write_file"]
+    };
+
+    const targets = extractSnapshotTargetsFromSubTask(subTask, workspaceRoot);
+
+    expect(targets).toContain(path.join(workspaceRoot, "src/loop/engine.ts"));
+    expect(targets).toContain(path.join(workspaceRoot, "src/loop/engine.test.ts"));
+    expect(targets).not.toContain(path.join(workspaceRoot, "src/loop"));
+    expect(targets).not.toContain(path.join(workspaceRoot, "bun test src/loop/engine.test.ts"));
+    expect(targets).not.toContain(path.join(workspaceRoot, "EISDIR: illegal operation on a directory, read"));
+    expect(targets).not.toContain(path.join(workspaceRoot, "23"));
+    expect(targets).not.toContain(path.join(workspaceRoot, "123"));
+
+    await fs.rm(workspaceRoot, { recursive: true, force: true });
+  });
+
+  test("excludes nonexistent dotted backticked tokens from snapshot targets", async () => {
+    const workspaceRoot = await createWorkspace(["src/loop/engine.ts"]);
+    const subTask: SubTask = {
+      assignee: "executor",
+      rationale: "test",
+      objective: "Update `src/loop/engine.ts` and ignore nonexistent `foo.txt`.",
+      expected_outcome: "Only real workspace files are snapshotted.",
+      recommended_tools: ["write_file"]
+    };
+
+    const targets = extractSnapshotTargetsFromSubTask(subTask, workspaceRoot);
+
+    expect(targets).toContain(path.join(workspaceRoot, "src/loop/engine.ts"));
+    expect(targets).not.toContain(path.join(workspaceRoot, "foo.txt"));
+
+    await fs.rm(workspaceRoot, { recursive: true, force: true });
   });
 });
 
@@ -104,6 +163,7 @@ describe("LoopEngine auto rework", () => {
       rationale: "test rationale",
       objective: "Persist markdown round summary",
       expected_outcome: "round summary artifact exists with core sections",
+      impacted_files: [],
       recommended_tools: ["read_file", "run_shell"]
     };
 
@@ -169,6 +229,7 @@ describe("LoopEngine auto rework", () => {
       rationale: "test rationale",
       objective: "Persist metrics artifact",
       expected_outcome: "round metrics artifact exists with core fields",
+      impacted_files: [],
       recommended_tools: ["read_file", "run_shell"]
     };
 
@@ -249,6 +310,7 @@ describe("LoopEngine auto rework", () => {
       rationale: "test rationale",
       objective: "Persist evaluator output",
       expected_outcome: "round evaluation artifact exists",
+      impacted_files: [],
       recommended_tools: ["read_file", "write_file"]
     };
 
@@ -307,9 +369,10 @@ describe("LoopEngine auto rework", () => {
 
     const plan: SubTask = {
       assignee: "executor",
-  rationale: "test rationale",
+      rationale: "test rationale",
       objective: "Implement one change",
       expected_outcome: "one verification passes",
+      impacted_files: [],
       recommended_tools: ["read_file", "write_file", "run_shell"]
     };
 
@@ -470,9 +533,10 @@ describe("LoopEngine time budget guard", () => {
 
     const plan: SubTask = {
       assignee: "executor",
-  rationale: "test rationale",
+      rationale: "test rationale",
       objective: "Execute bounded task",
       expected_outcome: "executor runs after planning",
+      impacted_files: [],
       recommended_tools: ["read_file", "run_shell"]
     };
 

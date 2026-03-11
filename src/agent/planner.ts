@@ -12,12 +12,17 @@ const SUBTASK_SCHEMA: JsonSchema = {
     assignee: { type: "string", enum: ["executor", "designer"] },
     objective: { type: "string" },
     expected_outcome: { type: "string" },
+    impacted_files: {
+      type: "array",
+      items: { type: "string" },
+      description: "List of files or directories the executor is expected to read or modify. Used for workspace snapshotting."
+    },
     recommended_tools: {
       type: "array",
       items: { type: "string" }
     }
   },
-  required: ["rationale", "assignee", "objective", "expected_outcome", "recommended_tools"],
+  required: ["rationale", "assignee", "objective", "expected_outcome", "impacted_files", "recommended_tools"],
   additionalProperties: false
 };
 
@@ -76,6 +81,7 @@ export function buildPlannerPrompt(
     "- Prioritize measurable user-defined value over cosmetic activity.",
     "- If goal is missing, create a clarification request task.",
     "- Consider previous round failure when setting rationale.",
+    "- Explicitly list ALL files or directories in 'impacted_files' that will be relevant for this step (snapshotting).",
     "- Keep the plan domain-agnostic and derived only from provided goal/instructions; do not inject scenario-specific assumptions.",
     "- objective and expected_outcome must be observable and verifiable (workspace change, command output, API check, or evaluator evidence).",
     "- If required context is missing for safe execution, choose a clarification sub-task instead of guessing.",
@@ -113,6 +119,7 @@ function fallbackPlan(context: PlannerContext): SubTask {
       assignee: "executor",
       objective: "Request clarification from the operator to populate .ailoop/README.md before continuing execution.",
       expected_outcome: "A human instruction is queued with concrete goal details.",
+      impacted_files: [".ailoop/README.md"],
       recommended_tools: ["read_file"]
     };
   }
@@ -129,6 +136,7 @@ function fallbackPlan(context: PlannerContext): SubTask {
       assignee: "executor",
       objective: `Execute one atomic, verifiable step that applies instruction '${cleanedInstruction}' and advances the goal.`,
       expected_outcome: "A concrete state change or validation result demonstrates measurable progress tied to the instruction.",
+      impacted_files: [],
       recommended_tools: ["read_file", "write_file", "run_shell", "http_request"]
     };
   }
@@ -140,6 +148,7 @@ function fallbackPlan(context: PlannerContext): SubTask {
       objective: "Implement one minimal code or test change in tracked project files that addresses the latest failure signal.",
       expected_outcome:
         "At least one file under src/, scripts/, or web/src/ changes and a re-runnable verification command confirms progress.",
+      impacted_files: ["src/", "scripts/", "web/src/"],
       recommended_tools: ["read_file", "write_file", "run_shell"]
     };
   }
@@ -149,6 +158,7 @@ function fallbackPlan(context: PlannerContext): SubTask {
     assignee: "executor",
     objective: `Complete one atomic, verifiable step for round ${context.round} that advances the goal in README.md.`,
     expected_outcome: "Evidence in workspace state or checks shows measurable progress toward the goal.",
+    impacted_files: [],
     recommended_tools: ["read_file", "write_file", "run_shell"]
   };
 }
@@ -159,6 +169,9 @@ function normalizeSubTask(candidate: SubTask): SubTask {
     assignee: candidate.assignee === "designer" ? "designer" : "executor",
     objective: String(candidate.objective ?? "").trim(),
     expected_outcome: String(candidate.expected_outcome ?? "").trim(),
+    impacted_files: Array.isArray(candidate.impacted_files)
+      ? candidate.impacted_files.map((item) => String(item)).filter(Boolean)
+      : [],
     recommended_tools: Array.isArray(candidate.recommended_tools)
       ? candidate.recommended_tools.map((item) => String(item)).filter(Boolean)
       : []

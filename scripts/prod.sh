@@ -65,6 +65,10 @@ graceful_stop_server() {
   if [[ "$USE_LAUNCHCTL" == "1" ]]; then
     launchctl remove "$LAUNCHCTL_LABEL" >/dev/null 2>&1 || true
   fi
+
+  # Clear any stale loop flags/locks to prevent deadlocks on restart
+  rm -f "$RUN_DIR/loop.lock" "$RUN_DIR/loop.pid" "$RUN_DIR/loop.pause" "$RUN_DIR/loop.stop"
+
   echo "Stopped AILoop Production server (PID: $existing_pid)."
 }
 

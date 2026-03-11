@@ -17,13 +17,14 @@ function createLoopPaths(homeDir: string): LoopPaths {
   return {
     homeDir,
     runsDir: path.join(homeDir, "runs"),
-    taskPath: path.join(homeDir, "task.md"),
+    taskPath: path.join(homeDir, "goal.md"),
     plannerRolePath: path.join(homeDir, "PLANNER_ROLE.md"),
     executorRolePath: path.join(homeDir, "EXECUTOR_ROLE.md"),
     designerRolePath: path.join(homeDir, "DESIGNER_ROLE.md"),
     evaluatorRolePath: path.join(homeDir, "EVALUATOR_ROLE.md"),
     leaderRolePath: path.join(homeDir, "LEADER_ROLE.md"),
-    instructionsPath: path.join(homeDir, "instructions.json"),    statePath: path.join(homeDir, "loop.state"),
+    instructionsPath: path.join(homeDir, "instructions.json"),
+    statePath: path.join(homeDir, "state.json"),
     pidPath: path.join(homeDir, "loop.pid"),
     lockPath: path.join(homeDir, "loop.lock"),
     pauseFlagPath: path.join(homeDir, "loop.pause"),
@@ -32,6 +33,13 @@ function createLoopPaths(homeDir: string): LoopPaths {
 }
 
 describe("WorkspaceManager.buildStateChange", () => {
+  test("uses current .ailoop goal and state filenames", () => {
+    const paths = createLoopPaths("/tmp/ailoop-home");
+
+    expect(paths.taskPath).toBe("/tmp/ailoop-home/goal.md");
+    expect(paths.statePath).toBe("/tmp/ailoop-home/state.json");
+  });
+
   test("reports only round delta instead of pre-existing dirty changes", async () => {
     const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-workspace-test-"));
     const homeDir = path.join(repoDir, ".ailoop");
@@ -45,7 +53,7 @@ describe("WorkspaceManager.buildStateChange", () => {
 
     await fs.writeFile(path.join(repoDir, "existing.txt"), "base\n", "utf8");
     await fs.writeFile(paths.taskPath, "# task\n", "utf8");
-    run("git add existing.txt .ailoop/task.md", repoDir);
+    run("git add existing.txt .ailoop/goal.md", repoDir);
     run("git commit -m 'init'", repoDir);
 
     await fs.writeFile(path.join(repoDir, "existing.txt"), "base\nold-dirty-change\n", "utf8");
@@ -74,8 +82,8 @@ describe("WorkspaceManager.buildStateChange", () => {
     run("git init", repoDir);
     run("git config user.email test@example.com", repoDir);
     run("git config user.name tester", repoDir);
-    await fs.writeFile(path.join(repoDir, ".gitignore"), ".ailoop/*\n!.ailoop/task.md\n", "utf8");
-    run("git add .ailoop/task.md", repoDir);
+    await fs.writeFile(path.join(repoDir, ".gitignore"), ".ailoop/*\n!.ailoop/goal.md\n", "utf8");
+    run("git add .ailoop/goal.md", repoDir);
     run("git add .gitignore", repoDir);
     run("git commit -m 'init'", repoDir);
 
@@ -104,8 +112,8 @@ describe("WorkspaceManager.buildStateChange", () => {
     run("git init", repoDir);
     run("git config user.email test@example.com", repoDir);
     run("git config user.name tester", repoDir);
-    await fs.writeFile(path.join(repoDir, ".gitignore"), ".ailoop/*\n!.ailoop/task.md\n", "utf8");
-    run("git add .ailoop/task.md", repoDir);
+    await fs.writeFile(path.join(repoDir, ".gitignore"), ".ailoop/*\n!.ailoop/goal.md\n", "utf8");
+    run("git add .ailoop/goal.md", repoDir);
     run("git add .gitignore", repoDir);
     run("git commit -m 'init'", repoDir);
 

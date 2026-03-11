@@ -32,6 +32,13 @@ Defaults:
 - Existing role files are preserved unless the operator explicitly regenerates (`roles generate --regen`).
 - Runtime safety constraints and schema contracts remain higher priority than role-file instructions.
 
+### 0.2 External Intervention & State Alignment
+
+If the operator (human) manually modifies the codebase or infrastructure to fix a bug or advance the goal outside of the autonomous loop:
+- **Mandatory Notification:** The operator MUST add a brief summary of the changes to `.ailoop/instructions.json`.
+- **Agent Behavior:** The Planner and Leader agents must prioritize these instructions to align their "memory" (state files/history) with the "reality" (current codebase).
+- **Verification:** The Agent should verify the manual fix (e.g., running a test) before proceeding to the next architectural goal.
+
 ---
 
 ## 1. Core Principles for All Agents
