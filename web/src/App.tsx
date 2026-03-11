@@ -221,6 +221,17 @@ interface RunArtifactBundle {
     decision: "pass" | "fail";
     justification: string;
     evidence: string[];
+    aggregate_score?: number;
+    dimensions?: Array<{
+      dimension: string;
+      decision: "pass" | "fail" | "unknown";
+      score?: number;
+      confidence?: number;
+      justification: string;
+      evidence: string[];
+      blocking_issues: string[];
+      recommended_next_action?: string;
+    }>;
     recommended_next_action?: string;
   };
 }
@@ -421,6 +432,18 @@ export default function App() {
     () => paginateRunHistory(runs, runHistoryPage, RUN_HISTORY_PAGE_SIZE),
     [runs, runHistoryPage]
   );
+  const selectedArtifactsReport = useMemo(() => {
+    if (!selectedArtifacts) {
+      return null;
+    }
+
+    return projectRunHistoryReport({
+      timestamp: selectedArtifacts.timestamp,
+      summary: selectedArtifacts.summary,
+      metrics: selectedArtifacts.metrics,
+      evaluation: selectedArtifacts.evaluation
+    });
+  }, [selectedArtifacts]);
 
   useEffect(() => {
     if (runHistoryPagination.currentPage !== runHistoryPage) {
@@ -1155,6 +1178,34 @@ export default function App() {
                   <p className="mt-2 text-xs text-mist/65">Score: {report.aggregateScore}</p>
                   <p className="mt-2 text-xs text-mist/65">Why: {report.justification}</p>
                   <p className="mt-2 text-xs text-mist/65">Evidence: {report.evidence}</p>
+                  {report.dimensionBreakdown.length > 0 ? (
+                    <div className="mt-3 grid gap-2 lg:grid-cols-2">
+                      {report.dimensionBreakdown.map((dimension) => (
+                        <div key={`${run.timestamp}-${dimension.label}`} className="rounded-xl border border-white/10 bg-ink/70 p-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-mist/70">{dimension.label}</p>
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] ${dimension.decision === "pass"
+                                ? "bg-accent/20 text-accent"
+                                : dimension.decision === "fail"
+                                  ? "bg-ember/20 text-ember"
+                                  : "bg-slate/70 text-mist/80"
+                                }`}
+                            >
+                              {dimension.decision}
+                            </span>
+                          </div>
+                          <p className="mt-2 text-xs text-mist/65">
+                            Score: {dimension.score} | Confidence: {dimension.confidence}
+                          </p>
+                          <p className="mt-2 text-xs text-mist/65">Why: {dimension.justification}</p>
+                          <p className="mt-2 text-xs text-mist/60">Evidence: {dimension.evidence}</p>
+                          <p className="mt-2 text-xs text-mist/60">Blocking: {dimension.blockingIssues}</p>
+                          <p className="mt-2 text-xs text-mist/60">Next: {dimension.nextRecommendation}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                   <p className="mt-2 text-xs text-mist/65">Next: {report.nextRecommendation}</p>
                   <div className="mt-3 grid gap-2 text-xs text-mist/70 sm:grid-cols-3">
                     <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">Cost: {report.budgetCost}</p>
@@ -1295,6 +1346,57 @@ export default function App() {
                     </div>
                   </div>
                 </section>
+                {selectedArtifactsReport ? (
+                  <section>
+                    <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">Evaluation</h4>
+                    <div className="rounded-2xl border border-white/10 bg-ink/60 p-5 shadow-inner">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.2em] text-mist/55">Evaluator Decision</p>
+                          <p className="mt-2 text-sm text-mist/90">{selectedArtifactsReport.decision}</p>
+                        </div>
+                        <div className="grid gap-2 text-xs text-mist/70 sm:grid-cols-3">
+                          <p className="rounded-lg border border-white/10 bg-ink/70 px-3 py-2">Score: {selectedArtifactsReport.aggregateScore}</p>
+                          <p className="rounded-lg border border-white/10 bg-ink/70 px-3 py-2">Cost: {selectedArtifactsReport.budgetCost}</p>
+                          <p className="rounded-lg border border-white/10 bg-ink/70 px-3 py-2">Actions: {selectedArtifactsReport.budgetActions}</p>
+                        </div>
+                      </div>
+                      <p className="mt-3 text-sm text-mist/85">Why: {selectedArtifactsReport.justification}</p>
+                      <p className="mt-2 text-sm text-mist/75">Evidence: {selectedArtifactsReport.evidence}</p>
+                      <p className="mt-2 text-sm text-mist/75">Next: {selectedArtifactsReport.nextRecommendation}</p>
+                      {selectedArtifactsReport.dimensionBreakdown.length > 0 ? (
+                        <div className="mt-4 grid gap-3 xl:grid-cols-2">
+                          {selectedArtifactsReport.dimensionBreakdown.map((dimension) => (
+                            <div key={`${selectedArtifacts.timestamp}-${dimension.label}`} className="rounded-xl border border-white/10 bg-ink/70 p-4">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-mist/65">{dimension.label}</p>
+                                  <p className="mt-2 text-xs text-mist/65">
+                                    Score: {dimension.score} | Confidence: {dimension.confidence}
+                                  </p>
+                                </div>
+                                <span
+                                  className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${dimension.decision === "pass"
+                                    ? "bg-accent/20 text-accent"
+                                    : dimension.decision === "fail"
+                                      ? "bg-ember/20 text-ember"
+                                      : "bg-slate/70 text-mist/80"
+                                    }`}
+                                >
+                                  {dimension.decision}
+                                </span>
+                              </div>
+                              <p className="mt-3 text-sm text-mist/85">Why: {dimension.justification}</p>
+                              <p className="mt-2 text-xs text-mist/65">Evidence: {dimension.evidence}</p>
+                              <p className="mt-2 text-xs text-mist/65">Blocking: {dimension.blockingIssues}</p>
+                              <p className="mt-2 text-xs text-mist/65">Next: {dimension.nextRecommendation}</p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  </section>
+                ) : null}
                 <div className="grid gap-6 lg:grid-cols-2">
                   <section>
                     <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">Round Log</h4>

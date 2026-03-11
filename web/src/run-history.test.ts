@@ -38,6 +38,28 @@ describe("projectRunHistoryReport", () => {
         justification: "Structured evaluation should override summary parsing.",
         evidence: ["bun test web/src/run-history.test.ts", "bun run web:build"],
         aggregate_score: 96,
+        dimensions: [
+          {
+            dimension: "goal_alignment",
+            decision: "pass",
+            score: 98,
+            confidence: 0.92,
+            justification: "The change directly exposes evaluator artifacts in the console.",
+            evidence: ["rendered aggregate score", "rendered per-dimension status"],
+            blocking_issues: [],
+            recommended_next_action: "continue"
+          },
+          {
+            dimension: "constraint_compliance",
+            decision: "fail",
+            score: 61,
+            confidence: 0.88,
+            justification: "One validation path still needs explicit evidence.",
+            evidence: ["missing build proof"],
+            blocking_issues: ["No end-to-end artifact confirmation yet."],
+            recommended_next_action: "Run the build and attach the output."
+          }
+        ],
         recommended_next_action: "Proceed to the next planner task."
       }
     };
@@ -54,6 +76,28 @@ describe("projectRunHistoryReport", () => {
     expect(report.evidence).toBe("bun test web/src/run-history.test.ts | bun run web:build");
     expect(report.aggregateScore).toBe("96");
     expect(report.nextRecommendation).toBe("Proceed to the next planner task.");
+    expect(report.dimensionBreakdown).toEqual([
+      {
+        label: "Goal Alignment",
+        decision: "pass",
+        score: "98",
+        confidence: "0.92",
+        justification: "The change directly exposes evaluator artifacts in the console.",
+        evidence: "rendered aggregate score | rendered per-dimension status",
+        blockingIssues: "None",
+        nextRecommendation: "continue"
+      },
+      {
+        label: "Constraint Compliance",
+        decision: "fail",
+        score: "61",
+        confidence: "0.88",
+        justification: "One validation path still needs explicit evidence.",
+        evidence: "missing build proof",
+        blockingIssues: "No end-to-end artifact confirmation yet.",
+        nextRecommendation: "Run the build and attach the output."
+      }
+    ]);
   });
 
   test("falls back to summary parsing when evaluation artifacts are missing", () => {
@@ -70,6 +114,7 @@ describe("projectRunHistoryReport", () => {
     expect(report.justification).toBe("Parsed markdown should only be fallback data.");
     expect(report.evidence).toBe("bun test web/src/App.test.tsx");
     expect(report.aggregateScore).toBe("N/A");
+    expect(report.dimensionBreakdown).toEqual([]);
     expect(report.nextRecommendation).toBe("Fallback next step from summary");
   });
 });

@@ -3,6 +3,18 @@ export interface RunEvaluation {
   justification: string;
   evidence: string[];
   aggregate_score?: number;
+  dimensions?: RunEvaluationDimension[];
+  recommended_next_action?: string;
+}
+
+export interface RunEvaluationDimension {
+  dimension: string;
+  decision: "pass" | "fail" | "unknown";
+  score?: number;
+  confidence?: number;
+  justification: string;
+  evidence: string[];
+  blocking_issues: string[];
   recommended_next_action?: string;
 }
 
@@ -11,6 +23,17 @@ export interface RunHistoryItem {
   summary: string;
   metrics: Record<string, unknown> | null;
   evaluation: RunEvaluation | null;
+}
+
+export interface RoundReportDimension {
+  label: string;
+  decision: "pass" | "fail" | "unknown";
+  score: string;
+  confidence: string;
+  justification: string;
+  evidence: string;
+  blockingIssues: string;
+  nextRecommendation: string;
 }
 
 export interface RoundReport {
@@ -26,6 +49,7 @@ export interface RoundReport {
   budgetCost: string;
   budgetTime: string;
   budgetActions: string;
+  dimensionBreakdown: RoundReportDimension[];
   nextRecommendation: string;
 }
 
@@ -92,6 +116,40 @@ function preferStructuredAggregateScore(evaluation: RunEvaluation | null): strin
   return `${evaluation.aggregate_score}`;
 }
 
+function formatDimensionLabel(value: string): string {
+  return value
+    .split("_")
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
+}
+
+function formatStructuredNumber(value: number | undefined): string {
+  return typeof value === "number" && Number.isFinite(value) ? `${value}` : "N/A";
+}
+
+function joinStructuredItems(items: string[], emptyValue: string): string {
+  const normalized = items.map((item) => item.trim()).filter(Boolean);
+  return normalized.length > 0 ? normalized.join(" | ") : emptyValue;
+}
+
+function preferStructuredDimensionBreakdown(evaluation: RunEvaluation | null): RoundReportDimension[] {
+  if (!evaluation?.dimensions?.length) {
+    return [];
+  }
+
+  return evaluation.dimensions.map((dimension) => ({
+    label: formatDimensionLabel(dimension.dimension),
+    decision: dimension.decision,
+    score: formatStructuredNumber(dimension.score),
+    confidence: formatStructuredNumber(dimension.confidence),
+    justification: dimension.justification.trim() || "No justification provided",
+    evidence: joinStructuredItems(dimension.evidence, "No evaluator evidence captured"),
+    blockingIssues: joinStructuredItems(dimension.blocking_issues, "None"),
+    nextRecommendation: dimension.recommended_next_action?.trim() || "No recommendation captured"
+  }));
+}
+
 export function projectRunHistoryReport(run: RunHistoryItem): RoundReport {
   const fallback = parseRoundReport(run.summary);
 
@@ -101,6 +159,7 @@ export function projectRunHistoryReport(run: RunHistoryItem): RoundReport {
     justification: preferStructuredValue(run.evaluation?.justification, fallback.justification),
     evidence: preferStructuredEvidence(run.evaluation, fallback.evidence),
     aggregateScore: preferStructuredAggregateScore(run.evaluation),
+    dimensionBreakdown: preferStructuredDimensionBreakdown(run.evaluation),
     nextRecommendation: preferStructuredValue(run.evaluation?.recommended_next_action, fallback.nextRecommendation)
   };
 }
