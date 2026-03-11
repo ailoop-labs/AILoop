@@ -650,6 +650,46 @@ describe("console server API contract", () => {
     expect(state.pid).toBe(process.pid);
   });
 
+  test("restarts a paused loop without a live pid for authenticated resume requests", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths, workspaceRoot } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    await seedProjectRoles(paths);
+    await seedLoopEntrypoint(workspaceRoot);
+    await fs.writeFile(paths.pauseFlagPath, "1\n", "utf8");
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "paused",
+      pid: null
+    });
+
+    let restartedPid: number | null = null;
+    try {
+      const response = await fetchHandler(
+        createAuthorizedRequest("http://console.test/api/loop/resume", token, {
+          method: "POST"
+        })
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+      expect(await fs.stat(paths.pauseFlagPath).catch(() => null)).toBeNull();
+
+      const startingState = await readLoopState(paths);
+      expect(startingState.state).toBe("starting");
+      expect(startingState.pid).not.toBeNull();
+      restartedPid = startingState.pid;
+
+      const runningStatus = await waitForLoopState(fetchHandler, token, "running");
+      expect(runningStatus.pid).toBe(restartedPid);
+      expect(runningStatus.pid_alive).toBe(true);
+    } finally {
+      killIfAlive(restartedPid);
+    }
+  });
+
   test("sets the stop flag for authenticated requests", async () => {
     const token = "test-token";
     const { fetchHandler, paths } = await createFixture({

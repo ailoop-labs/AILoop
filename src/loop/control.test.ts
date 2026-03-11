@@ -55,6 +55,75 @@ function makeTestConfig(homeDir: string): AppConfig {
   };
 }
 
+async function seedProjectRoles(paths: ReturnType<typeof buildLoopPaths>) {
+  await Promise.all([
+    fs.writeFile(paths.plannerRolePath, "# Planner Role\n", "utf8"),
+    fs.writeFile(paths.executorRolePath, "# Executor Role\n", "utf8"),
+    fs.writeFile(paths.evaluatorRolePath, "# Evaluator Role\n", "utf8"),
+    fs.writeFile(paths.designerRolePath, "# Designer Role\n", "utf8"),
+    fs.writeFile(paths.leaderRolePath, "# Leader Role\n", "utf8")
+  ]);
+}
+
+async function seedLoopEntrypoint(workspaceRoot: string) {
+  const scriptsDir = path.join(workspaceRoot, "scripts");
+  await fs.mkdir(scriptsDir, { recursive: true });
+  await fs.writeFile(
+    path.join(scriptsDir, "ailoop.ts"),
+    [
+      'import fs from "node:fs/promises";',
+      'import path from "node:path";',
+      "",
+      'const homeDir = path.join(process.cwd(), ".ailoop");',
+      'const statePath = path.join(homeDir, "state.json");',
+      "await Bun.sleep(150);",
+      'const current = JSON.parse(await fs.readFile(statePath, "utf8"));',
+      "const updatedAt = new Date().toISOString();",
+      "await fs.writeFile(",
+      "  statePath,",
+      "  `${JSON.stringify({",
+      "    ...current,",
+      '    state: "running",',
+      "    pid: process.pid,",
+      "    last_error: null,",
+      "    updated_at: updatedAt",
+      "  }, null, 2)}\\n`,",
+      '  "utf8"',
+      ");",
+      "await Bun.sleep(5_000);",
+      ""
+    ].join("\n"),
+    "utf8"
+  );
+}
+
+async function waitForRunningState(homeDir: string, timeoutMs = 3_000) {
+  const deadline = Date.now() + timeoutMs;
+  const paths = buildLoopPaths(homeDir);
+
+  while (Date.now() < deadline) {
+    const state = await readLoopState(paths);
+    if (state.state === "running" && state.pid) {
+      return state;
+    }
+    await Bun.sleep(25);
+  }
+
+  throw new Error("Timed out waiting for loop state running");
+}
+
+function killIfAlive(pid: number | null) {
+  if (!pid) {
+    return;
+  }
+
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    // The detached test process may already have exited.
+  }
+}
+
 async function writeRunArtifacts(
   runsDir: string,
   timestamp: string,
@@ -301,6 +370,46 @@ describe("resumeLoop", () => {
     expect(state.pid).toBe(process.pid);
 
     await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("restarts a paused loop when no live pid exists", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-resume-restart-test-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    const paths = buildLoopPaths(homeDir);
+    const originalCwd = process.cwd();
+
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(path.join(workspaceRoot, "README.md"), "# Test workspace\n", "utf8");
+    await seedProjectRoles(paths);
+    await seedLoopEntrypoint(workspaceRoot);
+    await setFlag(paths.pauseFlagPath);
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "paused",
+      pid: null
+    });
+
+    let restartedPid: number | null = null;
+    try {
+      process.chdir(workspaceRoot);
+
+      await resumeLoop(makeTestConfig(homeDir));
+
+      expect(await hasFlag(paths.pauseFlagPath)).toBe(false);
+
+      const state = await readLoopState(paths);
+      expect(state.state).toBe("starting");
+      expect(state.pid).not.toBeNull();
+      restartedPid = state.pid;
+
+      const runningState = await waitForRunningState(homeDir);
+      expect(runningState.pid).toBe(restartedPid);
+      expect(runningState.last_error).toBeNull();
+    } finally {
+      process.chdir(originalCwd);
+      killIfAlive(restartedPid);
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
   });
 });
 
