@@ -1,0 +1,54 @@
+name: Feature request
+description: Suggest an improvement to AILoop.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement.
+        Keep the request focused on one user-facing or developer-facing outcome.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What limitation, pain point, or missed opportunity should this address?
+      placeholder: It is hard to ...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the smallest useful change that would improve the situation.
+      placeholder: AILoop should ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which part of the project would this mostly impact?
+      options:
+        - Engine
+        - Planner, executor, or evaluator
+        - CLI and scripts
+        - Web console
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: success
+    attributes:
+      label: Success criteria
+      description: How should contributors know this request is complete?
+      placeholder: This is done when ...
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Link related docs, prior discussions, or examples if they are useful.
+    validations:
+      required: false

@@ -1,0 +1,44 @@
+name: Bug report
+description: Report a reproducible problem in AILoop.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug.
+        Please provide enough detail for a contributor to reproduce and verify it quickly.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the problem and the behavior you expected instead.
+      placeholder: When I ..., I expected ..., but ...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Share the smallest sequence of steps that reproduces the problem.
+      placeholder: |
+        1. Run ...
+        2. Open ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment details
+      description: Include OS, runtime versions, branch, and any relevant configuration.
+      placeholder: macOS 15, Bun 1.x, main branch, local run mode
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste sanitized logs, stack traces, or screenshots. Remove secrets before submitting.
+      render: shell
+    validations:
+      required: false
