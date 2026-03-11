@@ -192,4 +192,38 @@ describe("WorkspaceManager.buildStateChange", () => {
       await fs.rm(repoDir, { recursive: true, force: true });
     }
   });
+
+  test("handles nonexistent directory placeholders without throwing during state capture or rollback", async () => {
+    const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-workspace-future-dir-test-"));
+    const homeDir = path.join(repoDir, ".ailoop");
+    const paths = createLoopPaths(homeDir);
+    await fs.mkdir(paths.homeDir, { recursive: true });
+    await fs.mkdir(paths.runsDir, { recursive: true });
+    await fs.writeFile(paths.taskPath, "# task\n", "utf8");
+
+    run("git init", repoDir);
+    run("git config user.email test@example.com", repoDir);
+    run("git config user.name tester", repoDir);
+    run("git add .ailoop/goal.md", repoDir);
+    run("git commit -m 'init'", repoDir);
+
+    const futureDir = path.join(repoDir, ".github", "ISSUE_TEMPLATE") + path.sep;
+    const createdDir = path.join(repoDir, ".github", "ISSUE_TEMPLATE");
+    const createdFile = path.join(createdDir, "bug.yml");
+    const manager = new WorkspaceManager(paths, repoDir);
+    const snapshot = await manager.createSnapshot([futureDir]);
+    expect(snapshot.files.some((file) => file.path.replace(/[\\/]$/, "") === createdDir)).toBeTrue();
+
+    await fs.mkdir(createdDir, { recursive: true });
+    await fs.writeFile(createdFile, "name: Bug report\n", "utf8");
+
+    const stateChange = await manager.buildStateChange(snapshot);
+    expect(stateChange).toContain(".github/ISSUE_TEMPLATE/bug.yml");
+
+    await manager.rollback(snapshot);
+
+    await expect(fs.stat(createdFile)).rejects.toThrow();
+    await expect(fs.stat(createdDir)).rejects.toThrow();
+    await fs.rm(repoDir, { recursive: true, force: true });
+  });
 });

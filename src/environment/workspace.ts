@@ -17,6 +17,10 @@ export interface WorkspaceSnapshot {
   untrackedBaseline: string;
 }
 
+interface SnapshotTarget {
+  path: string;
+}
+
 function splitLines(input: string): string[] {
   if (!input) {
     return [];
@@ -81,6 +85,43 @@ function isPathInside(root: string, candidate: string): boolean {
 
 function uniquePaths(paths: string[]): string[] {
   return Array.from(new Set(paths));
+}
+
+function normalizeSnapshotTargets(
+  workspaceRoot: string,
+  taskPath: string,
+  extraTargetFiles: string[]
+): SnapshotTarget[] {
+  const targetMap = new Map<string, SnapshotTarget>();
+  for (const rawPath of [taskPath, ...extraTargetFiles]) {
+    const resolvedPath = path.isAbsolute(rawPath)
+      ? path.normalize(rawPath)
+      : path.resolve(workspaceRoot, rawPath);
+    if (!isPathInside(workspaceRoot, resolvedPath)) {
+      continue;
+    }
+
+    if (targetMap.has(resolvedPath)) {
+      continue;
+    }
+
+    targetMap.set(resolvedPath, {
+      path: resolvedPath
+    });
+  }
+
+  return Array.from(targetMap.values());
+}
+
+async function statIfExists(filePath: string): Promise<fs.Stats | null> {
+  try {
+    return await fs.lstat(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
 }
 
 async function collectDirectoryFiles(rootDir: string, workspaceRoot: string): Promise<string[]> {
@@ -179,25 +220,25 @@ export class WorkspaceManager {
   }
 
   async createSnapshot(extraTargetFiles: string[] = []): Promise<WorkspaceSnapshot> {
-    const normalizedTargets = uniquePaths(
-      [this.paths.taskPath, ...extraTargetFiles]
-        .map((filePath) => (path.isAbsolute(filePath) ? filePath : path.resolve(this.workspaceRoot, filePath)))
-        .filter((filePath) => isPathInside(this.workspaceRoot, filePath))
+    const normalizedTargets = normalizeSnapshotTargets(
+      this.workspaceRoot,
+      this.paths.taskPath,
+      extraTargetFiles
     );
     const snapshotTargets = uniquePaths(
       (
         await Promise.all(
-          normalizedTargets.map(async (targetPath) => {
-            if (!(await fileExists(targetPath))) {
-              return [targetPath];
+          normalizedTargets.map(async (target) => {
+            if (!(await fileExists(target.path))) {
+              return [target.path];
             }
 
-            const stat = await fs.lstat(targetPath);
+            const stat = await fs.lstat(target.path);
             if (stat.isDirectory()) {
-              return collectDirectoryFiles(targetPath, this.workspaceRoot);
+              return collectDirectoryFiles(target.path, this.workspaceRoot);
             }
 
-            return [targetPath];
+            return [target.path];
           })
         )
       ).flat()
@@ -227,7 +268,11 @@ export class WorkspaceManager {
   async rollback(snapshot: WorkspaceSnapshot): Promise<void> {
     for (const file of snapshot.files) {
       if (!file.existed) {
-        await fs.rm(file.path, { force: true });
+        const stat = await statIfExists(file.path);
+        if (!stat) {
+          continue;
+        }
+        await fs.rm(file.path, { force: true, recursive: stat.isDirectory() });
         continue;
       }
       await writeTextFile(file.path, file.content);
@@ -238,6 +283,10 @@ export class WorkspaceManager {
     const sections: string[] = [];
     const fileDiffs: string[] = [];
     for (const file of snapshot.files) {
+      const stat = await statIfExists(file.path);
+      if (stat && !stat.isFile()) {
+        continue;
+      }
       const latest = await readTextFile(file.path, "");
       const relativePath = path.relative(this.workspaceRoot, file.path) || file.path;
       const diff = toUnifiedLikeDiff(relativePath, file.content, latest);
