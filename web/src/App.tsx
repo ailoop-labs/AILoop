@@ -6,6 +6,7 @@ import { buildLogViewerText } from "./log-lines";
 import { resolveLogTailFollowBehavior } from "./log-follow";
 import { GoalMarkdown } from "./goal-markdown";
 import { deriveRoundProgress } from "./round-progress";
+import { projectRunHistoryReport, type RunHistoryItem } from "./run-history";
 import { paginateRunHistory, RUN_HISTORY_PAGE_SIZE } from "./run-history-pagination";
 
 type LoopStateName = "idle" | "running" | "cooldown" | "paused" | "stopping" | "error";
@@ -30,12 +31,6 @@ interface LoopStatus {
       actionsUsed: number;
     };
   } | null;
-}
-
-interface RunItem {
-  timestamp: string;
-  summary: string;
-  metrics: Record<string, unknown> | null;
 }
 
 type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
@@ -164,21 +159,6 @@ function formatMs(ms: number): string {
   return `${Math.round(ms / 1000)}s`;
 }
 
-interface RoundReport {
-  objective: string;
-  expectedOutcome: string;
-  toolStatus: string;
-  workSummary: string;
-  error: string;
-  decision: string;
-  justification: string;
-  evidence: string;
-  budgetCost: string;
-  budgetTime: string;
-  budgetActions: string;
-  nextRecommendation: string;
-}
-
 type StepStatus = "done" | "current" | "pending";
 
 interface RoleRuntimeStep {
@@ -189,30 +169,6 @@ interface RoleRuntimeStep {
 }
 
 const compactRunTimestampPattern = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/;
-
-function extractBulletValue(summary: string, label: string): string | null {
-  const prefix = `- ${label}:`;
-  const line = summary
-    .split("\n")
-    .map((item) => item.trim())
-    .find((item) => item.startsWith(prefix));
-  if (!line) {
-    return null;
-  }
-  return line.slice(prefix.length).trim();
-}
-
-function extractMarkdownSection(summary: string, heading: string): string {
-  const marker = `## ${heading}`;
-  const start = summary.indexOf(marker);
-  if (start === -1) {
-    return "";
-  }
-
-  const rest = summary.slice(start + marker.length).replace(/^\s*\n/, "");
-  const nextHeadingIndex = rest.search(/\n##\s+/);
-  return (nextHeadingIndex === -1 ? rest : rest.slice(0, nextHeadingIndex)).trim();
-}
 
 function parseRunTimestamp(timestamp: string): Date | null {
   const normalizedTimestamp = compactRunTimestampPattern.test(timestamp)
@@ -237,23 +193,6 @@ function formatRunTimestamp(timestamp: string): string {
     second: "2-digit",
     timeZoneName: "short"
   }).format(parsed);
-}
-
-function parseRoundReport(summary: string): RoundReport {
-  return {
-    objective: extractBulletValue(summary, "Objective") ?? "No objective captured",
-    expectedOutcome: extractBulletValue(summary, "Expected Outcome") ?? "No expected outcome captured",
-    toolStatus: extractBulletValue(summary, "Tool Status") ?? "unknown",
-    workSummary: extractBulletValue(summary, "Work Summary") ?? "No work summary captured",
-    error: extractBulletValue(summary, "Error") ?? "none",
-    decision: extractBulletValue(summary, "Decision") ?? "unknown",
-    justification: extractBulletValue(summary, "Justification") ?? "No evaluator justification captured",
-    evidence: extractBulletValue(summary, "Evidence") ?? "No evaluator evidence captured",
-    budgetCost: extractBulletValue(summary, "Cost USD") ?? "N/A",
-    budgetTime: extractBulletValue(summary, "Time ms") ?? "N/A",
-    budgetActions: extractBulletValue(summary, "Actions") ?? "N/A",
-    nextRecommendation: extractMarkdownSection(summary, "Next Round Recommendation") || "No recommendation captured"
-  };
 }
 
 function resolveRoleRuntimeCurrentIndex(phase: ReturnType<typeof deriveRoundProgress>["phase"]): number {
@@ -281,11 +220,11 @@ export default function App() {
   const [status, setStatus] = useState<LoopStatus | null>(null);
   const [goal, setGoal] = useState("");
   const [roles, setRoles] = useState<ProjectRoleItem[]>([]);
-  const [runs, setRuns] = useState<RunItem[]>([]);
+  const [runs, setRuns] = useState<RunHistoryItem[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [isGoalDialogOpen, setIsGoalDialogOpen] = useState(false);
   const [selectedRole, setSelectedRole] = useState<ProjectRoleItem | null>(null);
-  const [selectedRun, setSelectedRun] = useState<RunItem | null>(null);
+  const [selectedRun, setSelectedRun] = useState<RunHistoryItem | null>(null);
   const [runHistoryPage, setRunHistoryPage] = useState(1);
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeLoopConfig | null>(null);
   const [instruction, setInstruction] = useState("");
@@ -349,7 +288,7 @@ export default function App() {
       const [nextStatus, nextGoal, nextRuns, nextLogs, nextRoles] = await Promise.all([
         api<LoopStatus>("/api/status", undefined, activeToken),
         api<GoalResponse>("/api/goal", undefined, activeToken),
-        api<RunItem[]>("/api/runs?limit=20", undefined, activeToken),
+        api<RunHistoryItem[]>("/api/runs?limit=20", undefined, activeToken),
         api<{ lines: string[] }>("/api/logs/tail?lines=120", undefined, activeToken),
         api<ProjectRoleResponse>("/api/roles", undefined, activeToken)
       ]);
@@ -1139,7 +1078,7 @@ export default function App() {
             <p className="text-sm text-mist/70">No run artifacts yet.</p>
           ) : (
             runHistoryPagination.items.map((run, index) => {
-              const report = parseRoundReport(run.summary);
+              const report = projectRunHistoryReport(run);
               const parsedTimestamp = parseRunTimestamp(run.timestamp);
               const displayTimestamp = formatRunTimestamp(run.timestamp);
               return (
