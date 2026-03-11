@@ -126,6 +126,18 @@ function killIfAlive(pid: number | null) {
   }
 }
 
+function makeSpawnResult(pid: number): ReturnType<typeof childProcess.spawn> {
+  return {
+    pid,
+    unref() {}
+  } as ReturnType<typeof childProcess.spawn>;
+}
+
+function makeSpawnMock(nextPid: () => number): typeof childProcess.spawn {
+  return ((..._args: Parameters<typeof childProcess.spawn>) =>
+    makeSpawnResult(nextPid())) as typeof childProcess.spawn;
+}
+
 async function writeRunArtifacts(
   runsDir: string,
   timestamp: string,
@@ -195,13 +207,7 @@ describe("startBackgroundLoop", () => {
     await fs.writeFile(path.join(workspaceRoot, "README.md"), "# Test workspace\n", "utf8");
     await seedProjectRoles(paths);
 
-    const spawnSpy = spyOn(childProcess, "spawn").mockImplementation(
-      () =>
-        ({
-          pid: nextPid++,
-          unref() {}
-        }) as ReturnType<typeof childProcess.spawn>
-    );
+    const spawnSpy = spyOn(childProcess, "spawn").mockImplementation(makeSpawnMock(() => nextPid++));
 
     try {
       process.chdir(workspaceRoot);
@@ -221,6 +227,46 @@ describe("startBackgroundLoop", () => {
       const state = await readLoopState(paths);
       expect(state.state).toBe("starting");
       expect(state.pid).toBe(80_000);
+    } finally {
+      process.chdir(originalCwd);
+      mock.restore();
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("ignores invalid persisted non-positive pids and starts a fresh background loop", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-start-invalid-pid-test-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    const paths = buildLoopPaths(homeDir);
+    const originalCwd = process.cwd();
+    let nextPid = 81_000;
+
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(path.join(workspaceRoot, "README.md"), "# Test workspace\n", "utf8");
+    await seedProjectRoles(paths);
+    await fs.writeFile(paths.pidPath, "0\n", "utf8");
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "running",
+      pid: -1
+    });
+
+    const spawnSpy = spyOn(childProcess, "spawn").mockImplementation(makeSpawnMock(() => nextPid++));
+
+    try {
+      process.chdir(workspaceRoot);
+
+      const result = await startBackgroundLoop(makeTestConfig(homeDir));
+
+      expect(spawnSpy).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({
+        started: true,
+        message: "Loop started with pid 81000"
+      });
+
+      const state = await readLoopState(paths);
+      expect(state.state).toBe("starting");
+      expect(state.pid).toBe(81_000);
     } finally {
       process.chdir(originalCwd);
       mock.restore();
@@ -476,13 +522,7 @@ describe("resumeLoop", () => {
       pid: null
     });
 
-    const spawnSpy = spyOn(childProcess, "spawn").mockImplementation(
-      () =>
-        ({
-          pid: nextPid++,
-          unref() {}
-        }) as ReturnType<typeof childProcess.spawn>
-    );
+    const spawnSpy = spyOn(childProcess, "spawn").mockImplementation(makeSpawnMock(() => nextPid++));
 
     try {
       process.chdir(workspaceRoot);

@@ -123,7 +123,9 @@ export async function startBackgroundLoop(config: AppConfig): Promise<{ started:
 
     const currentState = await readLoopState(paths);
     const recordedPid = await readPid(paths);
-    const livePid = [recordedPid, currentState.pid].find((pid): pid is number => Boolean(pid) && isPidAlive(pid));
+    const livePid = [recordedPid, currentState.pid].find(
+      (pid): pid is number => typeof pid === "number" && isPidAlive(pid)
+    );
     if (currentState.state !== "idle" && livePid) {
       return { started: false, message: `Loop already running with pid ${livePid}` };
     }

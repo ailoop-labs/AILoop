@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import type { Stats } from "node:fs";
 import path from "node:path";
 import type { LoopPaths } from "../loop/state";
 import { runShellCommand } from "../utils/exec";
@@ -113,7 +114,7 @@ function normalizeSnapshotTargets(
   return Array.from(targetMap.values());
 }
 
-async function statIfExists(filePath: string): Promise<fs.Stats | null> {
+async function statIfExists(filePath: string): Promise<Stats | null> {
   try {
     return await fs.lstat(filePath);
   } catch (error) {

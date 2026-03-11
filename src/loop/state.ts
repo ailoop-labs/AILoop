@@ -62,6 +62,10 @@ export function defaultLoopState(pid: number | null = null): LoopStateData {
   };
 }
 
+function normalizePersistedPid(pid: number | null | undefined): number | null {
+  return typeof pid === "number" && Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
 function normalizeLoopState(raw: Partial<LoopStateData> | null | undefined): LoopStateData {
   const fallback = defaultLoopState();
   if (!raw) {
@@ -71,6 +75,7 @@ function normalizeLoopState(raw: Partial<LoopStateData> | null | undefined): Loo
   return {
     ...fallback,
     ...raw,
+    pid: normalizePersistedPid(raw.pid),
     previous_tool_result: raw.previous_tool_result ?? null,
     previous_evaluation_dimensions: raw.previous_evaluation_dimensions,
     current_budget: raw.current_budget ?? null
