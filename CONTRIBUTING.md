@@ -4,6 +4,13 @@ Thank you for contributing to AILoop. This repository is built around small, rev
 
 AILoop is a goal-driven autonomous loop runner, so contributions should optimize for measurable progress, explicit verification, and a low blast radius. Keep changes atomic, keep evidence concrete, and prefer safe workflows over speed.
 
+## Issue And Change Proposals
+
+- Check `README.md`, `ARCHITECTURE.md`, and any active instructions before proposing a change so the proposal reflects the current product and runtime contracts.
+- For non-trivial work, open or update an issue before you start coding. Describe the problem, the intended outcome, the smallest proposed change, and how you expect to verify it.
+- Link the issue in your Pull Request so reviewers can see the rationale, scope, and any operator context that shaped the change.
+- If you are fixing something outside the normal loop, summarize the manual intervention in `.ailoop/instructions.json` so future rounds can align workspace state with recorded history.
+
 ## Development Principles
 
 - Work from the current source of truth in `README.md`, `ARCHITECTURE.md`, and any active human instruction.
@@ -128,6 +135,10 @@ Do not manually create or claim `.ailoop/runs/*` artifacts in contributor notes.
 - If a required prerequisite is missing, stop and document the blocker instead of guessing.
 - If you hit an infrastructure or tool bug unrelated to the business objective, report it clearly rather than patching around it in unrelated files.
 - Keep documentation and implementation consistent. When behavior changes, update the relevant docs in the same change when practical.
+
+## Code of Conduct
+
+Contribute with the same review discipline the product expects from its agents: be respectful, be specific, and keep disagreement focused on the work. Prefer factual feedback, assume good intent, and leave a clear audit trail for decisions so future contributors can follow the reasoning.
 
 ## Pull Request Checklist
 
