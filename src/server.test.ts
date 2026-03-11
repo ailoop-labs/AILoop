@@ -359,6 +359,143 @@ describe("console server API contract", () => {
     expect(await response.json()).toEqual(await readRuntimeLoopConfig(config));
   });
 
+  test("persists runtime config overrides through the authenticated save endpoint", async () => {
+    const token = "test-token";
+    const { config, fetchHandler } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    const response = await fetchHandler(
+      createAuthorizedRequest("http://console.test/api/config", token, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          intervalSeconds: 90,
+          exitOnError: true,
+          budget: {
+            timeMinutes: 25
+          },
+          codex: {
+            profile: "saved-from-console",
+            timeoutMs: 240_000
+          }
+        })
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      config: await readRuntimeLoopConfig(config)
+    });
+    expect(await readRuntimeLoopConfig(config)).toMatchObject({
+      intervalSeconds: 90,
+      exitOnError: true,
+      budget: {
+        usdPerRound: 0.5,
+        timeMinutes: 25,
+        actions: 30
+      },
+      codex: {
+        profile: "saved-from-console",
+        timeoutMs: 240_000
+      }
+    });
+  });
+
+  test("restores default runtime config through the authenticated reset endpoint", async () => {
+    const token = "test-token";
+    const { config, fetchHandler } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    await saveRuntimeLoopConfig(config, {
+      intervalSeconds: 45,
+      maxCycles: 9,
+      exitOnError: true,
+      budget: {
+        usdPerRound: 2,
+        timeMinutes: 20,
+        actions: 40
+      },
+      codex: {
+        profile: "reset-me",
+        timeoutMs: 240_000
+      }
+    });
+
+    const response = await fetchHandler(
+      createAuthorizedRequest("http://console.test/api/config/reset", token, {
+        method: "POST"
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      config: {
+        intervalSeconds: 30,
+        maxCycles: 0,
+        exitOnError: false,
+        evaluatorReworkMaxAttempts: 1,
+        budget: {
+          usdPerRound: 0.5,
+          timeMinutes: 15,
+          actions: 30
+        },
+        codex: {
+          bin: "codex",
+          model: "gpt-5",
+          profile: "test",
+          plannerSandbox: "read-only",
+          executorSandbox: "danger-full-access",
+          evaluatorSandbox: "danger-full-access",
+          timeoutMs: 180_000,
+          llmEvaluatorDimensions: [
+            "goal_alignment",
+            "causal_validity",
+            "constraint_compliance",
+            "risk_externality",
+            "reversibility_resilience",
+            "learning_yield"
+          ],
+          llmEvaluatorMinPassScore: 75
+        }
+      }
+    });
+    expect(await readRuntimeLoopConfig(config)).toEqual({
+      intervalSeconds: 30,
+      maxCycles: 0,
+      exitOnError: false,
+      evaluatorReworkMaxAttempts: 1,
+      budget: {
+        usdPerRound: 0.5,
+        timeMinutes: 15,
+        actions: 30
+      },
+      codex: {
+        bin: "codex",
+        model: "gpt-5",
+        profile: "test",
+        plannerSandbox: "read-only",
+        executorSandbox: "danger-full-access",
+        evaluatorSandbox: "danger-full-access",
+        timeoutMs: 180_000,
+        llmEvaluatorDimensions: [
+          "goal_alignment",
+          "causal_validity",
+          "constraint_compliance",
+          "risk_externality",
+          "reversibility_resilience",
+          "learning_yield"
+        ],
+        llmEvaluatorMinPassScore: 75
+      }
+    });
+  });
+
   test("returns the workspace goal for authenticated requests", async () => {
     const token = "test-token";
     const goal = "# Goal\n\nShip the operator console.\n";
