@@ -42,6 +42,7 @@ import {
 } from "./state";
 import type { LoopPaths } from "./state";
 
+const startOperations = new Map<string, Promise<{ started: boolean; message: string }>>();
 const resumeOperations = new Map<string, Promise<void>>();
 
 export async function ensureProjectRoles(
@@ -111,38 +112,56 @@ export async function listProjectRoles(config: AppConfig): Promise<ProjectRoleVi
 }
 
 export async function startBackgroundLoop(config: AppConfig): Promise<{ started: boolean; message: string }> {
-  const paths = await ensureLoopHomeAndGetPaths(config);
-  await ensureProjectRoles(config, { workspaceRoot: process.cwd(), regen: false });
-
-  const existingPid = await readPid(paths);
-  if (existingPid && isPidAlive(existingPid)) {
-    return { started: false, message: `Loop already running with pid ${existingPid}` };
+  const existingOperation = startOperations.get(config.homeDir);
+  if (existingOperation) {
+    return await existingOperation;
   }
 
-  await prepareStartFlags(paths);
-  const runtimeConfig = await readRuntimeLoopConfig(config);
-  const runtimeEnv = runtimeLoopConfigToEnv(runtimeConfig);
-  const child = spawn("bun", ["run", "scripts/ailoop.ts", "run"], {
-    cwd: process.cwd(),
-    detached: true,
-    stdio: "ignore",
-    env: {
-      ...process.env,
-      ...runtimeEnv
+  const operation = (async () => {
+    const paths = await ensureLoopHomeAndGetPaths(config);
+    await ensureProjectRoles(config, { workspaceRoot: process.cwd(), regen: false });
+
+    const currentState = await readLoopState(paths);
+    const recordedPid = await readPid(paths);
+    const livePid = [recordedPid, currentState.pid].find((pid): pid is number => Boolean(pid) && isPidAlive(pid));
+    if (currentState.state !== "idle" && livePid) {
+      return { started: false, message: `Loop already running with pid ${livePid}` };
     }
-  });
 
-  const currentState = await readLoopState(paths);
-  await writeLoopState(paths, {
-    ...currentState,
-    state: "starting",
-    pid: child.pid ?? null,
-    last_error: null,
-    current_budget: null
-  });
-  child.unref();
+    await prepareStartFlags(paths);
+    const runtimeConfig = await readRuntimeLoopConfig(config);
+    const runtimeEnv = runtimeLoopConfigToEnv(runtimeConfig);
+    const child = spawn("bun", ["run", "scripts/ailoop.ts", "run"], {
+      cwd: process.cwd(),
+      detached: true,
+      stdio: "ignore",
+      env: {
+        ...process.env,
+        ...runtimeEnv
+      }
+    });
 
-  return { started: true, message: `Loop started with pid ${child.pid}` };
+    await writeLoopState(paths, {
+      ...currentState,
+      state: "starting",
+      pid: child.pid ?? null,
+      last_error: null,
+      current_budget: null
+    });
+    child.unref();
+
+    return { started: true, message: `Loop started with pid ${child.pid}` };
+  })();
+
+  startOperations.set(config.homeDir, operation);
+
+  try {
+    return await operation;
+  } finally {
+    if (startOperations.get(config.homeDir) === operation) {
+      startOperations.delete(config.homeDir);
+    }
+  }
 }
 
 export async function prepareStartFlags(paths: LoopPaths): Promise<void> {

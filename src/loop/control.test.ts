@@ -13,6 +13,7 @@ import {
   listProjectRoles,
   prepareStartFlags,
   resumeLoop,
+  startBackgroundLoop,
   tailLatestLog
 } from "./control";
 import type { AppConfig } from "../config/env";
@@ -179,6 +180,52 @@ describe("prepareStartFlags", () => {
     expect(await hasFlag(paths.pauseFlagPath)).toBe(false);
 
     await fs.rm(homeDir, { recursive: true, force: true });
+  });
+});
+
+describe("startBackgroundLoop", () => {
+  test("collapses duplicate concurrent starts into a single background start", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-start-duplicate-test-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    const paths = buildLoopPaths(homeDir);
+    const originalCwd = process.cwd();
+    let nextPid = 80_000;
+
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(path.join(workspaceRoot, "README.md"), "# Test workspace\n", "utf8");
+    await seedProjectRoles(paths);
+
+    const spawnSpy = spyOn(childProcess, "spawn").mockImplementation(
+      () =>
+        ({
+          pid: nextPid++,
+          unref() {}
+        }) as ReturnType<typeof childProcess.spawn>
+    );
+
+    try {
+      process.chdir(workspaceRoot);
+
+      const [first, second] = await Promise.all([
+        startBackgroundLoop(makeTestConfig(homeDir)),
+        startBackgroundLoop(makeTestConfig(homeDir))
+      ]);
+
+      expect(spawnSpy).toHaveBeenCalledTimes(1);
+      expect(first).toEqual({
+        started: true,
+        message: "Loop started with pid 80000"
+      });
+      expect(second).toEqual(first);
+
+      const state = await readLoopState(paths);
+      expect(state.state).toBe("starting");
+      expect(state.pid).toBe(80_000);
+    } finally {
+      process.chdir(originalCwd);
+      mock.restore();
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
   });
 });
 
