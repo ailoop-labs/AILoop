@@ -5,6 +5,7 @@ import { patchRuntimeLoopConfig, readRuntimeLoopConfig, resetRuntimeLoopConfig }
 import { isDateBasedAdminTokenExpired } from "./auth/admin-token";
 import {
   getLoopStatus,
+  getRunArtifacts,
   instructLoop,
   listProjectRoles,
   listRuns,
@@ -218,6 +219,18 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
       const limitRaw = Number(url.searchParams.get("limit") ?? "20");
       const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, limitRaw)) : 20;
       return json(await listRuns(config, limit));
+    }
+
+    const runArtifactsMatch =
+      request.method === "GET" ? url.pathname.match(/^\/api\/runs\/([^/]+)\/artifacts$/) : null;
+    if (runArtifactsMatch) {
+      const timestamp = decodeURIComponent(runArtifactsMatch[1] ?? "");
+      const artifacts = await getRunArtifacts(config, timestamp);
+      if (!artifacts) {
+        return json({ ok: false, error: "Run artifacts not found" }, 404);
+      }
+
+      return json(artifacts);
     }
 
     if (url.pathname === "/api/roles" && request.method === "GET") {

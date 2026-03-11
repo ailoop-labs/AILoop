@@ -982,6 +982,7 @@ export class LoopEngine {
         nextRecommendation: evaluation.recommended_next_action ?? "continue"
       });
 
+
       await trimOldRuns(this.paths.runsDir, this.config.maxRetainRuns);
 
       const nextFailureCount =

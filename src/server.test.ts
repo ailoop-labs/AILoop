@@ -713,6 +713,125 @@ describe("console server API contract", () => {
     ]);
   });
 
+  test("returns a specific completed run artifact bundle for authenticated requests", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    const timestamp = "2026-03-10T10-00-00-000Z";
+
+    await writeRunArtifacts(paths.runsDir, timestamp, {
+      summary: "Latest summary\n",
+      metrics: { round: 2, status: "success" },
+      evaluation: {
+        decision: "pass",
+        justification: "All checks satisfied.",
+        evidence: ["bun test src/server.test.ts"],
+        aggregate_score: 96
+      },
+      log: "OPENAI_API_KEY=[REDACTED]\n",
+      stateChange: "+SESSION_SECRET=[REDACTED]\n"
+    });
+
+    const response = await fetchHandler(
+      createAuthorizedRequest(`http://console.test/api/runs/${timestamp}/artifacts`, token)
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      timestamp,
+      summary: "Latest summary\n",
+      metrics: {
+        round: 2,
+        status: "success"
+      },
+      evaluation: {
+        decision: "pass",
+        justification: "All checks satisfied.",
+        evidence: ["bun test src/server.test.ts"],
+        aggregate_score: 96
+      },
+      log: "OPENAI_API_KEY=[REDACTED]\n",
+      state_change: "+SESSION_SECRET=[REDACTED]\n"
+    });
+  });
+
+  test("redacts mixed-case secret assignments from archived run artifacts at serve time", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    const timestamp = "2026-03-10T10-30-00-000Z";
+
+    await writeRunArtifacts(paths.runsDir, timestamp, {
+      summary: "Latest summary sessionSecret=uniquesecret123\n",
+      metrics: { round: 3, status: "success" },
+      evaluation: {
+        decision: "pass",
+        justification: "Artifacts verified for apiToken=uniquesecret123.",
+        evidence: ["sessionSecret=uniquesecret123"]
+      },
+      log: "sessionSecret=uniquesecret123\n",
+      stateChange: "+apiToken=uniquesecret123\n"
+    });
+
+    const response = await fetchHandler(
+      createAuthorizedRequest(`http://console.test/api/runs/${timestamp}/artifacts`, token)
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      timestamp,
+      summary: "Latest summary sessionSecret=[REDACTED]\n",
+      metrics: {
+        round: 3,
+        status: "success"
+      },
+      evaluation: {
+        decision: "pass",
+        justification: "Artifacts verified for apiToken=[REDACTED].",
+        evidence: ["sessionSecret=[REDACTED]"]
+      },
+      log: "sessionSecret=[REDACTED]\n",
+      state_change: "+apiToken=[REDACTED]\n"
+    });
+  });
+
+  test("rejects unauthenticated requests for run artifact bundles", async () => {
+    const { fetchHandler } = await createFixture({
+      consoleAdminToken: "test-token"
+    });
+
+    const response = await fetchHandler(
+      new Request("http://console.test/api/runs/2026-03-10T10-00-00-000Z/artifacts")
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "Unauthorized"
+    });
+  });
+
+  test("returns not found when the requested run artifact bundle does not exist", async () => {
+    const token = "test-token";
+    const { fetchHandler } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    const response = await fetchHandler(
+      createAuthorizedRequest("http://console.test/api/runs/2026-03-10T10-00-00-000Z/artifacts", token)
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "Run artifacts not found"
+    });
+  });
+
   test("tails the newest round log with the requested line limit", async () => {
     const token = "test-token";
     const { fetchHandler, paths } = await createFixture({

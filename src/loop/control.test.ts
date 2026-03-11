@@ -7,6 +7,7 @@ import {
   ensureProjectRoles,
   getCliStatus,
   getLoopStatus,
+  getRunArtifacts,
   listRuns,
   listProjectRoles,
   prepareStartFlags,
@@ -52,6 +53,44 @@ function makeTestConfig(homeDir: string): AppConfig {
       llmEvaluatorMinPassScore: 75
     }
   };
+}
+
+async function writeRunArtifacts(
+  runsDir: string,
+  timestamp: string,
+  contents: {
+    summary?: string;
+    metrics?: Record<string, unknown>;
+    evaluation?: Record<string, unknown>;
+    log?: string;
+    stateChange?: string;
+  }
+) {
+  await fs.mkdir(runsDir, { recursive: true });
+
+  if (contents.summary !== undefined) {
+    await fs.writeFile(path.join(runsDir, `${timestamp}.round.summary.md`), contents.summary, "utf8");
+  }
+  if (contents.metrics !== undefined) {
+    await fs.writeFile(
+      path.join(runsDir, `${timestamp}.round.metrics.json`),
+      `${JSON.stringify(contents.metrics, null, 2)}\n`,
+      "utf8"
+    );
+  }
+  if (contents.evaluation !== undefined) {
+    await fs.writeFile(
+      path.join(runsDir, `${timestamp}.round.evaluation.json`),
+      `${JSON.stringify(contents.evaluation, null, 2)}\n`,
+      "utf8"
+    );
+  }
+  if (contents.log !== undefined) {
+    await fs.writeFile(path.join(runsDir, `${timestamp}.round.log`), contents.log, "utf8");
+  }
+  if (contents.stateChange !== undefined) {
+    await fs.writeFile(path.join(runsDir, `${timestamp}.round.state_change.txt`), contents.stateChange, "utf8");
+  }
 }
 
 describe("prepareStartFlags", () => {
@@ -121,6 +160,104 @@ describe("listRuns", () => {
         evaluation: null
       }
     ]);
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+});
+
+describe("getRunArtifacts", () => {
+  test("returns the full artifact bundle for a specific completed run", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-run-artifacts-test-"));
+    const runsDir = path.join(homeDir, "runs");
+    const timestamp = "2026-03-01T02-00-00-000Z";
+
+    await writeRunArtifacts(runsDir, timestamp, {
+      summary: "summary\n",
+      metrics: { round: 2, status: "success" },
+      evaluation: {
+        decision: "pass",
+        justification: "Artifacts verified.",
+        evidence: ["bun test src/loop/control.test.ts"]
+      },
+      log: "OPENAI_API_KEY=[REDACTED]\n",
+      stateChange: "+ SESSION_SECRET=[REDACTED]\n"
+    });
+
+    const artifacts = await getRunArtifacts(makeTestConfig(homeDir), timestamp);
+
+    expect(artifacts).toEqual({
+      timestamp,
+      summary: "summary\n",
+      metrics: {
+        round: 2,
+        status: "success"
+      },
+      evaluation: {
+        decision: "pass",
+        justification: "Artifacts verified.",
+        evidence: ["bun test src/loop/control.test.ts"]
+      },
+      log: "OPENAI_API_KEY=[REDACTED]\n",
+      state_change: "+ SESSION_SECRET=[REDACTED]\n"
+    });
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("redacts mixed-case secret assignments from archived run artifacts at serve time", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-run-artifacts-redaction-test-"));
+    const runsDir = path.join(homeDir, "runs");
+    const timestamp = "2026-03-01T03-00-00-000Z";
+
+    await writeRunArtifacts(runsDir, timestamp, {
+      summary: "summary sessionSecret=uniquesecret123\n",
+      metrics: { round: 3, status: "success" },
+      evaluation: {
+        decision: "pass",
+        justification: "Artifacts verified for apiToken=uniquesecret123.",
+        evidence: ["sessionSecret=uniquesecret123"]
+      },
+      log: "sessionSecret=uniquesecret123\n",
+      stateChange: "+ apiToken=uniquesecret123\n"
+    });
+
+    try {
+      const artifacts = await getRunArtifacts(makeTestConfig(homeDir), timestamp);
+
+      expect(artifacts).toEqual({
+        timestamp,
+        summary: "summary sessionSecret=[REDACTED]\n",
+        metrics: {
+          round: 3,
+          status: "success"
+        },
+        evaluation: {
+          decision: "pass",
+          justification: "Artifacts verified for apiToken=[REDACTED].",
+          evidence: ["sessionSecret=[REDACTED]"]
+        },
+        log: "sessionSecret=[REDACTED]\n",
+        state_change: "+ apiToken=[REDACTED]\n"
+      });
+    } finally {
+      await fs.rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  test("returns null for timestamps without a complete artifact bundle", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-run-artifacts-missing-test-"));
+    const runsDir = path.join(homeDir, "runs");
+    const timestamp = "2026-03-01T02-00-00-000Z";
+
+    await writeRunArtifacts(runsDir, timestamp, {
+      summary: "summary\n",
+      metrics: { round: 2, status: "success" },
+      log: "log\n",
+      stateChange: "diff\n"
+    });
+
+    expect(await getRunArtifacts(makeTestConfig(homeDir), timestamp)).toBeNull();
+    expect(await getRunArtifacts(makeTestConfig(homeDir), "../outside")).toBeNull();
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });

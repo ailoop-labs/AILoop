@@ -211,6 +211,20 @@ function resolveRoleRuntimeCurrentIndex(phase: ReturnType<typeof deriveRoundProg
   return -1;
 }
 
+interface RunArtifactBundle {
+  timestamp: string;
+  summary: string;
+  metrics: Record<string, unknown>;
+  log: string;
+  state_change: string;
+  evaluation: {
+    decision: "pass" | "fail";
+    justification: string;
+    evidence: string[];
+    recommended_next_action?: string;
+  };
+}
+
 export default function App() {
   const [tokenRequired, setTokenRequired] = useState<boolean | null>(null);
   const [authToken, setAuthToken] = useState<string>(() => readStoredToken());
@@ -225,6 +239,8 @@ export default function App() {
   const [isGoalDialogOpen, setIsGoalDialogOpen] = useState(false);
   const [selectedRole, setSelectedRole] = useState<ProjectRoleItem | null>(null);
   const [selectedRun, setSelectedRun] = useState<RunHistoryItem | null>(null);
+  const [selectedArtifacts, setSelectedArtifacts] = useState<RunArtifactBundle | null>(null);
+  const [artifactsBusy, setArtifactsBusy] = useState(false);
   const [runHistoryPage, setRunHistoryPage] = useState(1);
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeLoopConfig | null>(null);
   const [instruction, setInstruction] = useState("");
@@ -565,20 +581,36 @@ export default function App() {
     }
   };
 
+  const fetchArtifacts = async (timestamp: string): Promise<void> => {
+    try {
+      setArtifactsBusy(true);
+      const bundle = await api<RunArtifactBundle>(`/api/runs/${timestamp}/artifacts`, undefined, authToken);
+      setSelectedArtifacts(bundle);
+      setError(null);
+    } catch (requestError) {
+      handleRequestError(requestError, "无法获取运行详情：请重试或重新登录。");
+    } finally {
+      setArtifactsBusy(false);
+    }
+  };
+
   useEffect(() => {
-    if (!selectedRun) {
+    if (!selectedRun && !selectedArtifacts && !selectedRole && !isGoalDialogOpen) {
       return;
     }
 
     const handleEscape = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
         setSelectedRun(null);
+        setSelectedArtifacts(null);
+        setSelectedRole(null);
+        setIsGoalDialogOpen(false);
       }
     };
 
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [selectedRun]);
+  }, [selectedRun, selectedArtifacts, selectedRole, isGoalDialogOpen]);
 
   if (tokenRequired === null) {
     return (
@@ -1129,10 +1161,11 @@ export default function App() {
                     <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">Actions: {report.budgetActions}</p>
                   </div>
                   <button
-                    onClick={() => setSelectedRun(run)}
-                    className="mt-4 rounded-lg border border-white/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-mist/70 transition hover:border-accent hover:text-accent"
+                    onClick={() => void fetchArtifacts(run.timestamp)}
+                    disabled={artifactsBusy}
+                    className="mt-4 rounded-lg border border-white/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-mist/70 transition hover:border-accent hover:text-accent disabled:opacity-50"
                   >
-                    Full Report
+                    {artifactsBusy && selectedArtifacts?.timestamp === run.timestamp ? "Loading..." : "Full Report"}
                   </button>
                 </article>
               );
@@ -1221,6 +1254,60 @@ export default function App() {
             <div className="max-h-[75vh] overflow-auto px-5 py-4 text-sm text-mist/85">
               <div className="markdown-body">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedRole.definition}</ReactMarkdown>
+              </div>
+            </div>
+          </article>
+        </div>
+      ) : null}
+
+      {selectedArtifacts ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/80 p-4"
+          onClick={() => setSelectedArtifacts(null)}
+          role="presentation"
+        >
+          <article
+            className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-white/15 bg-panel/95 shadow-lift backdrop-blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-white/10 px-6 py-5">
+              <div>
+                <h3 className="text-xl font-bold text-mist">Run Artifact Bundle</h3>
+                <p className="mt-1 text-xs uppercase tracking-widest text-accent/80">
+                  {formatRunTimestamp(selectedArtifacts.timestamp)} · ID: {selectedArtifacts.timestamp}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedArtifacts(null)}
+                className="rounded-lg border border-white/20 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-mist/70 transition hover:border-ember hover:text-ember"
+              >
+                Close
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-6">
+              <div className="grid gap-6">
+                <section>
+                  <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">Summary</h4>
+                  <div className="rounded-2xl border border-white/10 bg-ink/60 p-5 shadow-inner">
+                    <div className="markdown-body">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedArtifacts.summary}</ReactMarkdown>
+                    </div>
+                  </div>
+                </section>
+                <div className="grid gap-6 lg:grid-cols-2">
+                  <section>
+                    <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">Round Log</h4>
+                    <div className="h-[30rem] overflow-auto rounded-2xl border border-white/10 bg-ink/80 p-4 font-mono text-xs leading-relaxed text-mist/80 shadow-inner">
+                      <pre className="whitespace-pre-wrap">{selectedArtifacts.log}</pre>
+                    </div>
+                  </section>
+                  <section>
+                    <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">State Change</h4>
+                    <div className="h-[30rem] overflow-auto rounded-2xl border border-white/10 bg-ink/80 p-4 font-mono text-xs leading-relaxed text-mist/80 shadow-inner">
+                      <pre className="whitespace-pre-wrap">{selectedArtifacts.state_change}</pre>
+                    </div>
+                  </section>
+                </div>
               </div>
             </div>
           </article>

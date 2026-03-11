@@ -9,9 +9,10 @@ import {
 } from "../agent/role-definitions";
 import type { AppConfig } from "../config/env";
 import { readRuntimeLoopConfig, runtimeLoopConfigToEnv } from "../config/runtime";
-import { listRunRecords, readLastLogTail } from "../reporting/summary";
+import { buildRoundArtifactPaths, listRunRecords, readLastLogTail } from "../reporting/summary";
 import type { BudgetLimits, EvaluationResult, LoopStateData } from "../types/contracts";
 import { fileExists, readJsonFile, readTextFile } from "../utils/fs";
+import { redactJsonStrings, SecretRedactor } from "../utils/redaction";
 
 export async function buildDeterministicGoal(workspaceRoot: string = process.cwd()): Promise<string> {
   const goalMd = await readTextFile(path.join(workspaceRoot, "GOAL.md"), "");
@@ -264,6 +265,66 @@ export async function listRuns(config: AppConfig, limit = 20): Promise<
   }
 
   return output;
+}
+
+export interface RunArtifactBundle {
+  timestamp: string;
+  summary: string;
+  metrics: Record<string, unknown>;
+  log: string;
+  state_change: string;
+  evaluation: EvaluationResult;
+}
+
+const RUN_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/;
+
+function isValidRunTimestamp(timestamp: string): boolean {
+  return RUN_TIMESTAMP_PATTERN.test(timestamp);
+}
+
+export async function getRunArtifacts(config: AppConfig, timestamp: string): Promise<RunArtifactBundle | null> {
+  const normalizedTimestamp = timestamp.trim();
+  if (!isValidRunTimestamp(normalizedTimestamp)) {
+    return null;
+  }
+
+  const paths = await ensureLoopHomeAndGetPaths(config);
+  const artifactPaths = buildRoundArtifactPaths(paths.runsDir, normalizedTimestamp);
+  const hasRequiredArtifacts = await Promise.all([
+    fileExists(artifactPaths.summaryPath),
+    fileExists(artifactPaths.metricsPath),
+    fileExists(artifactPaths.logPath),
+    fileExists(artifactPaths.stateChangePath),
+    fileExists(artifactPaths.evaluationPath)
+  ]);
+
+  if (hasRequiredArtifacts.some((exists) => !exists)) {
+    return null;
+  }
+
+  const [summary, metrics, log, stateChange, evaluation] = await Promise.all([
+    readTextFile(artifactPaths.summaryPath, ""),
+    readJsonFile<Record<string, unknown> | null>(artifactPaths.metricsPath, null),
+    readTextFile(artifactPaths.logPath, ""),
+    readTextFile(artifactPaths.stateChangePath, ""),
+    readJsonFile<EvaluationResult | null>(artifactPaths.evaluationPath, null)
+  ]);
+
+  if (!metrics || !evaluation) {
+    return null;
+  }
+
+  const redactor = new SecretRedactor(process.env);
+  const redact = (text: string) => redactor.redact(text);
+
+  return {
+    timestamp: normalizedTimestamp,
+    summary: redact(summary),
+    metrics,
+    log: redact(log),
+    state_change: redact(stateChange),
+    evaluation: redactJsonStrings(evaluation, redactor)
+  };
 }
 
 export async function tailLatestLog(config: AppConfig, lines = 200): Promise<string[]> {
