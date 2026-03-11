@@ -130,6 +130,48 @@ function createAuthorizedRequest(url: string, token: string, init: RequestInit =
   });
 }
 
+async function seedProjectRoles(paths: ReturnType<typeof buildLoopPaths>) {
+  await Promise.all([
+    fs.writeFile(paths.plannerRolePath, "# Planner Role\n", "utf8"),
+    fs.writeFile(paths.executorRolePath, "# Executor Role\n", "utf8"),
+    fs.writeFile(paths.evaluatorRolePath, "# Evaluator Role\n", "utf8"),
+    fs.writeFile(paths.designerRolePath, "# Designer Role\n", "utf8"),
+    fs.writeFile(paths.leaderRolePath, "# Leader Role\n", "utf8")
+  ]);
+}
+
+async function seedLoopEntrypoint(workspaceRoot: string) {
+  const scriptsDir = path.join(workspaceRoot, "scripts");
+  await fs.mkdir(scriptsDir, { recursive: true });
+  await fs.writeFile(
+    path.join(scriptsDir, "ailoop.ts"),
+    'await Bun.sleep(5_000);\n',
+    "utf8"
+  );
+}
+
+function extractPid(message: string): number | null {
+  const match = message.match(/(\d+)$/);
+  if (!match) {
+    return null;
+  }
+
+  const pid = Number(match[1]);
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+function killIfAlive(pid: number | null) {
+  if (!pid) {
+    return;
+  }
+
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    // The detached test process may already have exited.
+  }
+}
+
 async function writeRunArtifacts(
   runsDir: string,
   timestamp: string,
@@ -329,6 +371,101 @@ describe("console server API contract", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ goal });
+  });
+
+  test("starts the loop for authenticated requests", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths, workspaceRoot } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    await seedProjectRoles(paths);
+    await seedLoopEntrypoint(workspaceRoot);
+    await fs.writeFile(paths.stopFlagPath, "1\n", "utf8");
+    await fs.writeFile(paths.pauseFlagPath, "1\n", "utf8");
+
+    let startedPid: number | null = null;
+    try {
+      const response = await fetchHandler(
+        createAuthorizedRequest("http://console.test/api/loop/start", token, {
+          method: "POST"
+        })
+      );
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { started: boolean; message: string };
+      expect(body.started).toBe(true);
+      expect(body.message).toMatch(/^Loop started with pid \d+$/);
+      expect(await fs.stat(paths.stopFlagPath).catch(() => null)).toBeNull();
+      expect(await fs.stat(paths.pauseFlagPath).catch(() => null)).toBeNull();
+
+      startedPid = extractPid(body.message);
+      expect(startedPid).not.toBeNull();
+    } finally {
+      killIfAlive(startedPid);
+    }
+  });
+
+  test("sets the pause flag for authenticated requests", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    const response = await fetchHandler(
+      createAuthorizedRequest("http://console.test/api/loop/pause", token, {
+        method: "POST"
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(await fs.readFile(paths.pauseFlagPath, "utf8")).toBe("1\n");
+  });
+
+  test("clears the pause flag and marks paused loops as running for authenticated requests", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    await fs.writeFile(paths.pauseFlagPath, "1\n", "utf8");
+    await writeLoopState(paths, {
+      ...defaultLoopState(process.pid),
+      state: "paused",
+      pid: process.pid
+    });
+
+    const response = await fetchHandler(
+      createAuthorizedRequest("http://console.test/api/loop/resume", token, {
+        method: "POST"
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(await fs.stat(paths.pauseFlagPath).catch(() => null)).toBeNull();
+
+    const state = await readLoopState(paths);
+    expect(state.state).toBe("running");
+    expect(state.pid).toBe(process.pid);
+  });
+
+  test("sets the stop flag for authenticated requests", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    const response = await fetchHandler(
+      createAuthorizedRequest("http://console.test/api/loop/stop", token, {
+        method: "POST"
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(await fs.readFile(paths.stopFlagPath, "utf8")).toBe("1\n");
   });
 
   test("appends operator instructions for authenticated requests", async () => {

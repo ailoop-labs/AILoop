@@ -1,0 +1,105 @@
+{
+  "round": 28,
+  "objective": "Collect and persist explicit evidence for these missing key dimensions: causal_validity.",
+  "expected_outcome": "Round artifacts include concrete, machine-verifiable evidence that directly addresses each missing key dimension.",
+  "generated_at_utc": "2026-03-11T02:54:11Z",
+  "workspace_root": "/Users/yinjames/projects/AILoop",
+  "branch": "main",
+  "head_commit": {
+    "hash": "b9dd7eedc7f29553f61211c7cd9306f00bffa867",
+    "subject": "AILoop Round 27: Add focused console API contract tests for the remaining MVP status, control, configuration, goal, run-history, and log-tail endpoints in  with re-runnable assertions."
+  },
+  "dimension": "causal_validity",
+  "claim": "The current uncommitted additions in src/server.test.ts causally exercise the existing authenticated loop-control endpoints in src/server.ts, and the full server contract test file passes against the present workspace state.",
+  "files": {
+    "src/server.test.ts": {
+      "git_status": "modified",
+      "sha256": "b059d00971d1d06ab1d44720a127d5019cffc6e134c8dbd7f12f7628ebca33ae"
+    },
+    "src/server.ts": {
+      "git_status": "tracked",
+      "sha256": "29c56df96c56ec77fa20e9087a884e6fbbe6dce0b4fd3bb377450ee645c51500"
+    }
+  },
+  "checks": [
+    {
+      "name": "CHANGED_FILE_SCOPE",
+      "command": "git status --short -- src/server.test.ts src/server.ts && git diff --name-only -- src/server.test.ts src/server.ts",
+      "exit_code": 0,
+      "observed": [
+        "M src/server.test.ts",
+        "src/server.test.ts"
+      ]
+    },
+    {
+      "name": "DIFF_INTRODUCES_LOOP_CONTROL_TESTS",
+      "command": "git diff --unified=0 -- src/server.test.ts",
+      "exit_code": 0,
+      "observed": [
+        "@@ -132,0 +133,42 @@ function createAuthorizedRequest(url: string, token: string, init: RequestInit = {}):",
+        "+async function seedProjectRoles(paths: ReturnType<typeof buildLoopPaths>) {",
+        "+async function seedLoopEntrypoint(workspaceRoot: string) {",
+        "+function extractPid(message: string): number | null {",
+        "+function killIfAlive(pid: number | null) {",
+        "@@ -333,0 +376,95 @@ describe(\"console server API contract\", () => {",
+        "+  test(\"starts the loop for authenticated requests\", async () => {",
+        "+  test(\"sets the pause flag for authenticated requests\", async () => {",
+        "+  test(\"clears the pause flag and marks paused loops as running for authenticated requests\", async () => {",
+        "+  test(\"sets the stop flag for authenticated requests\", async () => {"
+      ]
+    },
+    {
+      "name": "ROUTE_TO_TEST_ALIGNMENT",
+      "command": "rg -n \"starts the loop for authenticated requests|sets the pause flag for authenticated requests|clears the pause flag and marks paused loops as running for authenticated requests|sets the stop flag for authenticated requests|/api/loop/start|/api/loop/pause|/api/loop/resume|/api/loop/stop\" src/server.test.ts src/server.ts",
+      "exit_code": 0,
+      "observed": [
+        "src/server.ts:188:    if (url.pathname === \"/api/loop/start\" && request.method === \"POST\") {",
+        "src/server.ts:192:    if (url.pathname === \"/api/loop/stop\" && request.method === \"POST\") {",
+        "src/server.ts:197:    if (url.pathname === \"/api/loop/pause\" && request.method === \"POST\") {",
+        "src/server.ts:202:    if (url.pathname === \"/api/loop/resume\" && request.method === \"POST\") {",
+        "src/server.test.ts:376:  test(\"starts the loop for authenticated requests\", async () => {",
+        "src/server.test.ts:390:        createAuthorizedRequest(\"http://console.test/api/loop/start\", token, {",
+        "src/server.test.ts:409:  test(\"sets the pause flag for authenticated requests\", async () => {",
+        "src/server.test.ts:416:      createAuthorizedRequest(\"http://console.test/api/loop/pause\", token, {",
+        "src/server.test.ts:426:  test(\"clears the pause flag and marks paused loops as running for authenticated requests\", async () => {",
+        "src/server.test.ts:440:      createAuthorizedRequest(\"http://console.test/api/loop/resume\", token, {",
+        "src/server.test.ts:454:  test(\"sets the stop flag for authenticated requests\", async () => {",
+        "src/server.test.ts:461:      createAuthorizedRequest(\"http://console.test/api/loop/stop\", token, {"
+      ]
+    },
+    {
+      "name": "EXECUTABLE_VERIFICATION",
+      "command": "bun test src/server.test.ts",
+      "exit_code": 0,
+      "observed": [
+        "bun test v1.3.9 (cf6cdbbb)",
+        "src/server.test.ts:",
+        "(pass) console server API contract > serves health status without auth [9.08ms]",
+        "(pass) console server API contract > reports auth status when token auth is enabled [0.70ms]",
+        "(pass) console server API contract > rejects protected API access without a valid admin token [1.47ms]",
+        "(pass) console server API contract > returns loop status for authenticated requests [5.89ms]",
+        "(pass) console server API contract > returns runtime config overrides for authenticated requests [1.82ms]",
+        "(pass) console server API contract > returns the workspace goal for authenticated requests [1.18ms]",
+        "(pass) console server API contract > starts the loop for authenticated requests [7.43ms]",
+        "(pass) console server API contract > sets the pause flag for authenticated requests [2.02ms]",
+        "(pass) console server API contract > clears the pause flag and marks paused loops as running for authenticated requests [2.27ms]",
+        "(pass) console server API contract > sets the stop flag for authenticated requests [2.15ms]",
+        "(pass) console server API contract > appends operator instructions for authenticated requests [1.95ms]",
+        "(pass) console server API contract > rejects empty operator instructions [1.22ms]",
+        "(pass) console server API contract > lists the most recent complete run history entries [5.69ms]",
+        "(pass) console server API contract > tails the newest round log with the requested line limit [2.01ms]",
+        "14 pass",
+        "0 fail",
+        "55 expect() calls",
+        "Ran 14 tests across 1 file. [85.00ms]"
+      ]
+    }
+  ],
+  "causal_chain": [
+    "Only src/server.test.ts is currently changed, which limits the observed behavior change under evaluation to the added contract tests rather than unrelated runtime edits.",
+    "The diff adds setup helpers required to exercise loop start/pause/resume/stop behavior in an isolated workspace and then introduces four new authenticated loop-control tests.",
+    "The route-alignment check shows a one-to-one mapping between the new tests in src/server.test.ts and the runtime handlers in src/server.ts for /api/loop/start, /api/loop/pause, /api/loop/resume, and /api/loop/stop.",
+    "The executed verification command passes the full src/server.test.ts suite, including the four new loop-control tests, from the current workspace state."
+  ],
+  "result": "pass"
+}
