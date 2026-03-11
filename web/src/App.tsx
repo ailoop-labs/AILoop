@@ -1152,6 +1152,7 @@ export default function App() {
                   <p className="mt-3 text-xs text-mist/75">
                     Tool: {report.toolStatus} | Error: {report.error}
                   </p>
+                  <p className="mt-2 text-xs text-mist/65">Score: {report.aggregateScore}</p>
                   <p className="mt-2 text-xs text-mist/65">Why: {report.justification}</p>
                   <p className="mt-2 text-xs text-mist/65">Evidence: {report.evidence}</p>
                   <p className="mt-2 text-xs text-mist/65">Next: {report.nextRecommendation}</p>

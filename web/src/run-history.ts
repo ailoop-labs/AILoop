@@ -2,6 +2,7 @@ export interface RunEvaluation {
   decision: "pass" | "fail";
   justification: string;
   evidence: string[];
+  aggregate_score?: number;
   recommended_next_action?: string;
 }
 
@@ -21,6 +22,7 @@ export interface RoundReport {
   decision: string;
   justification: string;
   evidence: string;
+  aggregateScore: string;
   budgetCost: string;
   budgetTime: string;
   budgetActions: string;
@@ -82,6 +84,14 @@ function preferStructuredEvidence(evaluation: RunEvaluation | null, fallback: st
   return evidence.length > 0 ? evidence.join(" | ") : fallback;
 }
 
+function preferStructuredAggregateScore(evaluation: RunEvaluation | null): string {
+  if (typeof evaluation?.aggregate_score !== "number" || !Number.isFinite(evaluation.aggregate_score)) {
+    return "N/A";
+  }
+
+  return `${evaluation.aggregate_score}`;
+}
+
 export function projectRunHistoryReport(run: RunHistoryItem): RoundReport {
   const fallback = parseRoundReport(run.summary);
 
@@ -90,6 +100,7 @@ export function projectRunHistoryReport(run: RunHistoryItem): RoundReport {
     decision: preferStructuredValue(run.evaluation?.decision, fallback.decision),
     justification: preferStructuredValue(run.evaluation?.justification, fallback.justification),
     evidence: preferStructuredEvidence(run.evaluation, fallback.evidence),
+    aggregateScore: preferStructuredAggregateScore(run.evaluation),
     nextRecommendation: preferStructuredValue(run.evaluation?.recommended_next_action, fallback.nextRecommendation)
   };
 }

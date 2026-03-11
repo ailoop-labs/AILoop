@@ -37,6 +37,7 @@ describe("projectRunHistoryReport", () => {
         decision: "pass",
         justification: "Structured evaluation should override summary parsing.",
         evidence: ["bun test web/src/run-history.test.ts", "bun run web:build"],
+        aggregate_score: 96,
         recommended_next_action: "Proceed to the next planner task."
       }
     };
@@ -51,6 +52,7 @@ describe("projectRunHistoryReport", () => {
     expect(report.decision).toBe("pass");
     expect(report.justification).toBe("Structured evaluation should override summary parsing.");
     expect(report.evidence).toBe("bun test web/src/run-history.test.ts | bun run web:build");
+    expect(report.aggregateScore).toBe("96");
     expect(report.nextRecommendation).toBe("Proceed to the next planner task.");
   });
 
@@ -67,6 +69,7 @@ describe("projectRunHistoryReport", () => {
     expect(report.decision).toBe("fail");
     expect(report.justification).toBe("Parsed markdown should only be fallback data.");
     expect(report.evidence).toBe("bun test web/src/App.test.tsx");
+    expect(report.aggregateScore).toBe("N/A");
     expect(report.nextRecommendation).toBe("Fallback next step from summary");
   });
 });
