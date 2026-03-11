@@ -294,6 +294,7 @@ function isTransientInterfaceFailure(errorMessage: string, stderr: string): bool
     "too many requests",
     "service unavailable",
     "network error",
+    "stream disconnected before completion",
     "econnreset",
     "etimedout",
     "eai_again",

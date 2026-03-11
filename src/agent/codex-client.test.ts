@@ -390,6 +390,83 @@ describe("CodexClient.runJson", () => {
     expect(retryNotices[0]).toContain("waiting 60000ms");
   });
 
+  test("retries stream-disconnect request failures and succeeds on a later attempt", async () => {
+    const attempts = [
+      {
+        code: 1,
+        output: "",
+        stdout: "",
+        stderr:
+          "Codex exited with code 1\nstream disconnected before completion: error sending request for url (https://api.openai.com/v1/responses)"
+      },
+      { code: 0, output: '{"status":"ok"}', stdout: "", stderr: "" }
+    ];
+    const sleepCalls: number[] = [];
+    const stderrChunks: string[] = [];
+
+    const runner: ProcessRunner = async (_cmd, args) => {
+      const step = attempts.shift();
+      if (!step) {
+        throw new Error("unexpected additional attempt");
+      }
+      await fs.writeFile(outputPathFromArgs(args), step.output, "utf8");
+      return {
+        code: step.code,
+        stdout: step.stdout,
+        stderr: step.stderr
+      };
+    };
+
+    const client = new CodexClient(createCodexConfig(), runner, async (ms) => {
+      sleepCalls.push(ms);
+    });
+    const result = await client.runJson<{ status: string }>({
+      prompt: "Return JSON",
+      schema: { type: "object" },
+      cwd: process.cwd(),
+      sandbox: "read-only",
+      maxRetries: 0,
+      onStderrChunk: (chunk) => {
+        stderrChunks.push(chunk);
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.data?.status).toBe("ok");
+    expect(sleepCalls).toEqual([60_000, 0]);
+    expect(stderrChunks.some((line) => line.includes("AILoop interface retry 1/5"))).toBe(true);
+  });
+
+  test("does not retry generic request-send failures without a disconnect signal", async () => {
+    let callCount = 0;
+    const sleepCalls: number[] = [];
+
+    const runner: ProcessRunner = async (_cmd, args) => {
+      callCount += 1;
+      await fs.writeFile(outputPathFromArgs(args), "", "utf8");
+      return {
+        code: 1,
+        stdout: "",
+        stderr: "Codex exited with code 1\nerror sending request for url (https://api.openai.com/v1/responses)"
+      };
+    };
+
+    const client = new CodexClient(createCodexConfig(), runner, async (ms) => {
+      sleepCalls.push(ms);
+    });
+    const result = await client.runJson({
+      prompt: "Return JSON",
+      schema: { type: "object" },
+      cwd: process.cwd(),
+      sandbox: "read-only",
+      maxRetries: 0
+    });
+
+    expect(result.ok).toBe(false);
+    expect(callCount).toBe(1);
+    expect(sleepCalls).toEqual([0]);
+  });
+
   test("fails only after five interface-error retries are exhausted", async () => {
     let callCount = 0;
     const sleepCalls: number[] = [];
