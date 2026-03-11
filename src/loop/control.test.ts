@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, test } from "bun:test";
+import * as childProcess from "node:child_process";
+import { describe, expect, mock, spyOn, test } from "bun:test";
 import { buildLoopPaths, defaultLoopState, hasFlag, readLoopState, setFlag, writeLoopState } from "./state";
 import {
   ensureProjectRoles,
@@ -408,6 +409,48 @@ describe("resumeLoop", () => {
     } finally {
       process.chdir(originalCwd);
       killIfAlive(restartedPid);
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("collapses duplicate concurrent resumes into a single background start", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-resume-duplicate-test-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    const paths = buildLoopPaths(homeDir);
+    const originalCwd = process.cwd();
+    let nextPid = 70_000;
+
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(path.join(workspaceRoot, "README.md"), "# Test workspace\n", "utf8");
+    await seedProjectRoles(paths);
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "paused",
+      pid: null
+    });
+
+    const spawnSpy = spyOn(childProcess, "spawn").mockImplementation(
+      () =>
+        ({
+          pid: nextPid++,
+          unref() {}
+        }) as ReturnType<typeof childProcess.spawn>
+    );
+
+    try {
+      process.chdir(workspaceRoot);
+
+      await Promise.all([resumeLoop(makeTestConfig(homeDir)), resumeLoop(makeTestConfig(homeDir))]);
+
+      expect(spawnSpy).toHaveBeenCalledTimes(1);
+
+      const state = await readLoopState(paths);
+      expect(state.state).toBe("starting");
+      expect(state.pid).toBe(70_000);
+      expect(await hasFlag(paths.pauseFlagPath)).toBe(false);
+    } finally {
+      process.chdir(originalCwd);
+      mock.restore();
       await fs.rm(workspaceRoot, { recursive: true, force: true });
     }
   });

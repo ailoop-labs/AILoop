@@ -42,6 +42,8 @@ import {
 } from "./state";
 import type { LoopPaths } from "./state";
 
+const resumeOperations = new Map<string, Promise<void>>();
+
 export async function ensureProjectRoles(
   config: AppConfig,
   options: EnsureProjectRoleDefinitionsOptions = {}
@@ -159,29 +161,47 @@ export async function pauseLoop(config: AppConfig): Promise<void> {
 }
 
 export async function resumeLoop(config: AppConfig): Promise<void> {
-  const paths = await ensureLoopHomeAndGetPaths(config);
-  await clearFlag(paths.pauseFlagPath);
-
-  const state = await readLoopState(paths);
-  const pid = state.pid ?? (await readPid(paths));
-  if (state.state !== "paused") {
+  const existingOperation = resumeOperations.get(config.homeDir);
+  if (existingOperation) {
+    await existingOperation;
     return;
   }
 
-  if (pid && isPidAlive(pid)) {
-    await writeLoopState(paths, {
-      ...state,
-      state: "running",
-      pid
-    });
-    return;
-  }
+  const operation = (async () => {
+    const paths = await ensureLoopHomeAndGetPaths(config);
+    await clearFlag(paths.pauseFlagPath);
 
-  if (pid) {
-    await clearPid(paths);
-  }
+    const state = await readLoopState(paths);
+    const pid = state.pid ?? (await readPid(paths));
+    if (state.state !== "paused") {
+      return;
+    }
 
-  await startBackgroundLoop(config);
+    if (pid && isPidAlive(pid)) {
+      await writeLoopState(paths, {
+        ...state,
+        state: "running",
+        pid
+      });
+      return;
+    }
+
+    if (pid) {
+      await clearPid(paths);
+    }
+
+    await startBackgroundLoop(config);
+  })();
+
+  resumeOperations.set(config.homeDir, operation);
+
+  try {
+    await operation;
+  } finally {
+    if (resumeOperations.get(config.homeDir) === operation) {
+      resumeOperations.delete(config.homeDir);
+    }
+  }
 }
 
 export async function instructLoop(config: AppConfig, message: string): Promise<void> {
