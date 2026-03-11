@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { resolveLogTailFollowBehavior, shouldForceLogTailFollow } from "./log-follow";
 
 describe("shouldForceLogTailFollow", () => {
-  test("returns true only for running state", () => {
+  test("returns true for active startup and running states", () => {
+    expect(shouldForceLogTailFollow("starting")).toBe(true);
     expect(shouldForceLogTailFollow("running")).toBe(true);
     expect(shouldForceLogTailFollow("paused")).toBe(false);
     expect(shouldForceLogTailFollow("cooldown")).toBe(false);

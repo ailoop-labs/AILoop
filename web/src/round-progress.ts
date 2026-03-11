@@ -1,4 +1,4 @@
-export type LoopStateName = "idle" | "running" | "cooldown" | "paused" | "stopping" | "error";
+export type LoopStateName = "idle" | "starting" | "running" | "cooldown" | "paused" | "stopping" | "error";
 
 export interface RoundProgressInput {
   state?: LoopStateName;
@@ -10,7 +10,7 @@ export interface RoundProgressView {
   roundLabel: string;
   percent: number;
   role: "Planner" | "Executor" | "Evaluator" | "System";
-  phase: "idle" | "planner" | "executor" | "evaluator" | "cooldown" | "paused" | "stopping" | "error";
+  phase: "idle" | "starting" | "planner" | "executor" | "evaluator" | "cooldown" | "paused" | "stopping" | "error";
   step: string;
 }
 
@@ -74,6 +74,16 @@ export function deriveRoundProgress(input: RoundProgressInput): RoundProgressVie
       role: "System",
       phase: "cooldown",
       step: "Round completed, cooldown in progress"
+    };
+  }
+
+  if (input.state === "starting") {
+    return {
+      roundLabel,
+      percent: 4,
+      role: "System",
+      phase: "starting",
+      step: "Loop initialization in progress"
     };
   }
 

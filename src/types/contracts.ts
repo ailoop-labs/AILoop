@@ -1,4 +1,4 @@
-export type LoopStateName = "idle" | "running" | "cooldown" | "paused" | "stopping" | "error";
+export type LoopStateName = "idle" | "starting" | "running" | "cooldown" | "paused" | "stopping" | "error";
 
 export type EvaluationDimension =
   | "goal_alignment"

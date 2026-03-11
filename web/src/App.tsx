@@ -9,7 +9,7 @@ import { deriveRoundProgress } from "./round-progress";
 import { projectRunHistoryReport, type RunHistoryItem } from "./run-history";
 import { paginateRunHistory, RUN_HISTORY_PAGE_SIZE } from "./run-history-pagination";
 
-type LoopStateName = "idle" | "running" | "cooldown" | "paused" | "stopping" | "error";
+type LoopStateName = "idle" | "starting" | "running" | "cooldown" | "paused" | "stopping" | "error";
 
 interface LoopStatus {
   state: LoopStateName;
@@ -89,6 +89,7 @@ interface ProjectRoleItem {
 
 const stateTone: Record<LoopStateName, string> = {
   idle: "bg-slate text-mist",
+  starting: "bg-sky-300/20 text-sky-100",
   running: "bg-accent/20 text-accent",
   cooldown: "bg-sky-300/20 text-sky-200",
   paused: "bg-warning/20 text-warning",
@@ -98,6 +99,7 @@ const stateTone: Record<LoopStateName, string> = {
 
 const stateLabel: Record<LoopStateName, string> = {
   idle: "idle",
+  starting: "starting",
   running: "running",
   cooldown: "resting",
   paused: "paused",
@@ -423,7 +425,7 @@ export default function App() {
       canStart: state === "idle" || state === "error",
       canPause: state === "running" || state === "cooldown",
       canResume: state === "paused",
-      canStop: state === "running" || state === "cooldown" || state === "paused"
+      canStop: state === "starting" || state === "running" || state === "cooldown" || state === "paused"
     };
   }, [status?.state]);
 

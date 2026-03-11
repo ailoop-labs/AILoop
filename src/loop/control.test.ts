@@ -305,6 +305,35 @@ describe("resumeLoop", () => {
 });
 
 describe("getLoopStatus", () => {
+  test("marks a dead starting process as paused and preserves interrupted start context", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-starting-test-"));
+    const paths = buildLoopPaths(homeDir);
+    await fs.mkdir(homeDir, { recursive: true });
+
+    const staleState = {
+      ...defaultLoopState(),
+      round: 4,
+      state: "starting" as const,
+      pid: 999999
+    };
+    await writeLoopState(paths, staleState);
+
+    const status = await getLoopStatus(makeTestConfig(homeDir));
+    expect(status.state).toBe("paused");
+    expect(status.round).toBe(4);
+    expect(status.pid).toBeNull();
+    expect(status.pid_alive).toBe(false);
+    expect(status.last_error).toContain("unfinished starting state");
+    expect(status.last_error).toContain("during status check");
+
+    const persisted = await readLoopState(paths);
+    expect(persisted.state).toBe("paused");
+    expect(persisted.round).toBe(4);
+    expect(persisted.pid).toBeNull();
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
   test("marks a dead cooldown process as paused and preserves interrupted round context", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-cooldown-test-"));
     const paths = buildLoopPaths(homeDir);

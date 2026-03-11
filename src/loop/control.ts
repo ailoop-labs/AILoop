@@ -129,6 +129,15 @@ export async function startBackgroundLoop(config: AppConfig): Promise<{ started:
       ...runtimeEnv
     }
   });
+
+  const currentState = await readLoopState(paths);
+  await writeLoopState(paths, {
+    ...currentState,
+    state: "starting",
+    pid: child.pid ?? null,
+    last_error: null,
+    current_budget: null
+  });
   child.unref();
 
   return { started: true, message: `Loop started with pid ${child.pid}` };

@@ -145,9 +145,55 @@ async function seedLoopEntrypoint(workspaceRoot: string) {
   await fs.mkdir(scriptsDir, { recursive: true });
   await fs.writeFile(
     path.join(scriptsDir, "ailoop.ts"),
-    'await Bun.sleep(5_000);\n',
+    [
+      'import fs from "node:fs/promises";',
+      'import path from "node:path";',
+      "",
+      'const homeDir = path.join(process.cwd(), ".ailoop");',
+      'const statePath = path.join(homeDir, "state.json");',
+      "await Bun.sleep(150);",
+      'const current = JSON.parse(await fs.readFile(statePath, "utf8"));',
+      "const updatedAt = new Date().toISOString();",
+      "await fs.writeFile(",
+      "  statePath,",
+      "  `${JSON.stringify({",
+      "    ...current,",
+      '    state: "running",',
+      "    pid: process.pid,",
+      "    last_error: null,",
+      "    updated_at: updatedAt",
+      "  }, null, 2)}\\n`,",
+      '  "utf8"',
+      ");",
+      "await Bun.sleep(5_000);",
+      ""
+    ].join("\n"),
     "utf8"
   );
+}
+
+async function waitForLoopState(
+  fetchHandler: (request: Request) => Promise<Response>,
+  token: string,
+  expectedState: string,
+  timeoutMs = 3_000
+) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const response = await fetchHandler(createAuthorizedRequest("http://console.test/api/status", token));
+    const body = (await response.json()) as {
+      state: string;
+      pid: number | null;
+      pid_alive: boolean;
+    };
+    if (body.state === expectedState) {
+      return body;
+    }
+    await Bun.sleep(25);
+  }
+
+  throw new Error(`Timed out waiting for loop state ${expectedState}`);
 }
 
 function extractPid(message: string): number | null {
@@ -518,7 +564,7 @@ describe("console server API contract", () => {
     expect(await response.json()).toEqual({ goal });
   });
 
-  test("starts the loop for authenticated requests", async () => {
+  test("starts the loop for authenticated requests and reaches running after starting", async () => {
     const token = "test-token";
     const { fetchHandler, paths, workspaceRoot } = await createFixture({
       consoleAdminToken: token
@@ -546,6 +592,14 @@ describe("console server API contract", () => {
 
       startedPid = extractPid(body.message);
       expect(startedPid).not.toBeNull();
+
+      const startingState = await readLoopState(paths);
+      expect(startingState.state).toBe("starting");
+      expect(startingState.pid).toBe(startedPid);
+
+      const runningStatus = await waitForLoopState(fetchHandler, token, "running");
+      expect(runningStatus.pid).toBe(startedPid);
+      expect(runningStatus.pid_alive).toBe(true);
     } finally {
       killIfAlive(startedPid);
     }

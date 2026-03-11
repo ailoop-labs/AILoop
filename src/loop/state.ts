@@ -20,7 +20,7 @@ export interface LoopPaths {
   lockPath: string;
 }
 
-const INTERRUPTED_LOOP_STATES = new Set<LoopStateName>(["running", "cooldown", "stopping"]);
+const INTERRUPTED_LOOP_STATES = new Set<LoopStateName>(["starting", "running", "cooldown", "stopping"]);
 
 export function buildLoopPaths(homeDir: string): LoopPaths {
   return {

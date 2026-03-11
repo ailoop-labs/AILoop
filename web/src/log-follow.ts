@@ -4,7 +4,7 @@ interface LogTailFollowBehavior {
 }
 
 export function shouldForceLogTailFollow(state: string | null | undefined): boolean {
-  return state === "running";
+  return state === "starting" || state === "running";
 }
 
 export function resolveLogTailFollowBehavior(state: string | null | undefined): LogTailFollowBehavior {
