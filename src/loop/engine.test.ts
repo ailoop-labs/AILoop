@@ -79,6 +79,7 @@ describe("extractSnapshotTargetsFromSubTask", () => {
       rationale: "test",
       objective: "Create `.ailoop/plans/round-7.md` with checklist.",
       expected_outcome: "File `src/loop/engine.ts` updated and `.ailoop/runs/report.txt` written.",
+      impacted_files: [],
       recommended_tools: ["write_file"]
     };
 
@@ -99,6 +100,7 @@ describe("extractSnapshotTargetsFromSubTask", () => {
         "Update `src/loop/engine.ts`, investigate `EISDIR: illegal operation on a directory, read`, avoid `src/loop`, and rerun `bun test src/loop/engine.test.ts` for round `23`.",
       expected_outcome:
         "Only `src/loop/engine.test.ts` is snapshotted while ignoring `src/loop`, `bun test src/loop/engine.test.ts`, and `123`.",
+      impacted_files: [],
       recommended_tools: ["write_file"]
     };
 
@@ -122,6 +124,7 @@ describe("extractSnapshotTargetsFromSubTask", () => {
       rationale: "test",
       objective: "Update `src/loop/engine.ts` and ignore nonexistent `foo.txt`.",
       expected_outcome: "Only real workspace files are snapshotted.",
+      impacted_files: [],
       recommended_tools: ["write_file"]
     };
 

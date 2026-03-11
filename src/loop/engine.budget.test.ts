@@ -20,9 +20,10 @@ describe("LoopEngine budget guard", () => {
 
     const plan: SubTask = {
       assignee: "executor",
-  rationale: "test",
+      rationale: "test",
       objective: "should not execute",
       expected_outcome: "should not execute",
+      impacted_files: [],
       recommended_tools: ["read_file"]
     };
 
@@ -175,9 +176,10 @@ describe("LoopEngine budget guard", () => {
 
       const plan: SubTask = {
         assignee: "executor",
-  rationale: "test",
+        rationale: "test",
         objective: "trigger executor-phase budget breach",
         expected_outcome: "engine pauses with artifacts",
+        impacted_files: [],
         recommended_tools: ["run_shell"]
       };
 

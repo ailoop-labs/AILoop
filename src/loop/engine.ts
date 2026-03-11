@@ -185,6 +185,7 @@ function buildEvaluatorReworkSubTask(
     objective: `Revise the current round output to resolve evaluator failure for objective '${originalTask.objective}'.`,
     expected_outcome:
       "Updated code/tests plus explicit verification evidence address evaluator feedback and produce a pass decision.",
+    impacted_files: originalTask.impacted_files,
     recommended_tools: ["read_file", "write_file", "run_shell"]
   };
 }
@@ -612,6 +613,7 @@ export class LoopEngine {
       assignee: "executor",
       objective: "Initialize round context",
       expected_outcome: "Context initialized",
+      impacted_files: [],
       recommended_tools: []
     };
     let stateChange = "No state changes detected.\n";
@@ -748,6 +750,7 @@ export class LoopEngine {
           )}.`,
           expected_outcome:
             "Round artifacts include concrete, machine-verifiable evidence that directly addresses each missing key dimension.",
+          impacted_files: subTask.impacted_files,
           recommended_tools: ["read_file", "run_shell", "write_file"]
         };
 

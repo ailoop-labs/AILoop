@@ -20,9 +20,10 @@ function makeRoundContext(): RoundEvaluationContext {
   return {
     subTask: {
       assignee: "executor",
-  rationale: "test rationale",
+      rationale: "test rationale",
       objective: "Update workspace snapshot handling",
       expected_outcome: "workspace snapshot tests pass",
+      impacted_files: [],
       recommended_tools: ["read_file", "write_file", "run_shell"]
     },
     toolResult: {

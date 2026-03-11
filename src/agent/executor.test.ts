@@ -8,6 +8,7 @@ const sampleSubTask: SubTask = {
   rationale: "test rationale",
   objective: "Update one file",
   expected_outcome: "tests pass",
+  impacted_files: [],
   recommended_tools: ["read_file", "write_file", "run_shell"]
 };
 
