@@ -13,8 +13,11 @@ afterEach(async () => {
 });
 
 describe("loadConfig llm evaluator options", () => {
-  test("uses defaults for domain-agnostic evaluator controls", () => {
-    const config = loadConfig({});
+  test("uses defaults for domain-agnostic evaluator controls when cwd has no .env overrides", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-env-test-"));
+    tempDirs.push(cwd);
+
+    const config = loadConfig({}, { cwd });
 
     expect(config.codex.llmEvaluatorDimensions).toEqual([
       "goal_alignment",
@@ -44,14 +47,19 @@ describe("loadConfig llm evaluator options", () => {
     expect(config.evaluatorReworkMaxAttempts).toBe(3);
   });
 
-  test("reads codex bin from .env when process env does not provide it", async () => {
+  test("reads evaluator and codex settings from .env when process env does not provide them", async () => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-env-test-"));
     tempDirs.push(cwd);
-    await fs.writeFile(path.join(cwd, ".env"), "AILOOP_CODEX_BIN=/tmp/test-codex\n", "utf8");
+    await fs.writeFile(
+      path.join(cwd, ".env"),
+      "AILOOP_CODEX_BIN=/tmp/test-codex\nAILOOP_EVAL_REWORK_MAX_ATTEMPTS=3\n",
+      "utf8"
+    );
 
     const config = loadConfig({}, { cwd });
 
     expect(config.codex.bin).toBe("/tmp/test-codex");
+    expect(config.evaluatorReworkMaxAttempts).toBe(3);
   });
 
   test("prefers process env over .env codex settings", async () => {
