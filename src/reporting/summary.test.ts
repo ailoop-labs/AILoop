@@ -142,6 +142,35 @@ describe("writeSummaryFile auto rework section", () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
+  test("renders artifact references for the round summary bundle", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-summary-test-"));
+    const summaryPath = path.join(dir, "2026-03-11T00-00-00-000Z.round.summary.md");
+    const input = makeSummaryInput([]);
+    input.artifacts = {
+      summaryPath,
+      metricsPath: path.join(dir, "2026-03-11T00-00-00-000Z.round.metrics.json"),
+      logPath: path.join(dir, "2026-03-11T00-00-00-000Z.round.log"),
+      stateChangePath: path.join(dir, "2026-03-11T00-00-00-000Z.round.state_change.txt"),
+      evaluationPath: path.join(dir, "2026-03-11T00-00-00-000Z.round.evaluation.json")
+    };
+    input.toolResult.artifacts = {
+      log_path: input.artifacts.logPath,
+      state_change_path: input.artifacts.stateChangePath
+    };
+
+    await writeSummaryFile(summaryPath, input);
+    const text = await fs.readFile(summaryPath, "utf8");
+
+    expect(text).toContain("## Artifact References");
+    expect(text).toContain(`- Summary: ${input.artifacts.summaryPath}`);
+    expect(text).toContain(`- Metrics: ${input.artifacts.metricsPath}`);
+    expect(text).toContain(`- Log: ${input.artifacts.logPath}`);
+    expect(text).toContain(`- State Change: ${input.artifacts.stateChangePath}`);
+    expect(text).toContain(`- Evaluation: ${input.artifacts.evaluationPath}`);
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
   test("redacts secret env values before persisting round artifacts", async () => {
     await withSecretEnv(async () => {
       const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-summary-test-"));

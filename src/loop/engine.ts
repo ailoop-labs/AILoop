@@ -979,7 +979,8 @@ export class LoopEngine {
         metrics,
         risks,
         autoReworkAttempts,
-        nextRecommendation: evaluation.recommended_next_action ?? "continue"
+        nextRecommendation: evaluation.recommended_next_action ?? "continue",
+        artifacts
       });
 
 
@@ -1072,7 +1073,8 @@ export class LoopEngine {
         metrics,
         risks: [message],
         autoReworkAttempts: [],
-        nextRecommendation: error instanceof BudgetBreachError ? "pause" : "continue"
+        nextRecommendation: error instanceof BudgetBreachError ? "pause" : "continue",
+        artifacts
       });
 
       if (error instanceof BudgetBreachError) {

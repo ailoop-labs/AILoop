@@ -212,6 +212,20 @@ describe("LoopEngine auto rework", () => {
     expect(summaryText).toContain("- Objective: Persist markdown round summary");
     expect(summaryText).toContain("## Execution Result");
     expect(summaryText).toContain("- Work Summary: Created markdown summary artifact");
+    expect(summaryText).toContain("## Artifact References");
+    expect(summaryText).toContain(`- Summary: ${path.join(homeDir, "runs", summaryFile as string)}`);
+    expect(summaryText).toContain(
+      `- Metrics: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.metrics.json"))}`
+    );
+    expect(summaryText).toContain(
+      `- Log: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.log"))}`
+    );
+    expect(summaryText).toContain(
+      `- State Change: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.state_change.txt"))}`
+    );
+    expect(summaryText).toContain(
+      `- Evaluation: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.evaluation.json"))}`
+    );
     expect(summaryText).toContain("## Evaluation Result");
     expect(summaryText).toContain("- Decision: pass");
 

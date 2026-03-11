@@ -15,6 +15,7 @@ export interface SummaryInput {
   risks: string[];
   autoReworkAttempts: string[];
   nextRecommendation: string;
+  artifacts?: RoundArtifacts;
 }
 
 export interface RunRecord {
@@ -28,6 +29,38 @@ export interface RunRecord {
 
 function redactArtifactText(content: string): string {
   return new SecretRedactor(process.env).redact(content);
+}
+
+function inferArtifactPathsFromSummaryPath(summaryPath: string): RoundArtifacts {
+  if (summaryPath.endsWith(".round.summary.md")) {
+    const stem = summaryPath.slice(0, -".round.summary.md".length);
+    return {
+      summaryPath,
+      metricsPath: `${stem}.round.metrics.json`,
+      logPath: `${stem}.round.log`,
+      stateChangePath: `${stem}.round.state_change.txt`,
+      evaluationPath: `${stem}.round.evaluation.json`
+    };
+  }
+
+  if (summaryPath.endsWith(".summary.md")) {
+    const stem = summaryPath.slice(0, -".summary.md".length);
+    return {
+      summaryPath,
+      metricsPath: `${stem}.metrics.json`,
+      logPath: `${stem}.log`,
+      stateChangePath: `${stem}.state_change.txt`,
+      evaluationPath: `${stem}.evaluation.json`
+    };
+  }
+
+  return {
+    summaryPath,
+    metricsPath: `${summaryPath}.metrics.json`,
+    logPath: `${summaryPath}.log`,
+    stateChangePath: `${summaryPath}.state_change.txt`,
+    evaluationPath: `${summaryPath}.evaluation.json`
+  };
 }
 
 export async function writeLogFile(logPath: string, logLines: string[]): Promise<void> {
@@ -56,6 +89,10 @@ export async function writeSummaryFile(summaryPath: string, input: SummaryInput)
 
   const toolsUsed = input.actions.map((action) => action.tool);
   const uniqueTools = Array.from(new Set(toolsUsed));
+  const artifactPaths = input.artifacts ?? inferArtifactPathsFromSummaryPath(summaryPath);
+  const logArtifactPath = input.toolResult.artifacts.log_path || artifactPaths.logPath;
+  const stateChangeArtifactPath =
+    input.toolResult.artifacts.state_change_path || artifactPaths.stateChangePath;
 
   const markdown = [
     "# AILoop Round Summary",
@@ -79,6 +116,13 @@ export async function writeSummaryFile(summaryPath: string, input: SummaryInput)
     `- Tool Status: ${input.toolResult.status}`,
     `- Work Summary: ${input.toolResult.summary}`,
     `- Error: ${input.toolResult.error?.message ?? "none"}`,
+    "",
+    "## Artifact References",
+    `- Summary: ${artifactPaths.summaryPath}`,
+    `- Metrics: ${artifactPaths.metricsPath}`,
+    `- Log: ${logArtifactPath}`,
+    `- State Change: ${stateChangeArtifactPath}`,
+    `- Evaluation: ${artifactPaths.evaluationPath}`,
     "",
     "## Operational Evidence",
     input.toolResult.operational_evidence && input.toolResult.operational_evidence.length > 0
