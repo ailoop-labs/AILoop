@@ -125,6 +125,103 @@ describe("LoopEngine budget guard", () => {
     await fs.rm(homeDir, { recursive: true, force: true });
   });
 
+  test("stops before evaluation and records an explicit action-budget failure when executor action logs exceed the limit", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-action-budget-log-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir,
+      AILOOP_BUDGET_ACTIONS: "1"
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const plan: SubTask = {
+      assignee: "executor",
+      rationale: "test",
+      objective: "trigger post-executor action accounting breach",
+      expected_outcome: "engine pauses before evaluation",
+      impacted_files: [],
+      recommended_tools: ["run_shell"]
+    };
+
+    let evaluatorCalls = 0;
+
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      executor: {
+        execute: () => Promise<{
+          actions: Array<{ tool: string; args: Record<string, unknown>; ok: boolean; output: string }>;
+          toolResult: {
+            status: "success";
+            summary: string;
+            artifacts: { log_path: string; state_change_path: string };
+            error: null;
+            next_state_hint: "continue";
+          };
+        }>;
+      };
+      evaluator: { evaluate: () => Promise<unknown> };
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+    mutable.planner = {
+      plan: async () => plan
+    };
+    mutable.executor = {
+      execute: async () => ({
+        actions: [
+          {
+            tool: "codex_step",
+            args: { index: 1 },
+            ok: true,
+            output: "Observed current state"
+          },
+          {
+            tool: "codex_step",
+            args: { index: 2 },
+            ok: true,
+            output: "Attempted second action after the configured limit"
+          }
+        ],
+        toolResult: {
+          status: "success",
+          summary: "executor returned two action logs",
+          artifacts: {
+            log_path: "",
+            state_change_path: ""
+          },
+          error: null,
+          next_state_hint: "continue"
+        }
+      })
+    };
+    mutable.evaluator = {
+      evaluate: async () => {
+        evaluatorCalls += 1;
+        throw new Error("evaluator should not run after action budget breach");
+      }
+    };
+
+    const outcome = await mutable.runRound(1);
+
+    expect(outcome.success).toBe(false);
+    expect(outcome.errorMessage).toBe("BudgetBreach: action budget exceeded");
+    expect(evaluatorCalls).toBe(0);
+
+    const state = await readLoopState(paths);
+    expect(state.state).toBe("paused");
+    expect(state.previous_tool_result?.status).toBe("failure");
+    expect(state.previous_tool_result?.summary).toBe(
+      "Round paused because the action budget was exceeded before evaluation completed."
+    );
+    expect(state.previous_tool_result?.error).toEqual({
+      type: "BudgetBreach",
+      message: "BudgetBreach: action budget exceeded"
+    });
+    expect(state.previous_tool_result?.next_state_hint).toBe("pause");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
   test.each([
     {
       label: "action",
