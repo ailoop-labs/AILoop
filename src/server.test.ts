@@ -178,6 +178,7 @@ async function writeRunArtifacts(
   contents: {
     summary?: string;
     metrics?: Record<string, unknown>;
+    evaluation?: Record<string, unknown>;
     log?: string;
     stateChange?: string;
   }
@@ -191,6 +192,13 @@ async function writeRunArtifacts(
     await fs.writeFile(
       path.join(runsDir, `${timestamp}.round.metrics.json`),
       `${JSON.stringify(contents.metrics, null, 2)}\n`,
+      "utf8"
+    );
+  }
+  if (contents.evaluation !== undefined) {
+    await fs.writeFile(
+      path.join(runsDir, `${timestamp}.round.evaluation.json`),
+      `${JSON.stringify(contents.evaluation, null, 2)}\n`,
       "utf8"
     );
   }
@@ -670,6 +678,12 @@ describe("console server API contract", () => {
     await writeRunArtifacts(paths.runsDir, "2026-03-10T10-00-00-000Z", {
       summary: "Latest summary\n",
       metrics: { round: 2, status: "success" },
+      evaluation: {
+        decision: "pass",
+        justification: "All checks satisfied.",
+        evidence: ["bun test src/server.test.ts"],
+        aggregate_score: 96
+      },
       log: "latest log\n",
       stateChange: "latest diff\n"
     });
@@ -688,6 +702,12 @@ describe("console server API contract", () => {
         metrics: {
           round: 2,
           status: "success"
+        },
+        evaluation: {
+          decision: "pass",
+          justification: "All checks satisfied.",
+          evidence: ["bun test src/server.test.ts"],
+          aggregate_score: 96
         }
       }
     ]);

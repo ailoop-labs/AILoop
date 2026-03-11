@@ -10,7 +10,7 @@ import {
 import type { AppConfig } from "../config/env";
 import { readRuntimeLoopConfig, runtimeLoopConfigToEnv } from "../config/runtime";
 import { listRunRecords, readLastLogTail } from "../reporting/summary";
-import type { BudgetLimits, LoopStateData } from "../types/contracts";
+import type { BudgetLimits, EvaluationResult, LoopStateData } from "../types/contracts";
 import { fileExists, readJsonFile, readTextFile } from "../utils/fs";
 
 export async function buildDeterministicGoal(workspaceRoot: string = process.cwd()): Promise<string> {
@@ -238,6 +238,7 @@ export async function listRuns(config: AppConfig, limit = 20): Promise<
     timestamp: string;
     summary: string;
     metrics: Record<string, unknown> | null;
+    evaluation: EvaluationResult | null;
   }>
 > {
   const paths = await ensureLoopHomeAndGetPaths(config);
@@ -247,15 +248,18 @@ export async function listRuns(config: AppConfig, limit = 20): Promise<
     timestamp: string;
     summary: string;
     metrics: Record<string, unknown> | null;
+    evaluation: EvaluationResult | null;
   }> = [];
 
   for (const record of records) {
     const summary = await fs.readFile(record.summaryPath, "utf8");
     const metrics = await readJsonFile<Record<string, unknown> | null>(record.metricsPath, null);
+    const evaluation = await readJsonFile<EvaluationResult | null>(record.evaluationPath ?? "", null);
     output.push({
       timestamp: record.timestamp,
       summary,
-      metrics
+      metrics,
+      evaluation
     });
   }
 

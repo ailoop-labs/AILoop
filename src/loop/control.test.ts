@@ -7,6 +7,7 @@ import {
   ensureProjectRoles,
   getCliStatus,
   getLoopStatus,
+  listRuns,
   listProjectRoles,
   prepareStartFlags,
   resumeLoop,
@@ -87,6 +88,39 @@ describe("tailLatestLog", () => {
 
     const lines = await tailLatestLog(makeTestConfig(homeDir), 2);
     expect(lines).toEqual(["newer-2", "newer-3"]);
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+});
+
+describe("listRuns", () => {
+  test("returns null evaluation when the evaluation artifact is missing", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-list-runs-test-"));
+    const runsDir = path.join(homeDir, "runs");
+    await fs.mkdir(runsDir, { recursive: true });
+
+    const timestamp = "2026-03-01T02-00-00-000Z";
+    await fs.writeFile(path.join(runsDir, `${timestamp}.round.summary.md`), "summary\n", "utf8");
+    await fs.writeFile(
+      path.join(runsDir, `${timestamp}.round.metrics.json`),
+      `${JSON.stringify({ round: 2, status: "success" }, null, 2)}\n`,
+      "utf8"
+    );
+    await fs.writeFile(path.join(runsDir, `${timestamp}.round.log`), "log\n", "utf8");
+    await fs.writeFile(path.join(runsDir, `${timestamp}.round.state_change.txt`), "diff\n", "utf8");
+
+    const runs = await listRuns(makeTestConfig(homeDir));
+    expect(runs).toEqual([
+      {
+        timestamp,
+        summary: "summary\n",
+        metrics: {
+          round: 2,
+          status: "success"
+        },
+        evaluation: null
+      }
+    ]);
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
