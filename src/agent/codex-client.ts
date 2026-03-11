@@ -41,13 +41,16 @@ export type ProcessRunner = (
   hooks?: {
     onStdoutChunk?: (chunk: string) => void;
     onStderrChunk?: (chunk: string) => void;
-  }
+  },
+  env?: NodeJS.ProcessEnv
 ) => Promise<ProcessRunResult>;
 
 type SleepFn = (ms: number) => Promise<void>;
 
 const INTERFACE_ERROR_RETRY_DELAY_MS = 60_000;
 const INTERFACE_ERROR_MAX_RETRIES = 5;
+const CODEX_HOME_DIRNAME = "codex-home";
+const CODEX_AUTH_FILENAME = "auth.json";
 
 function parseJsonSafely<T>(payload: string): T | null {
   try {
@@ -342,6 +345,60 @@ function buildArgs(config: CodexConfig, options: CodexJsonCallOptions, schemaPat
   return args;
 }
 
+function resolveSourceCodexHome(env: NodeJS.ProcessEnv): string {
+  const configuredHome = env.CODEX_HOME?.trim();
+  if (configuredHome) {
+    return path.resolve(configuredHome);
+  }
+
+  const shellHome = env.HOME?.trim();
+  if (shellHome) {
+    return path.join(path.resolve(shellHome), ".codex");
+  }
+
+  return path.join(os.homedir(), ".codex");
+}
+
+function resolveIsolatedCodexHome(cwd: string, env: NodeJS.ProcessEnv): string {
+  const configuredAiloopHome = env.AILOOP_HOME?.trim();
+  const ailoopHome = configuredAiloopHome ? path.resolve(configuredAiloopHome) : path.resolve(cwd, ".ailoop");
+  return path.join(ailoopHome, CODEX_HOME_DIRNAME);
+}
+
+async function syncCodexAuthFile(sourceCodexHome: string, targetCodexHome: string): Promise<void> {
+  await fs.mkdir(targetCodexHome, { recursive: true });
+
+  if (path.resolve(sourceCodexHome) === path.resolve(targetCodexHome)) {
+    return;
+  }
+
+  const sourceAuthPath = path.join(sourceCodexHome, CODEX_AUTH_FILENAME);
+  const targetAuthPath = path.join(targetCodexHome, CODEX_AUTH_FILENAME);
+
+  try {
+    const authPayload = await fs.readFile(sourceAuthPath, "utf8");
+    await fs.writeFile(targetAuthPath, authPayload, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+}
+
+async function buildProcessEnv(config: CodexConfig, cwd: string, baseEnv: NodeJS.ProcessEnv = process.env): Promise<NodeJS.ProcessEnv> {
+  if (config.bin.endsWith("gemini")) {
+    return { ...baseEnv };
+  }
+
+  const isolatedCodexHome = resolveIsolatedCodexHome(cwd, baseEnv);
+  await syncCodexAuthFile(resolveSourceCodexHome(baseEnv), isolatedCodexHome);
+
+  return {
+    ...baseEnv,
+    CODEX_HOME: isolatedCodexHome
+  };
+}
+
 async function runProcess(
   cmd: string,
   args: string[],
@@ -350,12 +407,13 @@ async function runProcess(
   hooks?: {
     onStdoutChunk?: (chunk: string) => void;
     onStderrChunk?: (chunk: string) => void;
-  }
+  },
+  env: NodeJS.ProcessEnv = process.env
 ): Promise<ProcessRunResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
       cwd,
-      env: process.env
+      env
     });
 
     let stdout = "";
@@ -456,6 +514,7 @@ export class CodexClient {
       let combinedStdout = "";
       let combinedStderr = "";
       let interfaceRetryCount = 0;
+      const processEnv = await buildProcessEnv(this.config, options.cwd);
 
       for (let attempt = 0; ; attempt += 1) {
         const prompt =
@@ -475,10 +534,17 @@ export class CodexClient {
 
         await fs.writeFile(outputPath, "", "utf8");
         const args = buildArgs(this.config, attemptOptions, schemaPath, outputPath);
-        const runResult = await this.processRunner(this.config.bin, args, attemptOptions.cwd, timeoutMs, {
-          onStdoutChunk: attemptOptions.onStdoutChunk,
-          onStderrChunk: attemptOptions.onStderrChunk
-        });
+        const runResult = await this.processRunner(
+          this.config.bin,
+          args,
+          attemptOptions.cwd,
+          timeoutMs,
+          {
+            onStdoutChunk: attemptOptions.onStdoutChunk,
+            onStderrChunk: attemptOptions.onStderrChunk
+          },
+          processEnv
+        );
 
         let effectiveStdout = runResult.stdout;
         if (this.config.bin.endsWith("gemini")) {

@@ -105,7 +105,7 @@ Guidelines:
 - Run `bun run web:build` when touching the web console.
 - If you change scripts, environment handling, or loop orchestration, include the exact command output you used to verify the behavior.
 
-Do not claim success without a concrete verification step.
+Only report a task or round as successful when the stated objective is complete and your verification evidence directly proves that outcome.
 
 ## Round And Evidence Workflow
 
@@ -116,6 +116,7 @@ AILoop is designed around bounded, observable rounds. Contributions should follo
 3. Make the smallest change that advances the objective.
 4. Verify the result immediately after the change.
 5. Record evidence in your PR description, task summary, or handoff note.
+6. Keep the reported outcome aligned with the actual change from this round; if the objective was not completed, report failure or remaining blockers instead of overstating progress.
 
 Good evidence includes:
 

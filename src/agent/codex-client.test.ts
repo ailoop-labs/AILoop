@@ -1,4 +1,6 @@
 import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_LLM_EVALUATOR_DIMENSIONS, type CodexConfig } from "../config/env";
 import { CodexClient, type ProcessRunner } from "./codex-client";
@@ -26,6 +28,74 @@ function outputPathFromArgs(args: string[]): string {
 }
 
 describe("CodexClient.runJson", () => {
+  test("launches codex with an isolated AILoop-managed CODEX_HOME", async () => {
+    const sandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-codex-home-test-"));
+    const workspaceDir = path.join(sandboxRoot, "workspace");
+    const globalHomeDir = path.join(sandboxRoot, "global-home");
+    const ailoopHomeDir = path.join(sandboxRoot, "ailoop-home");
+    const globalCodexDir = path.join(globalHomeDir, ".codex");
+    const globalAuthPath = path.join(globalCodexDir, "auth.json");
+    const globalConfigPath = path.join(globalCodexDir, "config.toml");
+    const expectedCodexHome = path.join(ailoopHomeDir, "codex-home");
+    let capturedEnv: NodeJS.ProcessEnv | undefined;
+
+    await fs.mkdir(workspaceDir, { recursive: true });
+    await fs.mkdir(globalCodexDir, { recursive: true });
+    await fs.mkdir(ailoopHomeDir, { recursive: true });
+    await fs.writeFile(globalAuthPath, '{"OPENAI_API_KEY":"test-key"}\n', "utf8");
+    await fs.writeFile(globalConfigPath, 'model = "broken"\nmodel = "duplicate"\n', "utf8");
+
+    const originalHome = process.env.HOME;
+    const originalAiloopHome = process.env.AILOOP_HOME;
+    process.env.HOME = globalHomeDir;
+    process.env.AILOOP_HOME = ailoopHomeDir;
+
+    try {
+      const runner = (async function (_cmd, args) {
+        capturedEnv = arguments[5] as NodeJS.ProcessEnv | undefined;
+        await fs.writeFile(outputPathFromArgs(args), '{"status":"success"}', "utf8");
+        return {
+          code: 0,
+          stdout: "",
+          stderr: ""
+        };
+      }) as ProcessRunner;
+
+      const client = new CodexClient(createCodexConfig(), runner);
+      const result = await client.runJson<{ status: string }>({
+        prompt: "Return JSON",
+        schema: { type: "object" },
+        cwd: workspaceDir,
+        sandbox: "read-only",
+        maxRetries: 0
+      });
+
+      expect(result.ok).toBe(true);
+      expect(capturedEnv?.CODEX_HOME).toBe(expectedCodexHome);
+      expect(await fs.readFile(path.join(expectedCodexHome, "auth.json"), "utf8")).toBe(
+        await fs.readFile(globalAuthPath, "utf8")
+      );
+      expect(
+        await fs
+          .access(path.join(expectedCodexHome, "config.toml"))
+          .then(() => true)
+          .catch(() => false)
+      ).toBe(false);
+    } finally {
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+
+      if (originalAiloopHome === undefined) {
+        delete process.env.AILOOP_HOME;
+      } else {
+        process.env.AILOOP_HOME = originalAiloopHome;
+      }
+    }
+  });
+
   test("retries invalid JSON and succeeds on a later attempt", async () => {
     const prompts: string[] = [];
     const attempts = [
