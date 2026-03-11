@@ -130,6 +130,23 @@ describe("tailLatestLog", () => {
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
+
+  test("redacts secret-like values from the newest round log tail", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-tail-redaction-test-"));
+    const runsDir = path.join(homeDir, "runs");
+    await fs.mkdir(runsDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(runsDir, "2026-03-01T03-00-00-000Z.round.log"),
+      "visible-line\nsessionSecret=uniquesecret123\napiToken=anothersecret456!\n",
+      "utf8"
+    );
+
+    const lines = await tailLatestLog(makeTestConfig(homeDir), 3);
+    expect(lines).toEqual(["visible-line", "sessionSecret=[REDACTED]", "apiToken=[REDACTED]!"]);
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
 });
 
 describe("listRuns", () => {

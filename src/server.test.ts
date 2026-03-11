@@ -852,4 +852,22 @@ describe("console server API contract", () => {
       lines: ["latest-2", "latest-3"]
     });
   });
+
+  test("redacts secret-like values in authenticated latest log tail responses", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    await writeRunArtifacts(paths.runsDir, "2026-03-10T10-00-00-000Z", {
+      log: "visible-line\nsessionSecret=uniquesecret123\napiToken=anothersecret456!\n"
+    });
+
+    const response = await fetchHandler(createAuthorizedRequest("http://console.test/api/logs/tail?lines=3", token));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      lines: ["visible-line", "sessionSecret=[REDACTED]", "apiToken=[REDACTED]!"]
+    });
+  });
 });

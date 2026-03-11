@@ -337,7 +337,9 @@ export async function tailLatestLog(config: AppConfig, lines = 200): Promise<str
     return [];
   }
 
-  return readLastLogTail(path.join(paths.runsDir, latestLog), lines);
+  const redactor = new SecretRedactor(process.env);
+  const tail = await readLastLogTail(path.join(paths.runsDir, latestLog), lines);
+  return tail.map((line) => redactor.redact(line));
 }
 
 export async function readGoal(_config: AppConfig): Promise<string> {
