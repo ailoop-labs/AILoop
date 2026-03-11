@@ -432,7 +432,8 @@ export class LoopEngine {
                   goal: goalContent,
                   lastError: currentStateData.last_error,
                   previousEvaluationJustification: currentStateData.previous_tool_result?.status === "failure" ? null : currentStateData.last_error,
-                  stateChange: null // Can be populated if needed, but omitted for simplicity across boundaries
+                  previousEvaluationDimensions: currentStateData.previous_evaluation_dimensions,
+                  stateChange: null
                 },
                 paths: this.paths,
                 onLog: async (msg) => {
@@ -521,8 +522,16 @@ export class LoopEngine {
         last_error: null
       });
     } catch (error) {
-      await this.setState("error", (error as Error).message);
-      throw error;
+      const message = (error as Error).message;
+      console.error("[FATAL LOOP ERROR]", error);
+      
+      // Instead of crashing, we set the pause flag and stay in the loop
+      // This allows the Leader to potentially fix the infrastructure issue
+      await setFlag(this.paths.pauseFlagPath);
+      await this.setState("paused", `Fatal loop error: ${message}`);
+      
+      // Re-enter the loop to allow Leader to run
+      return this.run();
     } finally {
       await clearPid(this.paths);
       await this.releaseLock();
@@ -965,6 +974,7 @@ export class LoopEngine {
           (evaluation.decision === "fail" ? evaluation.justification : null),
         consecutive_evaluator_failures: nextFailureCount,
         previous_tool_result: finalToolResult,
+        previous_evaluation_dimensions: evaluation.dimensions,
         current_budget: {
           limits: guardrails.limitsSnapshot(),
           usage

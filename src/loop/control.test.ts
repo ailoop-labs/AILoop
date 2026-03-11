@@ -31,9 +31,6 @@ function makeTestConfig(homeDir: string): AppConfig {
       timeMinutes: 1,
       actions: 10
     },
-    evaluatorType: "shell",
-    evaluatorCmd: "",
-    webhookEvaluatorUrl: "",
     enableLeader: false,
     codex: {
       bin: "codex",

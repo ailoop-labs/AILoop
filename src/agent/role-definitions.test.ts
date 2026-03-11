@@ -22,9 +22,6 @@ function makeConfig(homeDir: string): AppConfig {
       timeMinutes: 15,
       actions: 30
     },
-    evaluatorType: "llm",
-    evaluatorCmd: "",
-    webhookEvaluatorUrl: "",
     codex: {
       bin: "codex",
       model: "",

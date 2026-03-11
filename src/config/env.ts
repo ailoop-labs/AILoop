@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { BudgetLimits, EvaluationDimension, EvaluatorType } from "../types/contracts";
+import type { BudgetLimits, EvaluationDimension } from "../types/contracts";
 
 export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 export const DEFAULT_LLM_EVALUATOR_DIMENSIONS: EvaluationDimension[] = [
@@ -37,9 +37,6 @@ export interface AppConfig {
   consoleAdminToken: string;
   maxRetainRuns: number;
   budget: BudgetLimits;
-  evaluatorType: EvaluatorType;
-  evaluatorCmd: string;
-  webhookEvaluatorUrl: string;
   codex: CodexConfig;
 }
 
@@ -167,11 +164,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, options: LoadCo
   const consoleAdminToken = get("AILOOP_CONSOLE_ADMIN_TOKEN") ?? "";
   const maxRetainRuns = parseNumber(get("AILOOP_MAX_RETAIN_RUNS"), 50);
 
-  const evaluatorTypeRaw = (get("AILOOP_EVALUATOR_TYPE") ?? "llm") as EvaluatorType;
-  const evaluatorType: EvaluatorType = ["shell", "llm", "webhook"].includes(evaluatorTypeRaw)
-    ? evaluatorTypeRaw
-    : "shell";
-
   return {
     homeDir,
     intervalSeconds,
@@ -188,9 +180,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, options: LoadCo
       timeMinutes: parseNumber(get("AILOOP_BUDGET_TIME_MINUTES"), 60),
       actions: parseNumber(get("AILOOP_BUDGET_ACTIONS"), 30)
     },
-    evaluatorType,
-    evaluatorCmd: get("AILOOP_EVALUATOR_CMD") ?? "",
-    webhookEvaluatorUrl: get("AILOOP_WEBHOOK_EVALUATOR_URL") ?? "",
     codex: {
       bin: get("AILOOP_CODEX_BIN") ?? "codex",
       model: get("AILOOP_CODEX_MODEL") ?? "",

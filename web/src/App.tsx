@@ -39,7 +39,6 @@ interface RunItem {
 }
 
 type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
-type EvaluatorType = "shell" | "llm" | "webhook";
 
 interface RuntimeLoopConfig {
   intervalSeconds: number;
@@ -50,9 +49,6 @@ interface RuntimeLoopConfig {
     timeMinutes: number;
     actions: number;
   };
-  evaluatorType: EvaluatorType;
-  evaluatorCmd: string;
-  webhookEvaluatorUrl: string;
   codex: {
     model: string;
     profile: string;
@@ -865,49 +861,6 @@ export default function App() {
                 <option value="false">false</option>
                 <option value="true">true</option>
               </select>
-            </label>
-            <label className="text-sm text-mist/80">
-              Evaluator Type
-              <select
-                value={runtimeConfig.evaluatorType}
-                onChange={(event) =>
-                  setRuntimeConfig({
-                    ...runtimeConfig,
-                    evaluatorType: event.target.value as EvaluatorType
-                  })
-                }
-                className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
-              >
-                <option value="llm">llm</option>
-                <option value="shell">shell</option>
-                <option value="webhook">webhook</option>
-              </select>
-            </label>
-            <label className="text-sm text-mist/80">
-              Evaluator Command (shell mode)
-              <input
-                value={runtimeConfig.evaluatorCmd}
-                onChange={(event) =>
-                  setRuntimeConfig({
-                    ...runtimeConfig,
-                    evaluatorCmd: event.target.value
-                  })
-                }
-                className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
-              />
-            </label>
-            <label className="text-sm text-mist/80 md:col-span-2">
-              Webhook Evaluator URL
-              <input
-                value={runtimeConfig.webhookEvaluatorUrl}
-                onChange={(event) =>
-                  setRuntimeConfig({
-                    ...runtimeConfig,
-                    webhookEvaluatorUrl: event.target.value
-                  })
-                }
-                className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
-              />
             </label>
             <label className="text-sm text-mist/80">
               Codex Model

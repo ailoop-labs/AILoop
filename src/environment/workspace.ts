@@ -155,6 +155,12 @@ export class WorkspaceManager {
 
     for (const filePath of normalizedTargets) {
       const existed = await fileExists(filePath);
+      if (existed) {
+        const stat = await fs.lstat(filePath);
+        if (!stat.isFile()) {
+          continue;
+        }
+      }
       const content = await readTextFile(filePath, "");
       files.push({ path: filePath, content, existed });
     }

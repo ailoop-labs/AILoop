@@ -19,9 +19,6 @@ function makeConfig(): AppConfig {
       timeMinutes: 60,
       actions: 30
     },
-    evaluatorType: "llm",
-    evaluatorCmd: "",
-    webhookEvaluatorUrl: "",
     codex: {
       bin: "/Users/test/.bun/bin/codex",
       model: "",

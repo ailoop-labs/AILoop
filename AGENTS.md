@@ -268,17 +268,16 @@ To stay consistent with the loop state machine:
 
 ---
 
-## 11. Operator Workflow Defaults
+## 11. Post-Pass Operational Workflow
 
-For this repository, unless a live human instruction explicitly overrides it in the current turn:
+For this repository, the **AILoop Engine** automatically performs operational follow-up tasks after a round receives a `Pass` decision from the Evaluator.
 
-1. After implementing a requested code change, run relevant verification commands first (tests/typecheck or task-specific checks).
-2. If verification is acceptable, create a git commit for the change set with a concise factual message.
-3. Push the commit to `origin` on the current branch.
-4. Restart the production service to apply new code with:
-   - `bash scripts/prod.sh restart`
-5. In the round/report summary, include:
-   - verification commands and outcomes,
-   - commit hash/message,
-   - push result (remote/branch),
-   - restart result (PID/log path if available).
+The Engine's automated workflow includes:
+1. Creating a git commit for the verified change set.
+2. Pushing the commit to the remote origin.
+3. Restarting the production service via `bash scripts/prod.sh restart`.
+4. Performing a final health check.
+
+**Agent Responsibility:**
+Agents (Planner and Executor) should focus strictly on the technical objective and providing clear verification evidence (tests, logs, diffs). They **must not** attempt to manually commit, push, or restart services unless explicitly instructed to do so as part of a specific sub-task. The Evaluator must judge the round based on the sub-task objective and should not fail a round for missing commit/push/restart actions, as those are performed by the Engine post-evaluation.
+

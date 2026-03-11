@@ -315,7 +315,16 @@ export function aggregateDimensionAssessments(
   aggregateScore: number;
 } {
   const normalized = assessments.map((assessment) => sanitizeDimensionAssessment(assessment.dimension, assessment));
-  const adjusted = normalized.map(softenScopeOnlyHardGateFailure);
+
+  // Heuristic: If all scores are <= 1.0 and at least one dimension passed, it is highly likely the LLM 
+  // used a 0-1 scale despite instructions. Scale them up to 0-100 to match the threshold.
+  const allLowScores = normalized.every(a => a.score <= 1.0);
+  const anyPassed = normalized.some(a => a.decision === "pass");
+  const finalAssessments = (allLowScores && anyPassed)
+    ? normalized.map(a => ({ ...a, score: a.score * 100 }))
+    : normalized;
+
+  const adjusted = finalAssessments.map(softenScopeOnlyHardGateFailure);
   const score = weightedScore(adjusted);
   const evidence = toEvidenceLines(adjusted);
 
@@ -416,6 +425,7 @@ export function buildDimensionPrompt(
     "- Do not infer hidden work.",
     "- If evidence is insufficient, return decision=unknown.",
     "- Judge only against provided context.",
+    "- Use a 0-100 scale for scores (75 is the default passing threshold).",
     "",
     "Evidence priority:",
     ...EVIDENCE_PRIORITY_LINES.map((line) => `- ${line}`),

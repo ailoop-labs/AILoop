@@ -68,9 +68,6 @@ function makeLlmConfig(dimensions: AppConfig["codex"]["llmEvaluatorDimensions"] 
       timeMinutes: 15,
       actions: 30
     },
-    evaluatorType: "llm",
-    evaluatorCmd: "",
-    webhookEvaluatorUrl: "",
     codex: {
       bin: "codex",
       model: "",
@@ -257,6 +254,22 @@ describe("aggregateDimensionAssessments", () => {
     expect(serialized).toContain("OPENAI_API_KEY=[REDACTED]");
     expect(serialized).toContain("SESSION_SECRET=[REDACTED]");
     expect(serialized).toContain("GITHUB_TOKEN=[REDACTED]");
+  });
+
+  test("normalizes scores from 0-1 scale to 0-100 when all scores are low and at least one passed", () => {
+    const result = aggregateDimensionAssessments(
+      [
+        makeAssessment({ dimension: "goal_alignment", decision: "pass", score: 1.0 }),
+        makeAssessment({ dimension: "causal_validity", decision: "pass", score: 0.9 }),
+        makeAssessment({ dimension: "constraint_compliance", decision: "pass", score: 0.95 })
+      ],
+      75
+    );
+
+    expect(result.decision).toBe("pass");
+    expect(result.aggregateScore).toBeGreaterThanOrEqual(90);
+    expect(result.evidence.some(e => e.includes("score=100.0"))).toBe(true);
+    expect(result.evidence.some(e => e.includes("score=90.0"))).toBe(true);
   });
 });
 

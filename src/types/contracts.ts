@@ -1,6 +1,5 @@
 export type LoopStateName = "idle" | "running" | "cooldown" | "paused" | "stopping" | "error";
 
-export type EvaluatorType = "shell" | "llm" | "webhook";
 export type EvaluationDimension =
   | "goal_alignment"
   | "causal_validity"
@@ -8,6 +7,7 @@ export type EvaluationDimension =
   | "risk_externality"
   | "reversibility_resilience"
   | "learning_yield";
+
 
 export interface BudgetLimits {
   usdPerRound: number;
@@ -29,6 +29,7 @@ export interface LoopStateData {
   last_error: string | null;
   consecutive_evaluator_failures: number;
   previous_tool_result: ToolResult | null;
+  previous_evaluation_dimensions?: DimensionAssessment[];
   current_budget: {
     limits: BudgetLimits;
     usage: BudgetUsage;
@@ -121,6 +122,7 @@ export interface LeaderContext {
   goal: string;
   lastError: string | null;
   previousEvaluationJustification: string | null;
+  previousEvaluationDimensions?: DimensionAssessment[];
   stateChange: string | null;
 }
 

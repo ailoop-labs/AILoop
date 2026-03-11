@@ -122,4 +122,24 @@ describe("WorkspaceManager.buildStateChange", () => {
     await expect(fs.stat(createdPath)).rejects.toThrow();
     await fs.rm(repoDir, { recursive: true, force: true });
   });
+
+  test("skips directories in extraTargetFiles to avoid EISDIR", async () => {
+    const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-workspace-dir-test-"));
+    const homeDir = path.join(repoDir, ".ailoop");
+    const paths = createLoopPaths(homeDir);
+    await fs.mkdir(paths.homeDir, { recursive: true });
+    await fs.mkdir(paths.runsDir, { recursive: true });
+    await fs.writeFile(paths.taskPath, "# task\n", "utf8");
+
+    const srcDir = path.join(repoDir, "src");
+    await fs.mkdir(srcDir, { recursive: true });
+
+    const manager = new WorkspaceManager(paths, repoDir);
+    // This should not throw EISDIR
+    const snapshot = await manager.createSnapshot([srcDir]);
+
+    expect(snapshot.files.find(f => f.path === srcDir)).toBeUndefined();
+
+    await fs.rm(repoDir, { recursive: true, force: true });
+  });
 });

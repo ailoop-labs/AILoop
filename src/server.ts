@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { loadConfig } from "./config/env";
+import { loadConfig, type AppConfig } from "./config/env";
 import { patchRuntimeLoopConfig, readRuntimeLoopConfig, resetRuntimeLoopConfig } from "./config/runtime";
 import { isDateBasedAdminTokenExpired } from "./auth/admin-token";
 import {
@@ -16,11 +16,6 @@ import {
   stopLoop,
   tailLatestLog
 } from "./loop/control";
-
-const config = loadConfig();
-const adminToken = config.consoleAdminToken.trim();
-const tokenAuthEnabled = adminToken.length > 0;
-const adminTokenIssuedDate = (process.env.AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE ?? "").trim();
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data, null, 2), {
@@ -54,6 +49,31 @@ function isPublicApi(pathname: string, method: string): boolean {
     (pathname === "/api/auth/status" && method === "GET") ||
     (pathname === "/api/auth/login" && method === "POST")
   );
+}
+
+interface ConsoleRuntime {
+  config: AppConfig;
+  adminToken: string;
+  tokenAuthEnabled: boolean;
+  adminTokenIssuedDate: string;
+}
+
+interface CreateConsoleFetchOptions {
+  config?: AppConfig;
+  adminTokenIssuedDate?: string;
+}
+
+function createConsoleRuntime(options: CreateConsoleFetchOptions = {}): ConsoleRuntime {
+  const config = options.config ?? loadConfig();
+  const adminToken = config.consoleAdminToken.trim();
+
+  return {
+    config,
+    adminToken,
+    tokenAuthEnabled: adminToken.length > 0,
+    adminTokenIssuedDate:
+      options.adminTokenIssuedDate ?? (process.env.AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE ?? "").trim()
+  };
 }
 
 async function serveStaticFromDist(urlPath: string): Promise<Response | null> {
@@ -94,12 +114,10 @@ async function serveStaticFromDist(urlPath: string): Promise<Response | null> {
   }
 }
 
-const server = Bun.serve({
-  hostname: config.consoleHost,
-  port: config.consolePort,
-  idleTimeout: 255,
-  async fetch(request) {
+function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
+  return async function fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    const { config, adminToken, tokenAuthEnabled, adminTokenIssuedDate } = runtime;
 
     if (url.pathname === "/api/health" && request.method === "GET") {
       return json({ ok: true, service: "ailoop-console" });
@@ -222,7 +240,26 @@ const server = Bun.serve({
     }
 
     return json({ error: "Not Found" }, 404);
-  }
-});
+  };
+}
 
-console.log(`AILoop console server running on http://${server.hostname}:${server.port}`);
+export function createConsoleFetch(options: CreateConsoleFetchOptions = {}) {
+  return createConsoleFetchFromRuntime(createConsoleRuntime(options));
+}
+
+export function startConsoleServer(options: CreateConsoleFetchOptions = {}) {
+  const runtime = createConsoleRuntime(options);
+  const server = Bun.serve({
+    hostname: runtime.config.consoleHost,
+    port: runtime.config.consolePort,
+    idleTimeout: 255,
+    fetch: createConsoleFetchFromRuntime(runtime)
+  });
+
+  console.log(`AILoop console server running on http://${server.hostname}:${server.port}`);
+  return server;
+}
+
+if (import.meta.main) {
+  startConsoleServer();
+}

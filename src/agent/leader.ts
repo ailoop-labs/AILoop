@@ -18,6 +18,12 @@ const LEADER_DECISION_SCHEMA: JsonSchema = {
 };
 
 function buildLeaderPrompt(context: LeaderContext, roleDefinition: string): string {
+  const dimensionsSummary = context.previousEvaluationDimensions
+    ? context.previousEvaluationDimensions.map(d => 
+        `- ${d.dimension}: ${d.decision} (score=${d.score}, confidence=${d.confidence}) - ${d.justification}`
+      ).join("\n")
+    : "None";
+
   return [
     roleDefinition,
     "",
@@ -25,6 +31,9 @@ function buildLeaderPrompt(context: LeaderContext, roleDefinition: string): stri
     `- Goal: ${context.goal}`,
     `- Last Error: ${context.lastError ?? "None"}`,
     `- Previous Evaluator Justification: ${context.previousEvaluationJustification ?? "None"}`,
+    "",
+    "## Evaluation Dimensions Breakdown",
+    dimensionsSummary,
     "",
     "## Workspace Changes (Diff)",
     context.stateChange ?? "No changes.",

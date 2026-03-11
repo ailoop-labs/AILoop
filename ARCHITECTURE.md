@@ -334,8 +334,7 @@ Evaluator requirements:
 
 - skeptical by default,
 - tied to the round objective rather than superficial activity,
-- explicit justification on fail,
-- safe to swap between deterministic and LLM-based modes.
+- explicit justification on fail.
 
 ### 8.4 Tool Contract
 
@@ -356,41 +355,11 @@ Tool design requirements:
 - budget/accounting metadata when relevant,
 - no assumption that a tool is available unless registered.
 
-## 9. Evaluator Modes
-
-The MVP supports pluggable evaluator implementations behind one interface.
-
-### 9.1 Shell Evaluator
-
-Use case: deterministic local validation such as test commands, typecheck, or bespoke scripts.
-
-- Input: command + expected exit semantics.
-- Pass condition: command output satisfies configured rule.
-- Best for: engineering tasks with executable checks.
-
-### 9.2 LLM Judge Evaluator
-
-Use case: assess whether artifacts and observed state satisfy a qualitative objective.
-
-- Input: sub-task, artifact summaries, execution logs, and state change.
-- Pass condition: the judge finds the objective completed.
-- Best for: documentation, synthesis, or tasks where pure shell assertions are insufficient.
-
-### 9.3 Webhook or API Evaluator
-
-Use case: validate external metrics or service state.
-
-- Input: HTTP request definition and expected response criteria.
-- Pass condition: external system returns target signal.
-- Best for: operational loops and integration checks.
-
-All evaluator modes must emit the same `EvaluationResult` shape so the engine can apply common pause and rollback policy.
-
-## 10. Budget Model and Guardrails
+## 9. Budget Model and Guardrails
 
 Budgets are enforced per round, with optional run-level aggregation layered on top later.
 
-### 10.1 Tracked Dimensions
+### 9.1 Tracked Dimensions
 
 - **Cost budget**: estimated or measured LLM/tool spend in USD.
 - **Time budget**: wall-clock minutes elapsed in the round.
@@ -402,7 +371,7 @@ Default MVP targets from the product specification:
 - `AILOOP_BUDGET_TIME_MINUTES=15`
 - `AILOOP_BUDGET_ACTIONS=30`
 
-### 10.2 Enforcement Rules
+### 9.2 Enforcement Rules
 
 - Guardrails check remaining budget before each tool action.
 - If any dimension crosses its limit, execution stops immediately.
@@ -412,11 +381,11 @@ Default MVP targets from the product specification:
 
 Budget breach is therefore both a runtime error condition and a state transition trigger.
 
-## 11. Persistence and Artifact Model
+## 10. Persistence and Artifact Model
 
 The MVP uses file-based persistence rooted at `AILOOP_HOME`, defaulting to `.ailoop/` in the workspace.
 
-### 11.1 Required Layout
+### 10.1 Required Layout
 
 ```text
 .ailoop/
@@ -432,7 +401,7 @@ The MVP uses file-based persistence rooted at `AILOOP_HOME`, defaulting to `.ail
     <timestamp>.round.evaluation.json
 ```
 
-### 11.2 Artifact Semantics
+### 10.2 Artifact Semantics
 
 - `state.json`: canonical persisted engine state, active run metadata, and counters.
 - `loop.lock`: lock owner and process metadata preventing concurrent engines.
@@ -444,11 +413,11 @@ The MVP uses file-based persistence rooted at `AILOOP_HOME`, defaulting to `.ail
 - `*.round.state_change.txt`: unified diff or concise mutation log.
 - `*.round.evaluation.json`: evaluator decision and evidence.
 
-### 11.3 Secret Redaction
+### 10.3 Secret Redaction
 
 Before any artifact is written, known secrets from environment variables containing `TOKEN`, `KEY`, or `SECRET` must be masked. Redaction happens automatically in log and artifact writers, not by relying on agent behavior alone.
 
-## 12. Crash Recovery and Rollback
+## 11. Crash Recovery and Rollback
 
 Crash recovery is mandatory because long-running loops can be interrupted.
 
@@ -462,7 +431,7 @@ On engine startup:
 
 This prevents the engine from silently continuing on top of uncertain state.
 
-## 13. Control Interfaces
+## 12. Control Interfaces
 
 The control plane must support these operations.
 
@@ -482,7 +451,7 @@ Representative API endpoints for the MVP:
 - `POST /api/loop/instruct`
 - `GET /api/status`
 
-## 14. MVP Implementation Map
+## 13. MVP Implementation Map
 
 Suggested module boundaries for implementation:
 
@@ -498,14 +467,13 @@ Suggested module boundaries for implementation:
 
 These file names are implementation guidance, not a public API guarantee, but they reflect the intended decomposition of the MVP.
 
-## 15. Definition of Done for This Architecture Contract
+## 14. Definition of Done for This Architecture Contract
 
 The architecture is sufficient for MVP implementation when it clearly answers all of the following:
 
 - What runtime components exist and what each owns.
 - What states the loop can be in and why transitions occur.
 - How a round progresses from planning through evaluation.
-- How evaluator modes plug into the same contract.
 - Where artifacts live and what each artifact means.
 - What happens on budget breach, evaluator failure, crash recovery, and stop/pause commands.
 

@@ -72,6 +72,7 @@ function normalizeLoopState(raw: Partial<LoopStateData> | null | undefined): Loo
     ...fallback,
     ...raw,
     previous_tool_result: raw.previous_tool_result ?? null,
+    previous_evaluation_dimensions: raw.previous_evaluation_dimensions,
     current_budget: raw.current_budget ?? null
   };
 }

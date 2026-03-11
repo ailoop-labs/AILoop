@@ -37,7 +37,7 @@ Design principles:
 - Goal-based iterative loop runner engine.
 - Round scheduler with default cooldown intervals.
 - Task planning and execution via LLM agents equipped with tools.
-- Pluggable Evaluators (Verifiers) for diverse success criteria (e.g., shell scripts, LLM-as-a-judge, API metrics).
+- Intelligent Evaluator (Verifier) that assesses success criteria using LLM-as-a-judge with multi-dimensional scoring.
 - Multi-dimensional Resource Budgets (Cost, Time, Actions).
 - Web console for status, controls, real-time feedback, and run history.
 - File-based state persistence and run artifacts.

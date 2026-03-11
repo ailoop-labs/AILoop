@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { AppConfig, CodexSandboxMode } from "./env";
 import { DEFAULT_LLM_EVALUATOR_DIMENSIONS } from "./env";
-import type { BudgetLimits, EvaluationDimension, EvaluatorType } from "../types/contracts";
+import type { BudgetLimits, EvaluationDimension } from "../types/contracts";
 import { readJsonFile, writeJsonFile } from "../utils/fs";
 
 const RUNTIME_CONFIG_FILENAME = "runtime-config.json";
@@ -13,9 +13,6 @@ export interface RuntimeLoopConfig {
   exitOnError: boolean;
   evaluatorReworkMaxAttempts: number;
   budget: BudgetLimits;
-  evaluatorType: EvaluatorType;
-  evaluatorCmd: string;
-  webhookEvaluatorUrl: string;
   codex: {
     bin: string;
     model: string;
@@ -81,13 +78,6 @@ function asString(value: unknown, fallback: string): string {
   return value.trim();
 }
 
-function asEvaluatorType(value: unknown, fallback: EvaluatorType): EvaluatorType {
-  if (value === "shell" || value === "llm" || value === "webhook") {
-    return value;
-  }
-  return fallback;
-}
-
 function asSandbox(value: unknown, fallback: CodexSandboxMode): CodexSandboxMode {
   if (value === "read-only" || value === "workspace-write" || value === "danger-full-access") {
     return value;
@@ -123,9 +113,6 @@ export function extractRuntimeLoopConfig(config: AppConfig): RuntimeLoopConfig {
       timeMinutes: config.budget.timeMinutes,
       actions: config.budget.actions
     },
-    evaluatorType: config.evaluatorType,
-    evaluatorCmd: config.evaluatorCmd,
-    webhookEvaluatorUrl: config.webhookEvaluatorUrl,
     codex: {
       bin: config.codex.bin,
       model: config.codex.model,
@@ -160,9 +147,6 @@ function normalizeRuntimeLoopConfig(candidate: unknown, fallback: RuntimeLoopCon
       timeMinutes: asNumber(budget.timeMinutes, fallback.budget.timeMinutes, 1, 1_440),
       actions: asInteger(budget.actions, fallback.budget.actions, 1, 1_000_000)
     },
-    evaluatorType: asEvaluatorType(root.evaluatorType, fallback.evaluatorType),
-    evaluatorCmd: asString(root.evaluatorCmd, fallback.evaluatorCmd),
-    webhookEvaluatorUrl: asString(root.webhookEvaluatorUrl, fallback.webhookEvaluatorUrl),
     codex: {
       bin: asString(codex.bin, fallback.codex.bin),
       model: asString(codex.model, fallback.codex.model),
@@ -232,9 +216,6 @@ export function applyRuntimeLoopConfig(baseConfig: AppConfig, runtime: RuntimeLo
     budget: {
       ...runtime.budget
     },
-    evaluatorType: runtime.evaluatorType,
-    evaluatorCmd: runtime.evaluatorCmd,
-    webhookEvaluatorUrl: runtime.webhookEvaluatorUrl,
     codex: {
       ...baseConfig.codex,
       bin: runtime.codex.bin,
@@ -259,9 +240,6 @@ export function runtimeLoopConfigToEnv(runtime: RuntimeLoopConfig): Record<strin
     AILOOP_BUDGET_USD_PER_ROUND: String(runtime.budget.usdPerRound),
     AILOOP_BUDGET_TIME_MINUTES: String(runtime.budget.timeMinutes),
     AILOOP_BUDGET_ACTIONS: String(runtime.budget.actions),
-    AILOOP_EVALUATOR_TYPE: runtime.evaluatorType,
-    AILOOP_EVALUATOR_CMD: runtime.evaluatorCmd,
-    AILOOP_WEBHOOK_EVALUATOR_URL: runtime.webhookEvaluatorUrl,
     AILOOP_CODEX_BIN: runtime.codex.bin,
     AILOOP_CODEX_MODEL: runtime.codex.model,
     AILOOP_CODEX_PROFILE: runtime.codex.profile,
