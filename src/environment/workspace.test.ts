@@ -131,7 +131,7 @@ describe("WorkspaceManager.buildStateChange", () => {
     await fs.rm(repoDir, { recursive: true, force: true });
   });
 
-  test("skips directories in extraTargetFiles to avoid EISDIR", async () => {
+  test("expands directory targets into concrete workspace files", async () => {
     const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-workspace-dir-test-"));
     const homeDir = path.join(repoDir, ".ailoop");
     const paths = createLoopPaths(homeDir);
@@ -140,14 +140,56 @@ describe("WorkspaceManager.buildStateChange", () => {
     await fs.writeFile(paths.taskPath, "# task\n", "utf8");
 
     const srcDir = path.join(repoDir, "src");
-    await fs.mkdir(srcDir, { recursive: true });
+    const nestedDir = path.join(srcDir, "nested");
+    await fs.mkdir(nestedDir, { recursive: true });
+    const entryPath = path.join(srcDir, "index.ts");
+    const nestedPath = path.join(nestedDir, "util.ts");
+    await fs.writeFile(entryPath, "export const entry = true;\n", "utf8");
+    await fs.writeFile(nestedPath, "export const util = true;\n", "utf8");
 
     const manager = new WorkspaceManager(paths, repoDir);
-    // This should not throw EISDIR
     const snapshot = await manager.createSnapshot([srcDir]);
 
-    expect(snapshot.files.find(f => f.path === srcDir)).toBeUndefined();
+    expect(snapshot.files.find((file) => file.path === srcDir)).toBeUndefined();
+    expect(snapshot.files.map((file) => file.path).sort()).toEqual(
+      [paths.taskPath, entryPath, nestedPath].sort()
+    );
 
     await fs.rm(repoDir, { recursive: true, force: true });
+  });
+
+  test("ignores nested directory read errors while snapshotting directory targets", async () => {
+    const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-workspace-dir-error-test-"));
+    const homeDir = path.join(repoDir, ".ailoop");
+    const paths = createLoopPaths(homeDir);
+    await fs.mkdir(paths.homeDir, { recursive: true });
+    await fs.mkdir(paths.runsDir, { recursive: true });
+    await fs.writeFile(paths.taskPath, "# task\n", "utf8");
+
+    const srcDir = path.join(repoDir, "src");
+    const okDir = path.join(srcDir, "ok");
+    const brokenDir = path.join(srcDir, "broken");
+    await fs.mkdir(okDir, { recursive: true });
+    await fs.mkdir(brokenDir, { recursive: true });
+    const okPath = path.join(okDir, "index.ts");
+    await fs.writeFile(okPath, "export const ok = true;\n", "utf8");
+
+    const originalReaddir = fs.readdir;
+    fs.readdir = (async (targetPath, options) => {
+      if (String(targetPath) === brokenDir) {
+        throw new Error("simulated readdir failure");
+      }
+      return originalReaddir(targetPath, options as never);
+    }) as typeof fs.readdir;
+
+    try {
+      const manager = new WorkspaceManager(paths, repoDir);
+      const snapshot = await manager.createSnapshot([srcDir]);
+
+      expect(snapshot.files.map((file) => file.path).sort()).toEqual([paths.taskPath, okPath].sort());
+    } finally {
+      fs.readdir = originalReaddir;
+      await fs.rm(repoDir, { recursive: true, force: true });
+    }
   });
 });

@@ -83,6 +83,39 @@ function uniquePaths(paths: string[]): string[] {
   return Array.from(new Set(paths));
 }
 
+async function collectDirectoryFiles(rootDir: string, workspaceRoot: string): Promise<string[]> {
+  const files: string[] = [];
+  const pending = [rootDir];
+
+  while (pending.length > 0) {
+    const currentDir = pending.pop();
+    if (!currentDir) {
+      continue;
+    }
+
+    const entries = await fs.readdir(currentDir, { withFileTypes: true }).catch(() => null);
+    if (!entries) {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const entryPath = path.join(currentDir, entry.name);
+      if (!isPathInside(workspaceRoot, entryPath) || entry.isSymbolicLink()) {
+        continue;
+      }
+      if (entry.isDirectory()) {
+        pending.push(entryPath);
+        continue;
+      }
+      if (entry.isFile()) {
+        files.push(entryPath);
+      }
+    }
+  }
+
+  return files;
+}
+
 export class WorkspaceManager {
   constructor(
     private readonly paths: LoopPaths,
@@ -151,9 +184,27 @@ export class WorkspaceManager {
         .map((filePath) => (path.isAbsolute(filePath) ? filePath : path.resolve(this.workspaceRoot, filePath)))
         .filter((filePath) => isPathInside(this.workspaceRoot, filePath))
     );
+    const snapshotTargets = uniquePaths(
+      (
+        await Promise.all(
+          normalizedTargets.map(async (targetPath) => {
+            if (!(await fileExists(targetPath))) {
+              return [targetPath];
+            }
+
+            const stat = await fs.lstat(targetPath);
+            if (stat.isDirectory()) {
+              return collectDirectoryFiles(targetPath, this.workspaceRoot);
+            }
+
+            return [targetPath];
+          })
+        )
+      ).flat()
+    );
     const files: FileSnapshot[] = [];
 
-    for (const filePath of normalizedTargets) {
+    for (const filePath of snapshotTargets) {
       const existed = await fileExists(filePath);
       if (existed) {
         const stat = await fs.lstat(filePath);
