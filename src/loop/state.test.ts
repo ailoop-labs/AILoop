@@ -189,7 +189,8 @@ describe("loop state persistence", () => {
       pid: 8765,
       last_error: "canonical state"
     });
-    expect(await fs.stat(paths.statePath)).toBeDefined();
+    // Both legacy and transition files should be removed once migrated to DB
+    await expect(fs.stat(paths.statePath)).rejects.toThrow();
     await expect(fs.access(paths.legacyStatePath)).rejects.toThrow();
 
     await fs.rm(homeDir, { recursive: true, force: true });
@@ -219,7 +220,15 @@ describe("loop state persistence", () => {
 
     await ensureLoopHome(paths);
 
-    expect(await fs.readFile(paths.legacyStatePath, "utf8")).toContain("\"round\": 5");
+    expect(await readLoopState(paths)).toMatchObject({
+      state: "paused",
+      round: 5,
+      pid: 5555,
+      last_error: "legacy state"
+    });
+    // Migration should have happened and files unlinked
+    await expect(fs.access(paths.legacyStatePath)).rejects.toThrow();
+    await expect(fs.access(paths.statePath)).rejects.toThrow();
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });

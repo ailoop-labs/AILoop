@@ -161,33 +161,26 @@ export async function listRunRecords(runsDir: string, limit = 20): Promise<RunRe
 
   const grouped = new Map<string, Partial<RunRecord>>();
   for (const entry of entries) {
-    const [timestamp, , kind] = entry.split(".");
-    if (!timestamp || !kind) {
-      continue;
-    }
+    const parts = entry.split(".");
+    const timestamp = parts[0];
+    if (!timestamp || parts.length < 3) continue;
 
     const record = grouped.get(timestamp) ?? { timestamp };
     const fullPath = path.join(runsDir, entry);
 
-    if (entry.endsWith(".round.summary.md")) {
-      record.summaryPath = fullPath;
-    } else if (entry.endsWith(".round.metrics.json")) {
-      record.metricsPath = fullPath;
-    } else if (entry.endsWith(".round.log")) {
-      record.logPath = fullPath;
-    } else if (entry.endsWith(".round.state_change.txt")) {
-      record.stateChangePath = fullPath;
-    } else if (entry.endsWith(".round.evaluation.json")) {
-      record.evaluationPath = fullPath;
-    }
+    if (entry.endsWith(".round.summary.md")) record.summaryPath = fullPath;
+    else if (entry.endsWith(".round.metrics.json")) record.metricsPath = fullPath;
+    else if (entry.endsWith(".round.log")) record.logPath = fullPath;
+    else if (entry.endsWith(".round.state_change.txt")) record.stateChangePath = fullPath;
+    else if (entry.endsWith(".round.evaluation.json")) record.evaluationPath = fullPath;
 
     grouped.set(timestamp, record);
   }
 
   return Array.from(grouped.values())
-    .filter((item): item is RunRecord => {
-      return Boolean(item.timestamp && item.summaryPath && item.metricsPath && item.logPath && item.stateChangePath);
-    })
+    .filter((item): item is RunRecord => 
+      Boolean(item.timestamp && item.summaryPath && item.metricsPath && item.logPath && item.stateChangePath)
+    )
     .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
     .slice(0, limit);
 }

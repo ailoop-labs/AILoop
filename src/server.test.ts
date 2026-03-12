@@ -146,25 +146,24 @@ async function seedLoopEntrypoint(workspaceRoot: string) {
   await fs.writeFile(
     path.join(scriptsDir, "ailoop.ts"),
     [
-      'import fs from "node:fs/promises";',
+      'import { Database } from "bun:sqlite";',
       'import path from "node:path";',
       "",
       'const homeDir = path.join(process.cwd(), ".ailoop");',
-      'const statePath = path.join(homeDir, "state.json");',
+      'const dbPath = path.join(homeDir, "ailoop.db");',
       "await Bun.sleep(150);",
-      'const current = JSON.parse(await fs.readFile(statePath, "utf8"));',
+      'const db = new Database(dbPath, { create: true });',
+      'const current = db.query("SELECT * FROM system_state WHERE id = 1").get();',
       "const updatedAt = new Date().toISOString();",
-      "await fs.writeFile(",
-      "  statePath,",
-      "  `${JSON.stringify({",
-      "    ...current,",
-      '    state: "running",',
-      "    pid: process.pid,",
-      "    last_error: undefined,",
-      "    updated_at: updatedAt",
-      "  }, null, 2)}\\n`,",
-      '  "utf8"',
-      ");",
+      'db.run(`',
+      '  UPDATE system_state SET ',
+      '    state = "running",',
+      '    pid = ?,',
+      '    updated_at = ?,',
+      '    last_error = NULL',
+      '  WHERE id = 1',
+      '`, [process.pid, updatedAt]);',
+      'db.close();',
       "await Bun.sleep(5_000);",
       ""
     ].join("\n"),
@@ -269,7 +268,8 @@ describe("console server API contract", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       ok: true,
-      service: "ailoop-console"
+      service: "ailoop-console",
+      db: "connected"
     });
   });
 
@@ -326,9 +326,7 @@ describe("console server API contract", () => {
         artifacts: {
           state_change_path: "state-change.txt",
           log_path: "round.log"
-        },
-        error: undefined,
-        next_state_hint: "continue"
+        }
       },
       current_budget: {
         limits: {
@@ -361,9 +359,7 @@ describe("console server API contract", () => {
         artifacts: {
           state_change_path: "state-change.txt",
           log_path: "round.log"
-        },
-        error: undefined,
-        next_state_hint: "continue"
+        }
       },
       current_budget: {
         limits: {
