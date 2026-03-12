@@ -64,7 +64,11 @@ function readDotEnvFile(cwd: string): Record<string, string> {
       continue;
     }
 
-    const key = trimmed.slice(0, separatorIndex).trim();
+    let key = trimmed.slice(0, separatorIndex).trim();
+    if (key.startsWith("export ")) {
+      key = key.slice(7).trim();
+    }
+
     if (!key) {
       continue;
     }
@@ -74,6 +78,11 @@ function readDotEnvFile(cwd: string): Record<string, string> {
       .trim()
       .replace(/^(['"])(.*)\1$/, "$2");
     parsed[key] = value;
+
+    // Populate process.env if not already set, allowing .env to provide defaults for child processes
+    if (process.env[key] === undefined) {
+      process.env[key] = value;
+    }
   }
 
   return parsed;
