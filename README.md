@@ -3,9 +3,6 @@
 AILoop is an open-source, goal-driven autonomous agent framework designed to execute generalized task loops for engineering, operations, and knowledge work.
 It repeatedly plans, executes, evaluates, and summarizes tasks until a target outcome is reached.
 
-This repository currently contains only this README as a source-of-truth specification.
-Use this document to regenerate the full codebase with AI.
-
 ## 1. Product Intent
 
 AILoop solves this problem:
