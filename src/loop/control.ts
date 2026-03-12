@@ -175,6 +175,23 @@ export async function prepareStartFlags(paths: LoopPaths): Promise<void> {
 export async function stopLoop(config: AppConfig): Promise<void> {
   const paths = await ensureLoopHomeAndGetPaths(config);
   await setFlag(paths.stopFlagPath);
+
+  // If no process is actually running, we should transition the state to idle immediately
+  // otherwise it stays stuck in 'paused' or 'running' forever in the DB.
+  const state = await readLoopState(paths);
+  const pid = state.pid ?? (await readPid(paths));
+  const pidAlive = pid ? isPidAlive(pid) : false;
+
+  if (!pidAlive) {
+    await writeLoopState(paths, {
+      ...state,
+      state: "idle",
+      pid: null,
+      current_budget: null
+    });
+    await clearFlag(paths.stopFlagPath);
+    await clearFlag(paths.pauseFlagPath);
+  }
 }
 
 export async function pauseLoop(config: AppConfig): Promise<void> {
@@ -243,14 +260,13 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStateData & 
   const pid = state.pid ?? (await readPid(paths));
   const pidAlive = pid ? isPidAlive(pid) : false;
 
-  if (!pidAlive && state.state !== "running") {
-    if (pid) {
-      await clearPid(paths);
-    }
+  // Stale running/paused state with no live PID
+  if (!pidAlive && (state.state === "running" || state.state === "paused" || state.state === "cooldown" || state.state === "starting")) {
     const normalized = {
       ...state,
+      state: "idle" as const,
       pid: null,
-      current_budget: state.state === "idle" ? null : state.current_budget
+      current_budget: null
     };
     await writeLoopState(paths, normalized);
     return {
@@ -259,16 +275,17 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStateData & 
     };
   }
 
-  if (state.state === "idle" && state.current_budget) {
+  // Ensure idle state doesn't have stale budget/PID
+  if (state.state === "idle" && (state.current_budget || state.pid)) {
     const normalized = {
       ...state,
-      pid: pid ?? null,
+      pid: null,
       current_budget: null
     };
     await writeLoopState(paths, normalized);
     return {
       ...normalized,
-      pid_alive: pidAlive
+      pid_alive: false
     };
   }
 
