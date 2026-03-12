@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import type { CodexConfig, CodexSandboxMode } from "../config/env";
+import { loadEnvironment, type CodexConfig, type CodexSandboxMode } from "../config/env";
 
 export type JsonSchema = Record<string, unknown>;
 
@@ -391,15 +391,17 @@ async function syncCodexConfigFiles(sourceCodexHome: string, targetCodexHome: st
 }
 
 async function buildProcessEnv(config: CodexConfig, cwd: string, baseEnv: NodeJS.ProcessEnv = process.env): Promise<NodeJS.ProcessEnv> {
+  const loadedEnv = loadEnvironment(cwd);
+
   if (config.bin.endsWith("gemini")) {
-    return { ...baseEnv };
+    return { ...loadedEnv };
   }
 
-  const isolatedCodexHome = resolveIsolatedCodexHome(cwd, baseEnv);
-  await syncCodexConfigFiles(resolveSourceCodexHome(baseEnv), isolatedCodexHome);
+  const isolatedCodexHome = resolveIsolatedCodexHome(cwd, loadedEnv);
+  await syncCodexConfigFiles(resolveSourceCodexHome(loadedEnv), isolatedCodexHome);
 
-  const env = {
-    ...baseEnv,
+  const env: NodeJS.ProcessEnv = {
+    ...loadedEnv,
     CODEX_HOME: isolatedCodexHome
   };
 
@@ -412,6 +414,7 @@ async function buildProcessEnv(config: CodexConfig, cwd: string, baseEnv: NodeJS
 
   return env;
 }
+
 
 async function runProcess(
   cmd: string,
@@ -629,12 +632,19 @@ export class CodexClient {
         if (shouldRetryByInterfacePolicy) {
           const nextRetry = interfaceRetryCount + 1;
           const reason = summarizeForRetry(errorMessage, runResult.stderr);
+          
+          // Exponential backoff: delay * 2^retryCount, capped at 5 mins
+          const backoffDelay = Math.min(
+            INTERFACE_ERROR_RETRY_DELAY_MS * Math.pow(2, interfaceRetryCount),
+            300_000 
+          );
+
           emitChunkSafely(
             attemptOptions.onStderrChunk,
-            `AILoop interface retry ${nextRetry}/${INTERFACE_ERROR_MAX_RETRIES}: waiting ${INTERFACE_ERROR_RETRY_DELAY_MS}ms before retry. reason=${reason}\n`
+            `AILoop interface retry ${nextRetry}/${INTERFACE_ERROR_MAX_RETRIES}: waiting ${backoffDelay}ms before retry. reason=${reason}\n`
           );
           interfaceRetryCount += 1;
-          await this.sleep(INTERFACE_ERROR_RETRY_DELAY_MS);
+          await this.sleep(backoffDelay);
           continue;
         }
         return failure;

@@ -44,6 +44,23 @@ interface LoadConfigOptions {
   cwd?: string;
 }
 
+/**
+ * Loads environment variables from .env and process.env into a clean object.
+ * This ensures child processes receive a consistent environment.
+ */
+export function loadEnvironment(cwd: string = process.cwd()): NodeJS.ProcessEnv {
+  const fileEnv = readDotEnvFile(cwd);
+  const result: NodeJS.ProcessEnv = { ...process.env };
+
+  for (const [key, value] of Object.entries(fileEnv)) {
+    if (result[key] === undefined) {
+      result[key] = value;
+    }
+  }
+
+  return result;
+}
+
 function readDotEnvFile(cwd: string): Record<string, string> {
   const envPath = path.join(cwd, ".env");
   if (!fs.existsSync(envPath)) {
@@ -85,11 +102,6 @@ function readDotEnvFile(cwd: string): Record<string, string> {
 
     value = value.replace(/^(['"])(.*)\1$/, "$2");
     parsed[key] = value;
-
-    // Populate process.env if not already set, allowing .env to provide defaults for child processes
-    if (process.env[key] === undefined) {
-      process.env[key] = value;
-    }
   }
 
   return parsed;
