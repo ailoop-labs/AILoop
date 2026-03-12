@@ -56,11 +56,6 @@ Design principles:
 
 License: MIT
 
-Before first public release:
-- Remove all secrets and private endpoints.
-- Add `CONTRIBUTING.md` and issue templates.
-- Add a short roadmap and known limitations.
-
 ---
-
+For the people want to contribute, please refer to [CONTRIBUTING.md](./CONTRIBUTING.md).
 For technical architecture, CLI details, and system components, please refer to [ARCHITECTURE.md](./ARCHITECTURE.md).
