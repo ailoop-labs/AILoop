@@ -164,7 +164,7 @@ export class DatabaseManager {
 
     upsertRound.run(
       state.round,
-      state.previous_tool_result?.artifacts.log_path ? path.basename(state.previous_tool_result.artifacts.log_path).split('.')[0] : null,
+      state.updated_at.replace(/[:.]/g, "-"),
       state.state,
       state.last_error,
       state.consecutive_evaluator_failures,

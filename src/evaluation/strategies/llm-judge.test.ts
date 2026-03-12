@@ -135,6 +135,36 @@ describe("aggregateDimensionAssessments", () => {
     expect(result.recommended_next_action).toContain("pause");
   });
 
+  test("surfaces Codex authentication failures as evaluator infrastructure blockers", () => {
+    const result = aggregateDimensionAssessments(
+      [
+        makeAssessment({
+          dimension: "goal_alignment",
+          decision: "unknown",
+          score: 0,
+          confidence: 0,
+          justification: "Dimension evaluator call failed.",
+          evidence: [
+            "Codex exited with code 1",
+            "Error: 401 Unauthorized - incorrect API key provided while calling the evaluator model."
+          ],
+          recommended_next_action: "pause and inspect evaluator failure"
+        }),
+        makeAssessment({ dimension: "causal_validity", score: 81 }),
+        makeAssessment({ dimension: "constraint_compliance", score: 90 })
+      ],
+      75
+    );
+
+    expect(result.decision).toBe("fail");
+    expect(result.justification).toContain("Evaluator infrastructure failure");
+    expect(result.justification).toContain("Codex authentication failed");
+    expect(result.root_cause).toBe("evaluator_infrastructure:codex_authentication");
+    expect(result.evidence.some((line) => line.includes("401 Unauthorized"))).toBe(true);
+    expect(result.recommended_next_action).toContain(".ailoop/codex-home/auth.json");
+    expect(result.recommended_next_action).not.toContain("gather evidence");
+  });
+
   test("surfaces concrete evidence and follow-up actions when a key dimension fails", () => {
     const result = aggregateDimensionAssessments(
       [

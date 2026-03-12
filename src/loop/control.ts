@@ -118,9 +118,16 @@ export async function startBackgroundLoop(config: AppConfig): Promise<{ started:
     return await existingOperation;
   }
 
-  const operation = (async () => {
+  let resolveOperation!: (value: { started: boolean; message: string }) => void;
+  let rejectOperation!: (reason?: unknown) => void;
+  const operation = new Promise<{ started: boolean; message: string }>((resolve, reject) => {
+    resolveOperation = resolve;
+    rejectOperation = reject;
+  });
+  startOperations.set(config.homeDir, operation);
+
+  try {
     const paths = await ensureLoopHomeAndGetPaths(config);
-    await ensureProjectRoles(config, { workspaceRoot: process.cwd(), regen: false });
 
     const currentState = await readLoopState(paths);
     const recordedPid = await readPid(paths);
@@ -128,7 +135,9 @@ export async function startBackgroundLoop(config: AppConfig): Promise<{ started:
       (pid): pid is number => typeof pid === "number" && isPidAlive(pid)
     );
     if (currentState.state !== "idle" && livePid) {
-      return { started: false, message: `Loop already running with pid ${livePid}` };
+      const result = { started: false, message: `Loop already running with pid ${livePid}` };
+      resolveOperation(result);
+      return result;
     }
 
     await prepareStartFlags(paths);
@@ -144,6 +153,7 @@ export async function startBackgroundLoop(config: AppConfig): Promise<{ started:
       }
     });
 
+    const result = { started: true, message: `Loop started with pid ${child.pid}` };
     await writeLoopState(paths, {
       ...currentState,
       state: "starting",
@@ -152,14 +162,11 @@ export async function startBackgroundLoop(config: AppConfig): Promise<{ started:
       current_budget: null
     });
     child.unref();
-
-    return { started: true, message: `Loop started with pid ${child.pid}` };
-  })();
-
-  startOperations.set(config.homeDir, operation);
-
-  try {
-    return await operation;
+    resolveOperation(result);
+    return result;
+  } catch (error) {
+    rejectOperation(error);
+    throw error;
   } finally {
     if (startOperations.get(config.homeDir) === operation) {
       startOperations.delete(config.homeDir);
@@ -189,7 +196,6 @@ export async function stopLoop(config: AppConfig): Promise<void> {
       pid: null,
       current_budget: null
     });
-    await clearFlag(paths.stopFlagPath);
     await clearFlag(paths.pauseFlagPath);
   }
 }
@@ -261,7 +267,7 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStateData & 
   const pidAlive = pid ? isPidAlive(pid) : false;
 
   // Stale running/paused state with no live PID
-  if (!pidAlive && (state.state === "running" || state.state === "paused" || state.state === "cooldown" || state.state === "starting")) {
+  if (!pidAlive && (state.state === "running" || state.state === "cooldown" || state.state === "starting")) {
     const normalized = {
       ...state,
       state: "idle" as const,
@@ -321,53 +327,42 @@ export async function listRuns(config: AppConfig, limit = 20): Promise<
   }>
 > {
   const paths = await ensureLoopHomeAndGetPaths(config);
+  const records = await listRunRecords(paths.runsDir, limit);
   const db = new DatabaseManager({ dbPath: paths.dbPath });
   const dbRounds = await db.getLatestRounds(limit);
   db.close();
+  const roundsByTimestamp = new Map(
+    (dbRounds as Array<{ run_timestamp: string; round_id: number }>).map((record) => [record.run_timestamp, record.round_id])
+  );
 
-  const output: Array<{
-    timestamp: string;
-    round: number;
-    summary: string;
-    metrics: Record<string, unknown> | null;
-    evaluation: EvaluationResult | null;
-  }> = [];
+  return await Promise.all(
+    records.map(async (record) => {
+      const [summary, metrics, evaluation] = await Promise.all([
+        readTextFile(record.summaryPath, ""),
+        readJsonFile<Record<string, unknown> | null>(record.metricsPath, null),
+        record.evaluationPath ? readJsonFile<EvaluationResult | null>(record.evaluationPath, null) : Promise.resolve(null)
+      ]);
+      const metricsRound = typeof metrics?.round === "number" ? metrics.round : null;
+      const round = roundsByTimestamp.get(record.timestamp) ?? metricsRound ?? 0;
 
-  for (const record of dbRounds as any[]) {
-    const timestamp = record.run_timestamp;
-    const round = record.round_id;
-    const artifactPaths = buildRoundArtifactPaths(paths.runsDir, timestamp);
-    
-    const summary = await readTextFile(artifactPaths.summaryPath, `Round ${round} Summary`);
-    const metrics = await readJsonFile<Record<string, unknown> | null>(artifactPaths.metricsPath, null);
-    
-    output.push({
-      timestamp,
-      round,
-      summary,
-      metrics,
-      evaluation: {
-        decision: record.decision,
-        justification: record.justification,
-        root_cause: record.root_cause,
-        evidence: [],
-        dimensions: record.dimensions_json ? JSON.parse(record.dimensions_json) : undefined
-      }
-    });
-  }
-
-  return output;
+      return {
+        timestamp: record.timestamp,
+        round,
+        summary,
+        metrics,
+        evaluation
+      };
+    })
+  );
 }
 
 export interface RunArtifactBundle {
   timestamp: string;
-  round: number;
   summary: string;
   metrics: Record<string, unknown>;
   log: string;
   state_change: string;
-  evaluation: EvaluationResult;
-  governance: any;
+  evaluation: EvaluationResult | null;
 }
 
 const RUN_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/;
@@ -383,21 +378,20 @@ export async function getRunArtifacts(config: AppConfig, timestamp: string): Pro
   }
 
   const paths = await ensureLoopHomeAndGetPaths(config);
-  const db = new DatabaseManager({ dbPath: paths.dbPath });
-  const dbRounds = await db.getLatestRounds(100); // Find the round for this timestamp
-  const targetRound = (dbRounds as any[]).find(r => r.run_timestamp === normalizedTimestamp);
-  
-  if (!targetRound) {
-    db.close();
+  const artifactPaths = buildRoundArtifactPaths(paths.runsDir, normalizedTimestamp);
+  const requiredArtifactsExist = await Promise.all([
+    fileExists(artifactPaths.summaryPath),
+    fileExists(artifactPaths.metricsPath),
+    fileExists(artifactPaths.logPath),
+    fileExists(artifactPaths.stateChangePath),
+    fileExists(artifactPaths.evaluationPath)
+  ]);
+
+  if (requiredArtifactsExist.some((exists) => !exists)) {
     return null;
   }
 
-  const governance = await db.getGovernanceDetails(targetRound.round_id);
-  db.close();
-
-  const artifactPaths = buildRoundArtifactPaths(paths.runsDir, normalizedTimestamp);
-  
-  const [summary, metrics, log, stateChange, evaluationJson] = await Promise.all([
+  const [summary, metrics, log, stateChange, evaluation] = await Promise.all([
     readTextFile(artifactPaths.summaryPath, ""),
     readJsonFile<Record<string, unknown> | null>(artifactPaths.metricsPath, null),
     readTextFile(artifactPaths.logPath, ""),
@@ -414,19 +408,11 @@ export async function getRunArtifacts(config: AppConfig, timestamp: string): Pro
 
   return {
     timestamp: normalizedTimestamp,
-    round: targetRound.round_id,
     summary: redact(summary),
     metrics,
     log: redact(log),
     state_change: redact(stateChange),
-    evaluation: evaluationJson ? redactJsonStrings(evaluationJson, redactor) : {
-      decision: targetRound.decision,
-      justification: targetRound.justification,
-      root_cause: targetRound.root_cause,
-      evidence: [],
-      dimensions: targetRound.dimensions_json ? JSON.parse(targetRound.dimensions_json) : undefined
-    },
-    governance
+    evaluation: evaluation ? redactJsonStrings(evaluation, redactor) : null
   };
 }
 

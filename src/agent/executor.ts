@@ -244,8 +244,8 @@ export class ExecutorAgent {
           status: "failure",
           summary: "Executor could not complete the task because Codex execution failed.",
           artifacts: {
-            state_change_path: "",
-            log_path: ""
+            state_change_path: options.paths.runsDir,
+            log_path: options.paths.runsDir
           },
           error: {
             type: "CodexExecError",
@@ -279,8 +279,8 @@ export class ExecutorAgent {
         status: safeStatus,
         summary: String(codexResult.data.summary || "No summary provided by Codex executor."),
         artifacts: {
-          state_change_path: "",
-          log_path: ""
+          state_change_path: options.paths.runsDir, // Will be replaced by finalizeRoundArtifacts with the concrete file path
+          log_path: options.paths.runsDir // Will be replaced by finalizeRoundArtifacts with the concrete file path
         },
         error: safeError ?? undefined,
         next_state_hint: codexResult.data.next_state_hint ?? (safeStatus === "success" ? "continue" : "pause")

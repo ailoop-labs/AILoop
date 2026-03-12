@@ -243,8 +243,8 @@ export class DesignerAgent {
           status: "failure",
           summary: "Designer could not complete the task because Codex execution failed.",
           artifacts: {
-            state_change_path: "",
-            log_path: ""
+            state_change_path: options.paths.runsDir,
+            log_path: options.paths.runsDir
           },
           error: {
             type: "CodexExecError",
@@ -278,8 +278,8 @@ export class DesignerAgent {
         status: safeStatus,
         summary: String(codexResult.data.summary || "No summary provided by Codex designer."),
         artifacts: {
-          state_change_path: "",
-          log_path: ""
+          state_change_path: options.paths.runsDir,
+          log_path: options.paths.runsDir
         },
         error: safeError ?? undefined,
         next_state_hint: codexResult.data.next_state_hint ?? (safeStatus === "success" ? "continue" : "pause")

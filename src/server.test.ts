@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import type { AppConfig } from "./config/env";
 import { readRuntimeLoopConfig, saveRuntimeLoopConfig } from "./config/runtime";
@@ -252,6 +253,179 @@ async function writeRunArtifacts(
   }
   if (contents.stateChange !== undefined) {
     await fs.writeFile(path.join(runsDir, `${timestamp}.round.state_change.txt`), contents.stateChange, "utf8");
+  }
+}
+
+async function seedRoundHistory(
+  homeDir: string,
+  input: {
+    round: number;
+    timestamp: string;
+    state?: string;
+    decision?: string;
+    justification?: string;
+    rootCause?: string | null;
+    dimensions?: Record<string, unknown>[];
+  }
+) {
+  const db = new Database(path.join(homeDir, "ailoop.db"), { create: true });
+
+  try {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS rounds (
+        round_id INTEGER PRIMARY KEY,
+        run_timestamp TEXT,
+        state TEXT,
+        last_error TEXT,
+        consecutive_evaluator_failures INTEGER DEFAULT 0,
+        usd_used REAL DEFAULT 0,
+        actions_used INTEGER DEFAULT 0,
+        elapsed_ms INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.run(`
+      CREATE TABLE IF NOT EXISTS evaluations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        round_id INTEGER,
+        decision TEXT,
+        justification TEXT,
+        root_cause TEXT,
+        dimensions_json TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    db
+      .prepare(
+        `
+        INSERT INTO rounds (round_id, run_timestamp, state, usd_used, actions_used, elapsed_ms)
+        VALUES (?, ?, ?, 0, 0, 0)
+      `
+      )
+      .run(input.round, input.timestamp, input.state ?? "completed");
+
+    if (input.decision) {
+      db
+        .prepare(
+          `
+          INSERT INTO evaluations (round_id, decision, justification, root_cause, dimensions_json)
+          VALUES (?, ?, ?, ?, ?)
+        `
+        )
+        .run(
+          input.round,
+          input.decision,
+          input.justification ?? "",
+          input.rootCause ?? null,
+          input.dimensions ? JSON.stringify(input.dimensions) : null
+        );
+    }
+  } finally {
+    db.close();
+  }
+}
+
+async function seedGovernanceDetails(
+  homeDir: string,
+  input: {
+    round: number;
+    leader: {
+      rationale: string;
+      action: string;
+      diagnosisType: string;
+      instructions: string[];
+    };
+    ccb: {
+      proposedChange: string;
+      finalDecision: string;
+      experts: Array<{
+        expertRole: string;
+        vote: string;
+        rationale: string;
+        incapacityFlag?: boolean;
+      }>;
+    };
+  }
+) {
+  const db = new Database(path.join(homeDir, "ailoop.db"), { create: true });
+
+  try {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS leader_strategies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        round_id INTEGER,
+        rationale TEXT,
+        action TEXT,
+        instructions_json TEXT,
+        diagnosis_type TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.run(`
+      CREATE TABLE IF NOT EXISTS ccb_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        round_id INTEGER,
+        proposed_change TEXT,
+        final_decision TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.run(`
+      CREATE TABLE IF NOT EXISTS expert_opinions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER,
+        expert_role TEXT,
+        vote TEXT,
+        rationale TEXT,
+        incapacity_flag INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    db
+      .prepare(
+        `
+        INSERT INTO leader_strategies (round_id, rationale, action, instructions_json, diagnosis_type)
+        VALUES (?, ?, ?, ?, ?)
+      `
+      )
+      .run(
+        input.round,
+        input.leader.rationale,
+        input.leader.action,
+        JSON.stringify(input.leader.instructions),
+        input.leader.diagnosisType
+      );
+
+    const ccbResult = db
+      .prepare(
+        `
+        INSERT INTO ccb_sessions (round_id, proposed_change, final_decision)
+        VALUES (?, ?, ?)
+      `
+      )
+      .run(input.round, input.ccb.proposedChange, input.ccb.finalDecision);
+
+    const sessionId = Number(ccbResult.lastInsertRowid);
+    const insertExpertOpinion = db.prepare(
+      `
+      INSERT INTO expert_opinions (session_id, expert_role, vote, rationale, incapacity_flag)
+      VALUES (?, ?, ?, ?, ?)
+    `
+    );
+
+    for (const expert of input.ccb.experts) {
+      insertExpertOpinion.run(
+        sessionId,
+        expert.expertRole,
+        expert.vote,
+        expert.rationale,
+        expert.incapacityFlag ? 1 : 0
+      );
+    }
+  } finally {
+    db.close();
   }
 }
 
@@ -756,7 +930,7 @@ describe("console server API contract", () => {
 
   test("lists the most recent complete run history entries", async () => {
     const token = "test-token";
-    const { fetchHandler, paths } = await createFixture({
+    const { config, fetchHandler, paths } = await createFixture({
       consoleAdminToken: token
     });
 
@@ -773,7 +947,19 @@ describe("console server API contract", () => {
         decision: "pass",
         justification: "All checks satisfied.",
         evidence: ["bun test src/server.test.ts"],
-        aggregate_score: 96
+        aggregate_score: 96,
+        recommended_next_action: "Continue to the next round.",
+        dimensions: [
+          {
+            dimension: "goal_alignment",
+            decision: "pass",
+            score: 98,
+            confidence: 0.9,
+            justification: "The artifact retains structured evaluator output.",
+            evidence: ["artifact-backed payload"],
+            blocking_issues: []
+          }
+        ]
       },
       log: "latest log\n",
       stateChange: "latest diff\n"
@@ -782,6 +968,13 @@ describe("console server API contract", () => {
       summary: "Incomplete summary\n",
       log: "incomplete log\n"
     });
+    await seedRoundHistory(config.homeDir, {
+      round: 2,
+      timestamp: "2026-03-10T10-00-00-000Z",
+      decision: "pass",
+      justification: "DB summary should not replace artifact-backed evaluation fields.",
+      rootCause: "db_only_summary"
+    });
 
     const response = await fetchHandler(createAuthorizedRequest("http://console.test/api/runs?limit=1", token));
 
@@ -789,6 +982,7 @@ describe("console server API contract", () => {
     expect(await response.json()).toEqual([
       {
         timestamp: "2026-03-10T10-00-00-000Z",
+        round: 2,
         summary: "Latest summary\n",
         metrics: {
           round: 2,
@@ -798,8 +992,21 @@ describe("console server API contract", () => {
           decision: "pass",
           justification: "All checks satisfied.",
           evidence: ["bun test src/server.test.ts"],
-          aggregate_score: 96
-        }
+          aggregate_score: 96,
+          recommended_next_action: "Continue to the next round.",
+          dimensions: [
+            {
+              dimension: "goal_alignment",
+              decision: "pass",
+              score: 98,
+              confidence: 0.9,
+              justification: "The artifact retains structured evaluator output.",
+              evidence: ["artifact-backed payload"],
+              blocking_issues: []
+            }
+          ]
+        },
+        has_governance: false
       }
     ]);
   });
@@ -844,7 +1051,112 @@ describe("console server API contract", () => {
         aggregate_score: 96
       },
       log: "OPENAI_API_KEY=[REDACTED]\n",
-      state_change: "+SESSION_SECRET=[REDACTED]\n"
+      state_change: "+SESSION_SECRET=[REDACTED]\n",
+      governance: {
+        leader: null,
+        ccb: null
+      }
+    });
+  });
+
+  test("returns governance details alongside a selected run artifact bundle", async () => {
+    const token = "test-token";
+    const { config, fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    const timestamp = "2026-03-10T11-00-00-000Z";
+
+    await writeRunArtifacts(paths.runsDir, timestamp, {
+      summary: "Governed summary\n",
+      metrics: { round: 3, status: "success" },
+      evaluation: {
+        decision: "pass",
+        justification: "Governance trail preserved.",
+        evidence: ["bun test src/server.test.ts"],
+        aggregate_score: 97
+      },
+      log: "round log\n",
+      stateChange: "+state change\n"
+    });
+    await seedRoundHistory(config.homeDir, {
+      round: 3,
+      timestamp,
+      decision: "pass",
+      justification: "Governance trail persisted."
+    });
+    await seedGovernanceDetails(config.homeDir, {
+      round: 3,
+      leader: {
+        rationale: "Retry with a narrower API patch.",
+        action: "resume",
+        diagnosisType: "implementation_failure",
+        instructions: ["Return governance data with the artifact bundle."]
+      },
+      ccb: {
+        proposedChange: "None.",
+        finalDecision: "reject",
+        experts: [
+          {
+            expertRole: "senior_dev",
+            vote: "reject",
+            rationale: "README changes are unnecessary."
+          },
+          {
+            expertRole: "qa_lead",
+            vote: "reject",
+            rationale: "A targeted API fix is sufficient."
+          }
+        ]
+      }
+    });
+
+    const response = await fetchHandler(
+      createAuthorizedRequest(`http://console.test/api/runs/${timestamp}/artifacts`, token)
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      timestamp,
+      summary: "Governed summary\n",
+      metrics: {
+        round: 3,
+        status: "success"
+      },
+      evaluation: {
+        decision: "pass",
+        justification: "Governance trail preserved.",
+        evidence: ["bun test src/server.test.ts"],
+        aggregate_score: 97
+      },
+      log: "round log\n",
+      state_change: "+state change\n",
+      governance: {
+        leader: {
+          rationale: "Retry with a narrower API patch.",
+          action: "resume",
+          diagnosis_type: "implementation_failure",
+          instructions: ["Return governance data with the artifact bundle."]
+        },
+        ccb: {
+          proposed_change: "None.",
+          final_decision: "reject",
+          experts: [
+            {
+              expert_role: "senior_dev",
+              vote: "reject",
+              rationale: "README changes are unnecessary.",
+              incapacity_flag: false
+            },
+            {
+              expert_role: "qa_lead",
+              vote: "reject",
+              rationale: "A targeted API fix is sufficient.",
+              incapacity_flag: false
+            }
+          ]
+        }
+      }
     });
   });
 
@@ -886,7 +1198,11 @@ describe("console server API contract", () => {
         evidence: ["sessionSecret=[REDACTED]"]
       },
       log: "sessionSecret=[REDACTED]\n",
-      state_change: "+apiToken=[REDACTED]\n"
+      state_change: "+apiToken=[REDACTED]\n",
+      governance: {
+        leader: null,
+        ccb: null
+      }
     });
   });
 

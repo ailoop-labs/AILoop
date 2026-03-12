@@ -244,29 +244,22 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
     if (url.pathname === "/api/runs" && request.method === "GET") {
       const limitRaw = Number(url.searchParams.get("limit") ?? "20");
       const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, limitRaw)) : 20;
-      
-      const dbRuns = await db.getLatestRounds(limit);
-      if (dbRuns.length > 0) {
-        return json(dbRuns.map(r => ({
-          timestamp: r.run_timestamp,
-          round: r.round_id,
-          summary: `Round ${r.round_id}: ${r.state}`,
-          metrics: {
-            usd_used: r.usd_used,
-            actions_used: r.actions_used,
-            elapsed_ms: r.elapsed_ms
-          },
-          evaluation: {
-            decision: r.decision,
-            justification: r.justification,
-            root_cause: r.root_cause
-          },
-          // Hint: If round state is not 'idle', 'running', it might have governance
-          has_governance: true 
-        })));
-      }
-      
-      return json(await listRuns(config, limit));
+      const runs = await listRuns(config, limit);
+      const payload = await Promise.all(
+        runs.map(async (run) => {
+          const governance =
+            run.round > 0
+              ? await db.getGovernanceDetails(run.round)
+              : { leader: null, ccb: null };
+
+          return {
+            ...run,
+            has_governance: Boolean(governance.leader || governance.ccb)
+          };
+        })
+      );
+
+      return json(payload);
     }
 
     const runArtifactsMatch =
@@ -278,7 +271,16 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
         return json({ ok: false, error: "Run artifacts not found" }, 404);
       }
 
-      return json(artifacts);
+      const run = (await listRuns(config, Number.MAX_SAFE_INTEGER)).find((record) => record.timestamp === timestamp);
+      const governance =
+        run && run.round > 0
+          ? await db.getGovernanceDetails(run.round)
+          : { leader: null, ccb: null };
+
+      return json({
+        ...artifacts,
+        governance
+      });
     }
 
     if (url.pathname === "/api/roles" && request.method === "GET") {

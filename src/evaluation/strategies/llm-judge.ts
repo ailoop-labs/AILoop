@@ -257,6 +257,27 @@ const CONCRETE_RISK_PATTERNS: RegExp[] = [
   /production/i
 ];
 
+const CODEX_AUTH_FAILURE_PATTERNS: RegExp[] = [
+  /\b401\b/i,
+  /unauthorized/i,
+  /incorrect api key/i,
+  /invalid api key/i,
+  /authentication (?:failed|failure|error)/i,
+  /auth\.json/i,
+  /not logged in/i,
+  /login required/i
+];
+
+const CODEX_TOOLING_FAILURE_PATTERNS: RegExp[] = [
+  /spawn .*enoent/i,
+  /\benoent\b/i,
+  /command not found/i,
+  /exited with code 127/i,
+  /permission denied/i,
+  /\beacces\b/i,
+  /no such file or directory/i
+];
+
 function hasPattern(patterns: RegExp[], text: string): boolean {
   return patterns.some((pattern) => pattern.test(text));
 }
@@ -304,6 +325,55 @@ function softenScopeOnlyHardGateFailure(assessment: DimensionAssessment): Dimens
   };
 }
 
+function detectEvaluatorInfrastructureFailure(
+  assessments: DimensionAssessment[]
+):
+  | {
+      matchedAssessments: DimensionAssessment[];
+      justification: string;
+      rootCause: string;
+      recommendedNextAction: string;
+    }
+  | undefined {
+  const authFailures = assessments.filter((assessment) => {
+    if (assessment.decision !== "unknown") {
+      return false;
+    }
+
+    return hasPattern(CODEX_AUTH_FAILURE_PATTERNS, toAssessmentText(assessment));
+  });
+  if (authFailures.length > 0) {
+    const dimensions = authFailures.map((assessment) => assessment.dimension).join(", ");
+    return {
+      matchedAssessments: authFailures,
+      justification: `Evaluator infrastructure failure: Codex authentication failed while checking ${dimensions}.`,
+      rootCause: "evaluator_infrastructure:codex_authentication",
+      recommendedNextAction:
+        "pause and repair evaluator Codex authentication (.ailoop/codex-home/auth.json or configured API credentials) before retrying evaluation"
+    };
+  }
+
+  const toolingFailures = assessments.filter((assessment) => {
+    if (assessment.decision !== "unknown") {
+      return false;
+    }
+
+    return hasPattern(CODEX_TOOLING_FAILURE_PATTERNS, toAssessmentText(assessment));
+  });
+  if (toolingFailures.length > 0) {
+    const dimensions = toolingFailures.map((assessment) => assessment.dimension).join(", ");
+    return {
+      matchedAssessments: toolingFailures,
+      justification: `Evaluator infrastructure failure: Codex tooling was unavailable while checking ${dimensions}.`,
+      rootCause: "evaluator_infrastructure:codex_tooling",
+      recommendedNextAction:
+        "pause and repair evaluator Codex tooling (binary path, executable permissions, and sandbox environment) before retrying evaluation"
+    };
+  }
+
+  return undefined;
+}
+
 export function aggregateDimensionAssessments(
   assessments: DimensionAssessment[],
   minPassScore: number
@@ -341,6 +411,18 @@ export function aggregateDimensionAssessments(
       root_cause: `hard_gate_violation:${hardGateFailure.dimension}`,
       evidence: withDetailedEvidence([...evidence, hardGateReason], [hardGateFailure]),
       recommended_next_action: followUpActions,
+      aggregateScore: score
+    };
+  }
+
+  const infrastructureFailure = detectEvaluatorInfrastructureFailure(adjusted);
+  if (infrastructureFailure) {
+    return {
+      decision: "fail",
+      justification: infrastructureFailure.justification,
+      root_cause: infrastructureFailure.rootCause,
+      evidence: withDetailedEvidence(evidence, infrastructureFailure.matchedAssessments),
+      recommended_next_action: infrastructureFailure.recommendedNextAction,
       aggregateScore: score
     };
   }

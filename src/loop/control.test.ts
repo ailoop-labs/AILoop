@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import * as childProcess from "node:child_process";
+import { Database } from "bun:sqlite";
 import { describe, expect, mock, spyOn, test } from "bun:test";
 import { buildLoopPaths, defaultLoopState, hasFlag, readLoopState, setFlag, writeLoopState } from "./state";
 import {
@@ -176,6 +177,76 @@ async function writeRunArtifacts(
   }
 }
 
+async function seedRoundHistory(
+  homeDir: string,
+  input: {
+    round: number;
+    timestamp: string;
+    state?: string;
+    decision?: string;
+    justification?: string;
+    rootCause?: string | null;
+    dimensions?: Record<string, unknown>[];
+  }
+) {
+  const db = new Database(path.join(homeDir, "ailoop.db"), { create: true });
+
+  try {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS rounds (
+        round_id INTEGER PRIMARY KEY,
+        run_timestamp TEXT,
+        state TEXT,
+        last_error TEXT,
+        consecutive_evaluator_failures INTEGER DEFAULT 0,
+        usd_used REAL DEFAULT 0,
+        actions_used INTEGER DEFAULT 0,
+        elapsed_ms INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.run(`
+      CREATE TABLE IF NOT EXISTS evaluations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        round_id INTEGER,
+        decision TEXT,
+        justification TEXT,
+        root_cause TEXT,
+        dimensions_json TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    db
+      .prepare(
+        `
+        INSERT INTO rounds (round_id, run_timestamp, state, usd_used, actions_used, elapsed_ms)
+        VALUES (?, ?, ?, 0, 0, 0)
+      `
+      )
+      .run(input.round, input.timestamp, input.state ?? "completed");
+
+    if (input.decision) {
+      db
+        .prepare(
+          `
+          INSERT INTO evaluations (round_id, decision, justification, root_cause, dimensions_json)
+          VALUES (?, ?, ?, ?, ?)
+        `
+        )
+        .run(
+          input.round,
+          input.decision,
+          input.justification ?? "",
+          input.rootCause ?? null,
+          input.dimensions ? JSON.stringify(input.dimensions) : null
+        );
+    }
+  } finally {
+    db.close();
+  }
+}
+
 describe("prepareStartFlags", () => {
   test("clears both stop and pause flags before start", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-control-test-"));
@@ -332,6 +403,7 @@ describe("listRuns", () => {
     expect(runs).toEqual([
       {
         timestamp,
+        round: 2,
         summary: "summary\n",
         metrics: {
           round: 2,
@@ -342,6 +414,88 @@ describe("listRuns", () => {
     ]);
 
     await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("prefers the structured evaluation artifact over truncated database history", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-list-runs-structured-eval-test-"));
+    const runsDir = path.join(homeDir, "runs");
+    const timestamp = "2026-03-01T03-00-00-000Z";
+
+    await writeRunArtifacts(runsDir, timestamp, {
+      summary: "summary\n",
+      metrics: { round: 4, status: "success" },
+      evaluation: {
+        decision: "pass",
+        justification: "Structured evaluation payload from artifact.",
+        evidence: ["bun test src/loop/control.test.ts"],
+        aggregate_score: 97,
+        recommended_next_action: "continue",
+        dimensions: [
+          {
+            dimension: "goal_alignment",
+            decision: "pass",
+            score: 99,
+            confidence: 0.91,
+            justification: "The richer evaluation payload is preserved.",
+            evidence: ["artifact evidence"],
+            blocking_issues: []
+          }
+        ]
+      },
+      log: "log\n",
+      stateChange: "diff\n"
+    });
+
+    await seedRoundHistory(homeDir, {
+      round: 4,
+      timestamp,
+      decision: "pass",
+      justification: "Database summary should not override the artifact.",
+      rootCause: "db_only_summary",
+      dimensions: [
+        {
+          dimension: "goal_alignment",
+          decision: "pass",
+          justification: "Truncated DB dimension"
+        }
+      ]
+    });
+
+    try {
+      const runs = await listRuns(makeTestConfig(homeDir));
+
+      expect(runs).toEqual([
+        {
+          timestamp,
+          round: 4,
+          summary: "summary\n",
+          metrics: {
+            round: 4,
+            status: "success"
+          },
+          evaluation: {
+            decision: "pass",
+            justification: "Structured evaluation payload from artifact.",
+            evidence: ["bun test src/loop/control.test.ts"],
+            aggregate_score: 97,
+            recommended_next_action: "continue",
+            dimensions: [
+              {
+                dimension: "goal_alignment",
+                decision: "pass",
+                score: 99,
+                confidence: 0.91,
+                justification: "The richer evaluation payload is preserved.",
+                evidence: ["artifact evidence"],
+                blocking_issues: []
+              }
+            ]
+          }
+        }
+      ]);
+    } finally {
+      await fs.rm(homeDir, { recursive: true, force: true });
+    }
   });
 });
 
