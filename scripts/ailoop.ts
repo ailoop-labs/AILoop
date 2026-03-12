@@ -17,7 +17,7 @@ import { sleep } from "../src/utils/time";
 const config = loadConfig();
 
 async function runForeground(): Promise<void> {
-  await ensureProjectRoles(config, { workspaceRoot: process.cwd(), regen: false });
+  await ensureProjectRoles(config, { workspaceRoot: process.cwd(), autoRefresh: true });
   const engine = new LoopEngine(config);
   await engine.run();
 }

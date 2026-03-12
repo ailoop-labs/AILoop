@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import path from "node:path";
 import type { AppConfig } from "../config/env";
 import { buildLoopPaths, ensureLoopHome } from "../loop/state";
@@ -9,6 +10,7 @@ export type ProjectRole = "planner" | "executor" | "evaluator" | "leader" | "des
 export interface EnsureProjectRoleDefinitionsOptions {
   workspaceRoot?: string;
   regen?: boolean;
+  autoRefresh?: boolean;
   codexClient?: Pick<CodexClient, "runJson">;
 }
 
@@ -57,6 +59,23 @@ const GENERATED_ROLE_SCHEMA: JsonSchema = {
 function normalizeMarkdown(content: string): string {
   const normalized = content.replace(/\r\n/g, "\n").trim();
   return `${normalized}\n`;
+}
+
+const ROLES_SOURCE_HASH_FILENAME = ".roles_source_hash";
+
+export function computeSourceHash(readme: string, goal: string): string {
+  return createHash("sha256").update(`${readme}\n---\n${goal}`).digest("hex");
+}
+
+async function shouldAutoRegenerate(homeDir: string, currentHash: string): Promise<boolean> {
+  const hashPath = path.join(homeDir, ROLES_SOURCE_HASH_FILENAME);
+  const storedHash = (await readTextFile(hashPath, "")).trim();
+  return storedHash !== currentHash;
+}
+
+async function writeSourceHash(homeDir: string, hash: string): Promise<void> {
+  const hashPath = path.join(homeDir, ROLES_SOURCE_HASH_FILENAME);
+  await writeTextFile(hashPath, `${hash}\n`);
 }
 
 function defaultPlannerRoleDefinition(): string {
@@ -206,9 +225,23 @@ export async function ensureProjectRoleDefinitions(
   options: EnsureProjectRoleDefinitionsOptions = {}
 ): Promise<EnsureProjectRoleDefinitionsResult> {
   const workspaceRoot = path.resolve(options.workspaceRoot ?? process.cwd());
-  const regen = options.regen === true;
+  let regen = options.regen === true;
+  const autoRefresh = options.autoRefresh === true;
   const paths = buildLoopPaths(config.homeDir);
   await ensureLoopHome(paths);
+
+  // Read source documents early for both hash computation and role generation
+  const projectGoal = await readTextFile(path.join(workspaceRoot, "GOAL.md"), "");
+  const readme = await readTextFile(path.join(workspaceRoot, "README.md"), "");
+
+  // Auto-refresh: compare source hash to decide if regeneration is needed
+  let currentHash: string | null = null;
+  if (autoRefresh && !regen) {
+    currentHash = computeSourceHash(readme, projectGoal);
+    if (await shouldAutoRegenerate(config.homeDir, currentHash)) {
+      regen = true;
+    }
+  }
 
   const allRoles: ProjectRole[] = ["planner", "designer", "executor", "evaluator", "leader", "senior_dev", "qa_lead", "product_owner"];
   const generated: ProjectRole[] = [];
@@ -225,11 +258,15 @@ export async function ensureProjectRoleDefinitions(
     skipped.push(role);
   }
 
-  if (targets.length === 0) return { generated, skipped, source: "none" };
+  if (targets.length === 0) {
+    // Even if no roles need regeneration, update hash if autoRefresh is active
+    if (autoRefresh && currentHash) {
+      await writeSourceHash(config.homeDir, currentHash);
+    }
+    return { generated, skipped, source: "none" };
+  }
 
   const codex = options.codexClient ?? new CodexClient(config.codex);
-  const projectGoal = await readTextFile(path.join(workspaceRoot, "GOAL.md"), "");
-  const readme = await readTextFile(path.join(workspaceRoot, "README.md"), "");
 
   let payload: GeneratedRolePayload | null = null;
   let source: EnsureProjectRoleDefinitionsResult["source"] = "template";
@@ -250,6 +287,12 @@ export async function ensureProjectRoleDefinitions(
     const content = typeof generatedContent === "string" && generatedContent.trim() ? normalizeMarkdown(generatedContent) : defaultRoleDefinition(role);
     await writeTextFile(rolePath, content);
     generated.push(role);
+  }
+
+  // Persist source hash after successful generation
+  if (autoRefresh) {
+    const hashToStore = currentHash ?? computeSourceHash(readme, projectGoal);
+    await writeSourceHash(config.homeDir, hashToStore);
   }
 
   return { generated, skipped, source: source === "ai" ? "ai" : "template" };

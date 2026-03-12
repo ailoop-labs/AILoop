@@ -91,6 +91,9 @@ describe("ensureProjectRoleDefinitions", () => {
     await fs.writeFile(path.join(homeDir, "EVALUATOR_ROLE.md"), "# Evaluator Role\n\nEXISTING", "utf8");
     await fs.writeFile(path.join(homeDir, "LEADER_ROLE.md"), "# Leader Role\n\nEXISTING", "utf8");
     await fs.writeFile(path.join(homeDir, "DESIGNER_ROLE.md"), "# Designer Role\n\nEXISTING", "utf8");
+    await fs.writeFile(path.join(homeDir, "SENIOR_DEV_ROLE.md"), "# Senior Dev Role\n\nEXISTING", "utf8");
+    await fs.writeFile(path.join(homeDir, "QA_LEAD_ROLE.md"), "# QA Lead Role\n\nEXISTING", "utf8");
+    await fs.writeFile(path.join(homeDir, "PRODUCT_OWNER_ROLE.md"), "# Product Owner Role\n\nEXISTING", "utf8");
 
     let calls = 0;
     const mockCodex = {
@@ -187,4 +190,123 @@ describe("ensureProjectRoleDefinitions", () => {
 
     await fs.rm(workspaceRoot, { recursive: true, force: true });
   });
+
+  test("regenerates roles when source hash changes with autoRefresh", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-role-defs-autorefresh-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    await fs.mkdir(homeDir, { recursive: true });
+
+    // Write initial README, role files, and an old source hash
+    await fs.writeFile(path.join(workspaceRoot, "README.md"), "# Old README\n", "utf8");
+    await fs.writeFile(path.join(homeDir, "PLANNER_ROLE.md"), "# Planner\n\nOLD", "utf8");
+    await fs.writeFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "# Executor\n\nOLD", "utf8");
+    await fs.writeFile(path.join(homeDir, "EVALUATOR_ROLE.md"), "# Evaluator\n\nOLD", "utf8");
+    await fs.writeFile(path.join(homeDir, "LEADER_ROLE.md"), "# Leader\n\nOLD", "utf8");
+    await fs.writeFile(path.join(homeDir, "DESIGNER_ROLE.md"), "# Designer\n\nOLD", "utf8");
+    await fs.writeFile(path.join(homeDir, "SENIOR_DEV_ROLE.md"), "# Senior Dev\n\nOLD", "utf8");
+    await fs.writeFile(path.join(homeDir, "QA_LEAD_ROLE.md"), "# QA Lead\n\nOLD", "utf8");
+    await fs.writeFile(path.join(homeDir, "PRODUCT_OWNER_ROLE.md"), "# Product Owner\n\nOLD", "utf8");
+    await fs.writeFile(path.join(homeDir, ".roles_source_hash"), "stale_hash_value\n", "utf8");
+
+    // Now change README to trigger hash mismatch
+    await fs.writeFile(path.join(workspaceRoot, "README.md"), "# Updated README\n\nNew content.\n", "utf8");
+
+    let calls = 0;
+    const mockCodex = {
+      async runJson<T>() {
+        calls += 1;
+        return {
+          ok: true,
+          data: {
+            planner_role_md: "# Planner\n\nREFRESHED",
+            executor_role_md: "# Executor\n\nREFRESHED",
+            evaluator_role_md: "# Evaluator\n\nREFRESHED",
+            leader_role_md: "# Leader\n\nREFRESHED",
+            designer_role_md: "# Designer\n\nREFRESHED",
+            senior_dev_role_md: "# Senior Dev\n\nREFRESHED",
+            qa_lead_role_md: "# QA Lead\n\nREFRESHED",
+            product_owner_role_md: "# Product Owner\n\nREFRESHED"
+          } as T,
+          rawMessage: "{}",
+          stdout: "",
+          stderr: ""
+        };
+      }
+    };
+
+    const result = await ensureProjectRoleDefinitions(makeConfig(homeDir), {
+      workspaceRoot,
+      autoRefresh: true,
+      codexClient: mockCodex as never
+    });
+
+    expect(calls).toBe(1);
+    expect(result.generated.length).toBe(8);
+    expect(result.source).toBe("ai");
+    expect(await fs.readFile(path.join(homeDir, "PLANNER_ROLE.md"), "utf8")).toContain("REFRESHED");
+    expect(await fs.readFile(path.join(homeDir, "LEADER_ROLE.md"), "utf8")).toContain("REFRESHED");
+
+    // Hash file should now be updated
+    const storedHash = (await fs.readFile(path.join(homeDir, ".roles_source_hash"), "utf8")).trim();
+    expect(storedHash).not.toBe("stale_hash_value");
+    expect(storedHash.length).toBe(64); // SHA-256 hex length
+
+    await fs.rm(workspaceRoot, { recursive: true, force: true });
+  });
+
+  test("skips regeneration when source hash matches with autoRefresh", async () => {
+    const { computeSourceHash } = await import("./role-definitions");
+
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-role-defs-autorefresh-skip-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    await fs.mkdir(homeDir, { recursive: true });
+
+    const readmeContent = "# Stable README\n";
+    const goalContent = "";
+    await fs.writeFile(path.join(workspaceRoot, "README.md"), readmeContent, "utf8");
+
+    // Write role files and a matching hash
+    const matchingHash = computeSourceHash(readmeContent, goalContent);
+    await fs.writeFile(path.join(homeDir, "PLANNER_ROLE.md"), "# Planner\n\nEXISTING", "utf8");
+    await fs.writeFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "# Executor\n\nEXISTING", "utf8");
+    await fs.writeFile(path.join(homeDir, "EVALUATOR_ROLE.md"), "# Evaluator\n\nEXISTING", "utf8");
+    await fs.writeFile(path.join(homeDir, "LEADER_ROLE.md"), "# Leader\n\nEXISTING", "utf8");
+    await fs.writeFile(path.join(homeDir, "DESIGNER_ROLE.md"), "# Designer\n\nEXISTING", "utf8");
+    await fs.writeFile(path.join(homeDir, "SENIOR_DEV_ROLE.md"), "# Senior Dev\n\nEXISTING", "utf8");
+    await fs.writeFile(path.join(homeDir, "QA_LEAD_ROLE.md"), "# QA Lead\n\nEXISTING", "utf8");
+    await fs.writeFile(path.join(homeDir, "PRODUCT_OWNER_ROLE.md"), "# Product Owner\n\nEXISTING", "utf8");
+    await fs.writeFile(path.join(homeDir, ".roles_source_hash"), `${matchingHash}\n`, "utf8");
+
+    let calls = 0;
+    const mockCodex = {
+      async runJson<T>() {
+        calls += 1;
+        return {
+          ok: true,
+          data: {} as T,
+          rawMessage: "{}",
+          stdout: "",
+          stderr: ""
+        };
+      }
+    };
+
+    const result = await ensureProjectRoleDefinitions(makeConfig(homeDir), {
+      workspaceRoot,
+      autoRefresh: true,
+      codexClient: mockCodex as never
+    });
+
+    // Codex should NOT be called since hash matches
+    expect(calls).toBe(0);
+    expect(result.source).toBe("none");
+    expect(result.skipped.length).toBe(8);
+    expect(result.generated.length).toBe(0);
+
+    // Roles should remain unchanged
+    expect(await fs.readFile(path.join(homeDir, "PLANNER_ROLE.md"), "utf8")).toContain("EXISTING");
+
+    await fs.rm(workspaceRoot, { recursive: true, force: true });
+  });
 });
+

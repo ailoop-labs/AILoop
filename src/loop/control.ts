@@ -53,6 +53,7 @@ export async function ensureProjectRoles(
   await ensureProjectRoleDefinitions(config, {
     workspaceRoot: options.workspaceRoot ?? process.cwd(),
     regen: options.regen ?? false,
+    autoRefresh: options.autoRefresh ?? false,
     codexClient: options.codexClient
   });
 }
