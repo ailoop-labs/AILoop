@@ -73,10 +73,17 @@ function readDotEnvFile(cwd: string): Record<string, string> {
       continue;
     }
 
-    const value = trimmed
-      .slice(separatorIndex + 1)
-      .trim()
-      .replace(/^(['"])(.*)\1$/, "$2");
+    let value = trimmed.slice(separatorIndex + 1).trim();
+
+    // Handle inline comments
+    if (!value.startsWith("'") && !value.startsWith('"')) {
+      const hashIndex = value.indexOf("#");
+      if (hashIndex !== -1) {
+        value = value.slice(0, hashIndex).trim();
+      }
+    }
+
+    value = value.replace(/^(['"])(.*)\1$/, "$2");
     parsed[key] = value;
 
     // Populate process.env if not already set, allowing .env to provide defaults for child processes
