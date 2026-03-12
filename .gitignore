@@ -12,3 +12,7 @@ node_modules/
 .ailoop/runs/*.metrics.json
 .ailoop/runs/*.state_change.txt
 web/dist/
+
+# State files
+running
+starting
