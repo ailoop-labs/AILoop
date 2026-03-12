@@ -622,10 +622,7 @@ export default function App() {
     try {
       setArtifactsBusy(true);
       setSelectedGovernance(null);
-      const [bundle, governance] = await Promise.all([
-        api<RunArtifactBundle>(`/api/runs/${run.timestamp}/artifacts`, undefined, authToken),
-        run.has_governance ? api<GovernanceDetails>(`/api/runs/${run.round}/governance`, undefined, authToken).catch(() => null) : Promise.resolve(null)
-      ]);
+      const bundle = await api<RunArtifactBundle & { governance: GovernanceDetails }>(`/api/runs/${run.timestamp}/artifacts`, undefined, authToken);
       setSelectedArtifacts({
         ...bundle,
         timestamp: run.timestamp,
@@ -633,7 +630,7 @@ export default function App() {
         metrics: run.metrics,
         evaluation: run.evaluation
       });
-      setSelectedGovernance(governance);
+      setSelectedGovernance(bundle.governance);
       setError(null);
     } catch (requestError) {
       handleRequestError(requestError, "无法获取运行详情：请重试或重新登录。");
@@ -641,7 +638,6 @@ export default function App() {
       setArtifactsBusy(false);
     }
   };
-
   useEffect(() => {
     if (!selectedRun && !selectedArtifacts && !selectedRole && !isGoalDialogOpen) {
       return;

@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { DatabaseManager } from "../utils/db";
 import {
   ensureProjectRoleDefinitions,
   loadProjectRoleDefinition,
@@ -296,30 +297,45 @@ export async function getCliStatus(config: AppConfig): Promise<CliStatusPayload>
 export async function listRuns(config: AppConfig, limit = 20): Promise<
   Array<{
     timestamp: string;
+    round: number;
     summary: string;
     metrics: Record<string, unknown> | null;
     evaluation: EvaluationResult | null;
   }>
 > {
   const paths = await ensureLoopHomeAndGetPaths(config);
-  const records = await listRunRecords(paths.runsDir, limit);
+  const db = new DatabaseManager({ dbPath: paths.dbPath });
+  const dbRounds = await db.getLatestRounds(limit);
+  db.close();
 
   const output: Array<{
     timestamp: string;
+    round: number;
     summary: string;
     metrics: Record<string, unknown> | null;
     evaluation: EvaluationResult | null;
   }> = [];
 
-  for (const record of records) {
-    const summary = await fs.readFile(record.summaryPath, "utf8");
-    const metrics = await readJsonFile<Record<string, unknown> | null>(record.metricsPath, null);
-    const evaluation = await readJsonFile<EvaluationResult | null>(record.evaluationPath ?? "", null);
+  for (const record of dbRounds as any[]) {
+    const timestamp = record.run_timestamp;
+    const round = record.round_id;
+    const artifactPaths = buildRoundArtifactPaths(paths.runsDir, timestamp);
+    
+    const summary = await readTextFile(artifactPaths.summaryPath, `Round ${round} Summary`);
+    const metrics = await readJsonFile<Record<string, unknown> | null>(artifactPaths.metricsPath, null);
+    
     output.push({
-      timestamp: record.timestamp,
+      timestamp,
+      round,
       summary,
       metrics,
-      evaluation
+      evaluation: {
+        decision: record.decision,
+        justification: record.justification,
+        root_cause: record.root_cause,
+        evidence: [],
+        dimensions: record.dimensions_json ? JSON.parse(record.dimensions_json) : undefined
+      }
     });
   }
 
@@ -328,11 +344,13 @@ export async function listRuns(config: AppConfig, limit = 20): Promise<
 
 export interface RunArtifactBundle {
   timestamp: string;
+  round: number;
   summary: string;
   metrics: Record<string, unknown>;
   log: string;
   state_change: string;
   evaluation: EvaluationResult;
+  governance: any;
 }
 
 const RUN_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/;
@@ -348,20 +366,21 @@ export async function getRunArtifacts(config: AppConfig, timestamp: string): Pro
   }
 
   const paths = await ensureLoopHomeAndGetPaths(config);
-  const artifactPaths = buildRoundArtifactPaths(paths.runsDir, normalizedTimestamp);
-  const hasRequiredArtifacts = await Promise.all([
-    fileExists(artifactPaths.summaryPath),
-    fileExists(artifactPaths.metricsPath),
-    fileExists(artifactPaths.logPath),
-    fileExists(artifactPaths.stateChangePath),
-    fileExists(artifactPaths.evaluationPath)
-  ]);
-
-  if (hasRequiredArtifacts.some((exists) => !exists)) {
+  const db = new DatabaseManager({ dbPath: paths.dbPath });
+  const dbRounds = await db.getLatestRounds(100); // Find the round for this timestamp
+  const targetRound = (dbRounds as any[]).find(r => r.run_timestamp === normalizedTimestamp);
+  
+  if (!targetRound) {
+    db.close();
     return null;
   }
 
-  const [summary, metrics, log, stateChange, evaluation] = await Promise.all([
+  const governance = await db.getGovernanceDetails(targetRound.round_id);
+  db.close();
+
+  const artifactPaths = buildRoundArtifactPaths(paths.runsDir, normalizedTimestamp);
+  
+  const [summary, metrics, log, stateChange, evaluationJson] = await Promise.all([
     readTextFile(artifactPaths.summaryPath, ""),
     readJsonFile<Record<string, unknown> | null>(artifactPaths.metricsPath, null),
     readTextFile(artifactPaths.logPath, ""),
@@ -369,7 +388,7 @@ export async function getRunArtifacts(config: AppConfig, timestamp: string): Pro
     readJsonFile<EvaluationResult | null>(artifactPaths.evaluationPath, null)
   ]);
 
-  if (!metrics || !evaluation) {
+  if (!metrics) {
     return null;
   }
 
@@ -378,11 +397,19 @@ export async function getRunArtifacts(config: AppConfig, timestamp: string): Pro
 
   return {
     timestamp: normalizedTimestamp,
+    round: targetRound.round_id,
     summary: redact(summary),
     metrics,
     log: redact(log),
     state_change: redact(stateChange),
-    evaluation: redactJsonStrings(evaluation, redactor)
+    evaluation: evaluationJson ? redactJsonStrings(evaluationJson, redactor) : {
+      decision: targetRound.decision,
+      justification: targetRound.justification,
+      root_cause: targetRound.root_cause,
+      evidence: [],
+      dimensions: targetRound.dimensions_json ? JSON.parse(targetRound.dimensions_json) : undefined
+    },
+    governance
   };
 }
 

@@ -47,11 +47,14 @@ import {
   readLoopState,
   recoverInterruptedLoopState,
   setFlag,
+  savePid,
   updateLoopState,
   writeLoopState,
   writePid,
   appendInstruction,
-  saveEvaluation
+  saveEvaluation,
+  saveLeaderStrategy,
+  saveCCBSession
 } from "./state";
 
 const CONSECUTIVE_EVALUATOR_FAILURE_LIMIT = 3;
@@ -271,10 +274,14 @@ export class LoopEngine {
               onLog: (msg) => console.log(`[LEADER] ${msg}`)
             });
 
+            await saveLeaderStrategy(this.paths, currentStateData.round, decision);
+
             if (decision.action === "escalate_to_ccb" || (decision.action === "resume" && leaderReworkCount >= LEADER_REWORK_LIMIT)) {
               // --- GOVERNANCE STEP 4: CCB Meeting ---
               console.log(`[GOVERNANCE] Escalating to CCB...`);
               const ccbResult = await this.ccb.run(currentStateData.round, decision, readmeContent);
+
+              await saveCCBSession(this.paths, currentStateData.round, ccbResult);
               
               if (ccbResult.decision === "approve") {
                 console.log(`[CCB] CHANGE APPROVED. Applying Constitution modification...`);

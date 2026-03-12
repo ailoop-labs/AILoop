@@ -158,6 +158,18 @@ export async function saveEvaluation(paths: LoopPaths, roundId: number, evaluati
   db.close();
 }
 
+export async function saveLeaderStrategy(paths: LoopPaths, roundId: number, strategy: any): Promise<void> {
+  const db = new DatabaseManager({ dbPath: paths.dbPath });
+  await db.saveLeaderStrategy(roundId, strategy);
+  db.close();
+}
+
+export async function saveCCBSession(paths: LoopPaths, roundId: number, session: any): Promise<void> {
+  const db = new DatabaseManager({ dbPath: paths.dbPath });
+  await db.saveCCBSession(roundId, session);
+  db.close();
+}
+
 export async function updateLoopState(
   paths: LoopPaths,
   updater: (current: LoopStateData) => LoopStateData

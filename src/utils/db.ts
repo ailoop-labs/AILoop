@@ -189,6 +189,51 @@ export class DatabaseManager {
     );
   }
 
+  async saveLeaderStrategy(roundId: number, strategy: any) {
+    const query = this.db.prepare(`
+      INSERT INTO leader_strategies (round_id, rationale, action, instructions_json, diagnosis_type)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+
+    query.run(
+      roundId,
+      strategy.rationale,
+      strategy.action,
+      strategy.instructions ? JSON.stringify(strategy.instructions) : null,
+      strategy.diagnosis_type
+    );
+  }
+
+  async saveCCBSession(roundId: number, session: any) {
+    const sessionQuery = this.db.prepare(`
+      INSERT INTO ccb_sessions (round_id, proposed_change, final_decision)
+      VALUES (?, ?, ?)
+    `);
+
+    const result = sessionQuery.run(
+      roundId,
+      session.proposed_change,
+      session.final_decision
+    );
+
+    const sessionId = result.lastInsertRowid;
+
+    const expertQuery = this.db.prepare(`
+      INSERT INTO expert_opinions (session_id, expert_role, vote, rationale, incapacity_flag)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+
+    for (const opinion of session.experts) {
+      expertQuery.run(
+        sessionId,
+        opinion.expert_role,
+        opinion.vote,
+        opinion.rationale,
+        opinion.incapacity_flag ? 1 : 0
+      );
+    }
+  }
+
   async getFrictionIndex() {
     // 1. Rework Churn Rate: Percentage of rounds with consecutive failures > 0 in the last 20 rounds
     const reworkChurn = this.db.query(`
