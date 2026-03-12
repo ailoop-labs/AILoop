@@ -1496,7 +1496,7 @@ export default function App() {
                                 <span className="rounded bg-warning/20 px-2 py-0.5 text-[10px] text-warning uppercase font-bold tracking-tighter">Action: {selectedGovernance.leader.action}</span>
                               </div>
                               <p className="mt-3 text-sm text-mist/90 italic leading-relaxed">"{selectedGovernance.leader.rationale}"</p>
-                              {selectedGovernance.leader.instructions.length > 0 && (
+                              {selectedGovernance.leader.instructions && selectedGovernance.leader.instructions.length > 0 && (
                                 <div className="mt-4 pt-3 border-t border-warning/20">
                                   <p className="text-[10px] uppercase tracking-widest text-mist/50 font-bold">Strategic Recovery Instructions:</p>
                                   <ul className="mt-2 space-y-2">
@@ -1509,17 +1509,17 @@ export default function App() {
                                   </ul>
                                 </div>
                               )}
-                            </div>
-                          </div>
-                        )}
+                              </div>
+                              </div>
+                              )}
 
-                        {/* CCB Step */}
-                        {selectedGovernance.ccb && (
-                          <div className="relative pl-8">
-                            <span className="absolute left-0 top-1 h-6 w-6 rounded-full border border-white/20 bg-ink flex items-center justify-center">
+                              {/* CCB Step */}
+                              {selectedGovernance.ccb && (
+                              <div className="relative pl-8">
+                              <span className="absolute left-0 top-1 h-6 w-6 rounded-full border border-white/20 bg-ink flex items-center justify-center">
                               <span className="h-2 w-2 rounded-full bg-sky-400" />
-                            </span>
-                            <div className="rounded-xl border border-sky-400/30 bg-sky-400/5 p-4 shadow-sm">
+                              </span>
+                              <div className="rounded-xl border border-sky-400/30 bg-sky-400/5 p-4 shadow-sm">
                               <p className="text-xs font-bold uppercase tracking-widest text-sky-400/90">4. CCB Expert Consensus</p>
                               <div className="mt-3">
                                 <p className="text-[10px] uppercase tracking-widest text-mist/50 font-bold">Proposed Constitutional Modification:</p>
@@ -1527,23 +1527,24 @@ export default function App() {
                                   {selectedGovernance.ccb.proposed_change}
                                 </div>
                               </div>
-                              
-                              <div className="mt-5 grid gap-4 md:grid-cols-3">
-                                {selectedGovernance.ccb.experts.map((expert: ExpertOpinion, i: number) => (
-                                  <div key={i} className="rounded-xl border border-white/5 bg-ink/60 p-3 shadow-inner">
-                                    <div className="flex items-center justify-between">
-                                      <p className="text-[10px] uppercase tracking-widest text-mist/40 font-bold">{expert.expert_role.replace('_', ' ')}</p>
-                                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-black uppercase ${expert.vote === 'approve' ? 'bg-accent/20 text-accent' : 'bg-ember/20 text-ember'}`}>
-                                        {expert.vote}
-                                      </span>
-                                    </div>
-                                    <p className="mt-2 text-[11px] text-mist/70 leading-relaxed italic" title={expert.rationale}>
-                                      "{expert.rationale}"
-                                    </p>
-                                  </div>
-                                ))}
-                              </div>
 
+                              {selectedGovernance.ccb.experts && selectedGovernance.ccb.experts.length > 0 && (
+                                <div className="mt-5 grid gap-4 md:grid-cols-3">
+                                  {selectedGovernance.ccb.experts.map((expert: ExpertOpinion, i: number) => (
+                                    <div key={i} className="rounded-xl border border-white/5 bg-ink/60 p-3 shadow-inner">
+                                      <div className="flex items-center justify-between">
+                                        <p className="text-[10px] uppercase tracking-widest text-mist/40 font-bold">{expert.expert_role.replace('_', ' ')}</p>
+                                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-black uppercase ${expert.vote === 'approve' ? 'bg-accent/20 text-accent' : 'bg-ember/20 text-ember'}`}>
+                                          {expert.vote}
+                                        </span>
+                                      </div>
+                                      <p className="mt-2 text-[11px] text-mist/70 leading-relaxed italic" title={expert.rationale}>
+                                        "{expert.rationale}"
+                                      </p>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                               <div className="mt-5 flex items-center justify-between border-t border-sky-400/20 pt-4">
                                 <div className="flex items-center gap-2">
                                   <span className={`h-2 w-2 rounded-full ${selectedGovernance.ccb.final_decision === 'approve' ? 'bg-accent' : 'bg-ember'}`} />

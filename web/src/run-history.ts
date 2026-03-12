@@ -128,7 +128,7 @@ function preferStructuredValue(value: string | undefined, fallback: string): str
 }
 
 function preferStructuredEvidence(evaluation: RunEvaluation | null, fallback: string): string {
-  if (!evaluation) {
+  if (!evaluation || !evaluation.evidence || !Array.isArray(evaluation.evidence)) {
     return fallback;
   }
 
@@ -156,13 +156,16 @@ function formatStructuredNumber(value: number | undefined): string {
   return typeof value === "number" && Number.isFinite(value) ? `${value}` : "N/A";
 }
 
-function joinStructuredItems(items: string[], emptyValue: string): string {
+function joinStructuredItems(items: string[] | undefined | null, emptyValue: string): string {
+  if (!items || !Array.isArray(items)) {
+    return emptyValue;
+  }
   const normalized = items.map((item) => item.trim()).filter(Boolean);
   return normalized.length > 0 ? normalized.join(" | ") : emptyValue;
 }
 
 function preferStructuredDimensionBreakdown(evaluation: RunEvaluation | null): RoundReportDimension[] {
-  if (!evaluation?.dimensions?.length) {
+  if (!evaluation?.dimensions || !Array.isArray(evaluation.dimensions)) {
     return [];
   }
 
@@ -171,7 +174,7 @@ function preferStructuredDimensionBreakdown(evaluation: RunEvaluation | null): R
     decision: dimension.decision,
     score: formatStructuredNumber(dimension.score),
     confidence: formatStructuredNumber(dimension.confidence),
-    justification: dimension.justification.trim() || "No justification provided",
+    justification: (dimension.justification || "").trim() || "No justification provided",
     evidence: joinStructuredItems(dimension.evidence, "No evaluator evidence captured"),
     blockingIssues: joinStructuredItems(dimension.blocking_issues, "None"),
     nextRecommendation: dimension.recommended_next_action?.trim() || "No recommendation captured"
