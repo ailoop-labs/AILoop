@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { loadEnvironment, type CodexConfig, type CodexSandboxMode } from "../config/env";
+import type { CodexConfig, CodexSandboxMode } from "../config/env";
 
 export type JsonSchema = Record<string, unknown>;
 
@@ -391,17 +391,15 @@ async function syncCodexConfigFiles(sourceCodexHome: string, targetCodexHome: st
 }
 
 async function buildProcessEnv(config: CodexConfig, cwd: string, baseEnv: NodeJS.ProcessEnv = process.env): Promise<NodeJS.ProcessEnv> {
-  const loadedEnv = loadEnvironment(cwd);
-
   if (config.bin.endsWith("gemini")) {
-    return { ...loadedEnv };
+    return { ...baseEnv };
   }
 
-  const isolatedCodexHome = resolveIsolatedCodexHome(cwd, loadedEnv);
-  await syncCodexConfigFiles(resolveSourceCodexHome(loadedEnv), isolatedCodexHome);
+  const isolatedCodexHome = resolveIsolatedCodexHome(cwd, baseEnv);
+  await syncCodexConfigFiles(resolveSourceCodexHome(baseEnv), isolatedCodexHome);
 
   const env: NodeJS.ProcessEnv = {
-    ...loadedEnv,
+    ...baseEnv,
     CODEX_HOME: isolatedCodexHome
   };
 

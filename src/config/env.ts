@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import path from "node:path";
 import type { BudgetLimits, EvaluationDimension } from "../types/contracts";
 
@@ -40,95 +39,14 @@ export interface AppConfig {
   codex: CodexConfig;
 }
 
-interface LoadConfigOptions {
-  cwd?: string;
-}
-
-/**
- * Loads environment variables from .env and process.env into a clean object.
- * This ensures child processes receive a consistent environment.
- */
-export function loadEnvironment(cwd: string = process.cwd()): NodeJS.ProcessEnv {
-  const fileEnv = readDotEnvFile(cwd);
-  const result: NodeJS.ProcessEnv = { ...process.env };
-
-  for (const [key, value] of Object.entries(fileEnv)) {
-    if (result[key] === undefined) {
-      result[key] = value;
-    }
-  }
-
-  return result;
-}
-
-function readDotEnvFile(cwd: string): Record<string, string> {
-  const envPath = path.join(cwd, ".env");
-  if (!fs.existsSync(envPath)) {
-    return {};
-  }
-
-  const parsed: Record<string, string> = {};
-  const raw = fs.readFileSync(envPath, "utf8");
-
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue;
-    }
-
-    const separatorIndex = trimmed.indexOf("=");
-    if (separatorIndex <= 0) {
-      continue;
-    }
-
-    let key = trimmed.slice(0, separatorIndex).trim();
-    if (key.startsWith("export ")) {
-      key = key.slice(7).trim();
-    }
-
-    if (!key) {
-      continue;
-    }
-
-    let value = trimmed.slice(separatorIndex + 1).trim();
-
-    // Handle inline comments
-    if (!value.startsWith("'") && !value.startsWith('"')) {
-      const hashIndex = value.indexOf("#");
-      if (hashIndex !== -1) {
-        value = value.slice(0, hashIndex).trim();
-      }
-    }
-
-    value = value.replace(/^(['"])(.*)\1$/, "$2");
-    parsed[key] = value;
-  }
-
-  return parsed;
-}
-
-function resolveEnvValue(
-  env: NodeJS.ProcessEnv,
-  fileEnv: Record<string, string>,
-  key: string
-): string | undefined {
-  const runtimeValue = env[key];
-  if (runtimeValue !== undefined) {
-    return runtimeValue;
-  }
-  return fileEnv[key];
-}
-
 function parseNumber(value: string | undefined, fallback: number): number {
   if (!value) {
     return fallback;
   }
-
   const parsed = Number(value);
   if (Number.isFinite(parsed)) {
     return parsed;
   }
-
   return fallback;
 }
 
@@ -174,9 +92,8 @@ export function resolveCodexBin(
   return configuredBin || defaultBin;
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env, options: LoadConfigOptions = {}): AppConfig {
-  const fileEnv = readDotEnvFile(options.cwd ?? process.cwd());
-  const get = (key: string): string | undefined => resolveEnvValue(env, fileEnv, key);
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+  const get = (key: string): string | undefined => env[key];
 
   const homeDir = path.resolve(get("AILOOP_HOME") ?? "./.ailoop");
   const intervalSeconds = parseNumber(get("AILOOP_INTERVAL_SECONDS"), 1200);
