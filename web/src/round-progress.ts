@@ -169,7 +169,7 @@ export function deriveRoundProgress(input: RoundProgressInput): RoundProgressVie
 
   if (
     normalizedLogs.some((line) => line.includes("Evaluator started LLM dimension checks.")) ||
-    normalizedLogs.some((line) => line.startsWith("[evaluator codex "))
+    normalizedLogs.some((line) => line.startsWith("[evaluator] "))
   ) {
     return {
       roundLabel,
@@ -195,8 +195,7 @@ export function deriveRoundProgress(input: RoundProgressInput): RoundProgressVie
 
   if (
     normalizedLogs.some((line) => line.includes("Executor started Codex execution")) ||
-    normalizedLogs.some((line) => line.startsWith("[codex stdout]")) ||
-    normalizedLogs.some((line) => line.startsWith("[codex stderr]"))
+    normalizedLogs.some((line) => line.startsWith("[executor] "))
   ) {
     return {
       roundLabel,
@@ -219,7 +218,7 @@ export function deriveRoundProgress(input: RoundProgressInput): RoundProgressVie
 
   if (
     normalizedLogs.some((line) => line.includes("Planner started Codex planning")) ||
-    normalizedLogs.some((line) => line.startsWith("[planner codex "))
+    normalizedLogs.some((line) => line.startsWith("[planner] "))
   ) {
     return {
       roundLabel,

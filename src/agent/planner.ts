@@ -208,11 +208,11 @@ export class PlannerAgent {
         // Planner logging is best-effort and must not block planning.
       });
     };
-    const toLogLines = (source: "stdout" | "stderr", chunk: string): string[] =>
+    const toLogLines = (_source: "stdout" | "stderr", chunk: string): string[] =>
       chunk
         .split(/\r?\n/)
         .filter((line) => line.length > 0)
-        .map((line) => `[planner codex ${source}] ${line}`);
+        .map((line) => `[planner] ${line}`);
 
     const adaptiveDirectives = buildAdaptivePlannerDirectives(context);
     const plannerRoleDefinition = await loadProjectRoleDefinition(this.homeDir, "planner");

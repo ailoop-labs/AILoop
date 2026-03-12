@@ -88,11 +88,11 @@ function normalizeActions(rawActions: string[], status: "success" | "failure", e
       ];
 }
 
-function toLogLines(source: "stdout" | "stderr", chunk: string): string[] {
+function toLogLines(_source: "stdout" | "stderr", chunk: string): string[] {
   return chunk
     .split(/\r?\n/)
     .filter((line) => line.length > 0)
-    .map((line) => `[codex ${source}] ${line}`);
+    .map((line) => `[executor] ${line}`);
 }
 
 function emitLog(options: ExecuteOptions, message: string): void {

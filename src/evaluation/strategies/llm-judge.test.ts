@@ -370,7 +370,7 @@ describe("LLMJudgeEvaluator logging", () => {
     expect(result.decision).toBe("pass");
     expect(logs.some((line) => line.includes("Evaluator started LLM dimension checks"))).toBe(true);
     expect(logs.some((line) => line.includes("Evaluator checking dimension: goal_alignment"))).toBe(true);
-    expect(logs.some((line) => line.includes("[evaluator codex stdout] stdout from evaluator"))).toBe(true);
-    expect(logs.some((line) => line.includes("[evaluator codex stderr] stderr from evaluator"))).toBe(true);
+    expect(logs.some((line) => line.includes("[evaluator] stdout from evaluator"))).toBe(true);
+    expect(logs.some((line) => line.includes("[evaluator] stderr from evaluator"))).toBe(true);
   });
 });

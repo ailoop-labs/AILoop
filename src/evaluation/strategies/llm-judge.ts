@@ -286,11 +286,11 @@ function toAssessmentText(assessment: DimensionAssessment): string {
   return [assessment.justification, ...assessment.evidence, ...assessment.blocking_issues].join("\n");
 }
 
-function toLogLines(source: "stdout" | "stderr", chunk: string): string[] {
+function toLogLines(_source: "stdout" | "stderr", chunk: string): string[] {
   return chunk
     .split(/\r?\n/)
     .filter((line) => line.length > 0)
-    .map((line) => `[evaluator codex ${source}] ${line}`);
+    .map((line) => `[evaluator] ${line}`);
 }
 
 function emitEvaluationLog(context: RoundEvaluationContext, message: string): void {

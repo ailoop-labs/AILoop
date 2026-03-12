@@ -66,7 +66,7 @@ describe("deriveRoundProgress", () => {
       round: 12,
       logs: [
         "[2026-03-02T12:05:00.000Z] Evaluator failed; triggering auto-rework attempt 2/3.",
-        "[2026-03-02T12:05:01.000Z] [codex stdout] applying patch"
+        "[12:05:01][executor] applying patch"
       ]
     });
 

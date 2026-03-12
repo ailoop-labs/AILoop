@@ -408,7 +408,8 @@ export class LoopEngine {
     const artifacts = buildRoundArtifactPaths(this.paths.runsDir, runId);
     const logLines: string[] = [];
     const log = async (message: string): Promise<void> => {
-      const line = `[${new Date().toISOString()}] ${this.redactor.redact(message)}`;
+      const ts = new Date().toISOString().slice(11, 19);
+      const line = `[${ts}]${this.redactor.redact(message)}`;
       logLines.push(line);
       await appendLogLine(artifacts.logPath, line);
     };
