@@ -727,6 +727,7 @@ describe("console server API contract", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
+    expect(paths.instructionsPath).toBe(path.join(paths.homeDir, "instructions.queue.json"));
     expect(JSON.parse(await fs.readFile(paths.instructionsPath, "utf8"))).toEqual([
       "Verify the production fix before resuming."
     ]);

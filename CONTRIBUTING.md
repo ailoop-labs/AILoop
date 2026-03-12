@@ -9,7 +9,7 @@ AILoop is a goal-driven autonomous loop runner, so contributions should optimize
 - Check `README.md`, `ARCHITECTURE.md`, and any active instructions before proposing a change so the proposal reflects the current product and runtime contracts.
 - For non-trivial work, open or update an issue before you start coding. Describe the problem, the intended outcome, the smallest proposed change, and how you expect to verify it.
 - Link the issue in your Pull Request so reviewers can see the rationale, scope, and any operator context that shaped the change.
-- If you are fixing something outside the normal loop, summarize the manual intervention in `.ailoop/instructions.json` so future rounds can align workspace state with recorded history.
+- If you are fixing something outside the normal loop, summarize the manual intervention in `.ailoop/instructions.queue.json` so future rounds can align workspace state with recorded history.
 
 ## Development Principles
 
@@ -125,7 +125,7 @@ Good evidence includes:
 - a short explanation of why those checks are sufficient
 - the relevant diff or affected files
 
-If you manually intervene outside the loop to fix code or infrastructure, summarize that intervention in `.ailoop/instructions.json` so future rounds can realign with the actual workspace state.
+If you manually intervene outside the loop to fix code or infrastructure, summarize that intervention in `.ailoop/instructions.queue.json` so future rounds can realign with the actual workspace state.
 
 Do not manually create or claim `.ailoop/runs/*` artifacts in contributor notes. Those are engine-managed outputs.
 

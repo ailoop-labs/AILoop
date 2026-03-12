@@ -13,6 +13,7 @@ export interface LoopPaths {
   evaluatorRolePath: string;
   leaderRolePath: string;
   instructionsPath: string;
+  legacyInstructionsPath: string;
   statePath: string;
   pidPath: string;
   stopFlagPath: string;
@@ -32,7 +33,8 @@ export function buildLoopPaths(homeDir: string): LoopPaths {
     designerRolePath: path.join(homeDir, "DESIGNER_ROLE.md"),
     evaluatorRolePath: path.join(homeDir, "EVALUATOR_ROLE.md"),
     leaderRolePath: path.join(homeDir, "LEADER_ROLE.md"),
-    instructionsPath: path.join(homeDir, "instructions.json"),
+    instructionsPath: path.join(homeDir, "instructions.queue.json"),
+    legacyInstructionsPath: path.join(homeDir, "instructions.json"),
     statePath: path.join(homeDir, "state.json"),
     pidPath: path.join(homeDir, "loop.pid"),
     stopFlagPath: path.join(homeDir, "loop.stop"),
@@ -41,12 +43,45 @@ export function buildLoopPaths(homeDir: string): LoopPaths {
   };
 }
 
+async function ensureLegacyInstructionsFile(paths: LoopPaths): Promise<boolean> {
+  if (!(await fileExists(paths.legacyInstructionsPath))) {
+    return false;
+  }
+
+  await ensureRegularFile(paths.legacyInstructionsPath, "[]\n");
+  return true;
+}
+
+async function readMergedInstructionQueue(paths: LoopPaths): Promise<string[]> {
+  const canonical = await readJsonFile<string[]>(paths.instructionsPath, []);
+  const hasLegacyInstructions = await ensureLegacyInstructionsFile(paths);
+  if (!hasLegacyInstructions) {
+    return canonical;
+  }
+
+  const legacy = await readJsonFile<string[]>(paths.legacyInstructionsPath, []);
+  if (legacy.length === 0) {
+    return canonical;
+  }
+
+  return [...legacy, ...canonical];
+}
+
+async function writeInstructionQueue(paths: LoopPaths, queue: string[]): Promise<void> {
+  await writeJsonFile(paths.instructionsPath, queue);
+
+  if (await ensureLegacyInstructionsFile(paths)) {
+    await writeJsonFile(paths.legacyInstructionsPath, []);
+  }
+}
+
 export async function ensureLoopHome(paths: LoopPaths): Promise<void> {
   await ensureDir(paths.homeDir);
   await ensureDir(paths.runsDir);
 
   await ensureRegularFile(paths.taskPath, "# AILoop Task Log\n");
   await ensureRegularFile(paths.instructionsPath, "[]\n");
+  await writeInstructionQueue(paths, await readMergedInstructionQueue(paths));
 }
 
 export function defaultLoopState(pid: number | null = null): LoopStateData {
@@ -193,17 +228,19 @@ export async function recoverInterruptedLoopState(
 }
 
 export async function appendInstruction(paths: LoopPaths, message: string): Promise<void> {
-  const current = await readJsonFile<string[]>(paths.instructionsPath, []);
+  const current = await readMergedInstructionQueue(paths);
   current.push(message);
-  await writeJsonFile(paths.instructionsPath, current);
+  await writeInstructionQueue(paths, current);
 }
 
 export async function drainInstructions(paths: LoopPaths): Promise<string[]> {
-  const current = await readJsonFile<string[]>(paths.instructionsPath, []);
-  await writeJsonFile(paths.instructionsPath, []);
+  const current = await readMergedInstructionQueue(paths);
+  await writeInstructionQueue(paths, []);
   return current;
 }
 
 export async function peekInstructions(paths: LoopPaths): Promise<string[]> {
-  return readJsonFile<string[]>(paths.instructionsPath, []);
+  const current = await readMergedInstructionQueue(paths);
+  await writeInstructionQueue(paths, current);
+  return current;
 }

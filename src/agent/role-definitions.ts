@@ -139,7 +139,7 @@ Responsibilities:
 Constraints:
 - If the issue is a simple operational blocker (e.g., missing dependency, port in use, type error), provide instructions to fix it and return "resume".
 - If the overall project goal is fundamentally impossible or structurally broken, return "stop" to escalate to the human owner.
-- You can read all files, but you may ONLY write to directional documents (README.md, GOAL.md, ARCHITECTURE.md, instructions.json).
+- You can read all files, but you may ONLY write to directional documents (README.md, GOAL.md, ARCHITECTURE.md, instructions.queue.json).
 
 This file is project-scoped and editable. Update it to customize leader behavior.`);
 }

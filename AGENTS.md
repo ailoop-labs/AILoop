@@ -35,7 +35,7 @@ Defaults:
 ### 0.2 External Intervention & State Alignment
 
 If the operator (human) manually modifies the codebase or infrastructure to fix a bug or advance the goal outside of the autonomous loop:
-- **Mandatory Notification:** The operator MUST add a brief summary of the changes to `.ailoop/instructions.json`.
+- **Mandatory Notification:** The operator MUST add a brief summary of the changes to `.ailoop/instructions.queue.json`.
 - **Agent Behavior:** The Planner and Leader agents must prioritize these instructions to align their "memory" (state files/history) with the "reality" (current codebase).
 - **Verification:** The Agent should verify the manual fix (e.g., running a test) before proceeding to the next architectural goal.
 
@@ -287,4 +287,3 @@ The Engine's automated workflow includes:
 
 **Agent Responsibility:**
 Agents (Planner and Executor) should focus strictly on the technical objective and providing clear verification evidence (tests, logs, diffs). They **must not** attempt to manually commit, push, or restart services unless explicitly instructed to do so as part of a specific sub-task. The Evaluator must judge the round based on the sub-task objective and should not fail a round for missing commit/push/restart actions, as those are performed by the Engine post-evaluation.
-

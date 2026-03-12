@@ -113,7 +113,10 @@ export class ToolRegistry {
             return fail(`Permission denied: The '${context.role}' role is read-only and cannot modify files.`);
           }
 
-          const isDirectionalDoc = ["README.md", "GOAL.md", "ARCHITECTURE.md"].includes(relPath) || relPath.endsWith('instructions.json');
+          const isDirectionalDoc =
+            ["README.md", "GOAL.md", "ARCHITECTURE.md"].includes(relPath) ||
+            relPath.endsWith("instructions.queue.json") ||
+            relPath.endsWith("instructions.json");
 
           if (context.role === "leader" && !isDirectionalDoc) {
             return fail(`Permission denied: Leader should only modify directional documents, not actual source code (${relPath}).`);

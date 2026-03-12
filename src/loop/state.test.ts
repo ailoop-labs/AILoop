@@ -2,14 +2,23 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
-import { buildLoopPaths, defaultLoopState, ensureLoopHome, readLoopState, writeLoopState } from "./state";
+import {
+  appendInstruction,
+  buildLoopPaths,
+  defaultLoopState,
+  ensureLoopHome,
+  readLoopState,
+  writeLoopState
+} from "./state";
 
 describe("loop state persistence", () => {
-  test("buildLoopPaths includes project role definition paths", () => {
+  test("buildLoopPaths includes project role definition paths and canonical instruction queue path", () => {
     const paths = buildLoopPaths("/tmp/ailoop-home");
     expect(paths.plannerRolePath).toBe("/tmp/ailoop-home/PLANNER_ROLE.md");
     expect(paths.executorRolePath).toBe("/tmp/ailoop-home/EXECUTOR_ROLE.md");
     expect(paths.evaluatorRolePath).toBe("/tmp/ailoop-home/EVALUATOR_ROLE.md");
+    expect(paths.instructionsPath).toBe("/tmp/ailoop-home/instructions.queue.json");
+    expect(paths.legacyInstructionsPath).toBe("/tmp/ailoop-home/instructions.json");
   });
 
   test("defaultLoopState initializes previous_tool_result", () => {
@@ -69,7 +78,7 @@ describe("loop state persistence", () => {
     await fs.rm(homeDir, { recursive: true, force: true });
   });
 
-  test("ensureLoopHome heals instructions.json when it is a directory", async () => {
+  test("ensureLoopHome heals instructions.queue.json when it is a directory", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-state-heal-instructions-"));
     const paths = buildLoopPaths(homeDir);
 
@@ -84,7 +93,42 @@ describe("loop state persistence", () => {
     expect(JSON.parse(instructionsContent)).toEqual([]);
 
     const homeEntries = await fs.readdir(homeDir);
-    expect(homeEntries.some((entry) => entry.startsWith("instructions.json.invalid-type-"))).toBe(true);
+    expect(homeEntries.some((entry) => entry.startsWith("instructions.queue.json.invalid-type-"))).toBe(true);
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("ensureLoopHome migrates legacy instructions.json into the canonical queue file", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-state-migrate-instructions-"));
+    const paths = buildLoopPaths(homeDir);
+
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(paths.legacyInstructionsPath, `${JSON.stringify(["legacy instruction"], null, 2)}\n`, "utf8");
+
+    await ensureLoopHome(paths);
+
+    expect(JSON.parse(await fs.readFile(paths.instructionsPath, "utf8"))).toEqual(["legacy instruction"]);
+    expect(JSON.parse(await fs.readFile(paths.legacyInstructionsPath, "utf8"))).toEqual([]);
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("appendInstruction preserves legacy queued items and heals them to the canonical queue file", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-state-append-instructions-"));
+    const paths = buildLoopPaths(homeDir);
+
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(paths.instructionsPath, `${JSON.stringify(["canonical instruction"], null, 2)}\n`, "utf8");
+    await fs.writeFile(paths.legacyInstructionsPath, `${JSON.stringify(["legacy instruction"], null, 2)}\n`, "utf8");
+
+    await appendInstruction(paths, "new instruction");
+
+    expect(JSON.parse(await fs.readFile(paths.instructionsPath, "utf8"))).toEqual([
+      "legacy instruction",
+      "canonical instruction",
+      "new instruction"
+    ]);
+    expect(JSON.parse(await fs.readFile(paths.legacyInstructionsPath, "utf8"))).toEqual([]);
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });

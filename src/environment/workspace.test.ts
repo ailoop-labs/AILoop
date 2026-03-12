@@ -23,7 +23,8 @@ function createLoopPaths(homeDir: string): LoopPaths {
     designerRolePath: path.join(homeDir, "DESIGNER_ROLE.md"),
     evaluatorRolePath: path.join(homeDir, "EVALUATOR_ROLE.md"),
     leaderRolePath: path.join(homeDir, "LEADER_ROLE.md"),
-    instructionsPath: path.join(homeDir, "instructions.json"),
+    instructionsPath: path.join(homeDir, "instructions.queue.json"),
+    legacyInstructionsPath: path.join(homeDir, "instructions.json"),
     statePath: path.join(homeDir, "state.json"),
     pidPath: path.join(homeDir, "loop.pid"),
     lockPath: path.join(homeDir, "loop.lock"),
@@ -37,6 +38,7 @@ describe("WorkspaceManager.buildStateChange", () => {
     const paths = createLoopPaths("/tmp/ailoop-home");
 
     expect(paths.taskPath).toBe("/tmp/ailoop-home/goal.md");
+    expect(paths.instructionsPath).toBe("/tmp/ailoop-home/instructions.queue.json");
     expect(paths.statePath).toBe("/tmp/ailoop-home/state.json");
   });
 
