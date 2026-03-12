@@ -58,4 +58,5 @@ License: MIT
 
 ---
 For the people want to contribute, please refer to [CONTRIBUTING.md](./CONTRIBUTING.md).
+
 For technical architecture, CLI details, and system components, please refer to [ARCHITECTURE.md](./ARCHITECTURE.md).
