@@ -51,6 +51,7 @@ const INTERFACE_ERROR_RETRY_DELAY_MS = 60_000;
 const INTERFACE_ERROR_MAX_RETRIES = 5;
 const CODEX_HOME_DIRNAME = "codex-home";
 const CODEX_AUTH_FILENAME = "auth.json";
+const CODEX_CONFIG_FILENAME = "config.toml";
 
 function parseJsonSafely<T>(payload: string): T | null {
   try {
@@ -365,22 +366,26 @@ function resolveIsolatedCodexHome(cwd: string, env: NodeJS.ProcessEnv): string {
   return path.join(ailoopHome, CODEX_HOME_DIRNAME);
 }
 
-async function syncCodexAuthFile(sourceCodexHome: string, targetCodexHome: string): Promise<void> {
+async function syncCodexConfigFiles(sourceCodexHome: string, targetCodexHome: string): Promise<void> {
   await fs.mkdir(targetCodexHome, { recursive: true });
 
   if (path.resolve(sourceCodexHome) === path.resolve(targetCodexHome)) {
     return;
   }
 
-  const sourceAuthPath = path.join(sourceCodexHome, CODEX_AUTH_FILENAME);
-  const targetAuthPath = path.join(targetCodexHome, CODEX_AUTH_FILENAME);
+  const filesToSync = [CODEX_AUTH_FILENAME, CODEX_CONFIG_FILENAME];
 
-  try {
-    const authPayload = await fs.readFile(sourceAuthPath, "utf8");
-    await fs.writeFile(targetAuthPath, authPayload, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
+  for (const filename of filesToSync) {
+    const sourcePath = path.join(sourceCodexHome, filename);
+    const targetPath = path.join(targetCodexHome, filename);
+
+    try {
+      const payload = await fs.readFile(sourcePath, "utf8");
+      await fs.writeFile(targetPath, payload, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
     }
   }
 }
@@ -391,7 +396,7 @@ async function buildProcessEnv(config: CodexConfig, cwd: string, baseEnv: NodeJS
   }
 
   const isolatedCodexHome = resolveIsolatedCodexHome(cwd, baseEnv);
-  await syncCodexAuthFile(resolveSourceCodexHome(baseEnv), isolatedCodexHome);
+  await syncCodexConfigFiles(resolveSourceCodexHome(baseEnv), isolatedCodexHome);
 
   const env = {
     ...baseEnv,
