@@ -15,7 +15,7 @@ function makeToolResult(summary: string): ToolResult {
       log_path: "",
       state_change_path: ""
     },
-    error: null,
+    error: undefined,
     next_state_hint: "continue"
   };
 }

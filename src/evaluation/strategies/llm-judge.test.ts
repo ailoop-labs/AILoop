@@ -33,7 +33,7 @@ function makeRoundContext(): RoundEvaluationContext {
         state_change_path: ".ailoop/runs/example.round.state_change.txt",
         log_path: ".ailoop/runs/example.round.log"
       },
-      error: null,
+      error: undefined,
       next_state_hint: "continue"
     },
     stateChange: "diff --git a/src/environment/workspace.ts b/src/environment/workspace.ts",
@@ -48,7 +48,8 @@ function makeRoundContext(): RoundEvaluationContext {
       usdUsed: 0.05,
       actionsUsed: 5,
       elapsedMs: 5000
-    }
+    },
+    onLog: async () => {}
   };
 }
 

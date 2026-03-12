@@ -132,6 +132,7 @@ export async function writeSummaryFile(summaryPath: string, input: SummaryInput)
     "## Evaluation Result",
     `- Decision: ${input.evaluation.decision}`,
     `- Justification: ${input.evaluation.justification}`,
+    `- Root Cause: ${input.evaluation.root_cause || "none"}`,
     `- Evidence: ${input.evaluation.evidence.join(" | ") || "none"}`,
     "",
     "## Auto Rework Attempts",

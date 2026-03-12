@@ -1,24 +1,128 @@
-export type LoopStateName = "idle" | "starting" | "running" | "cooldown" | "paused" | "stopping" | "error";
+export type LoopStateName =
+  | "idle"
+  | "starting"
+  | "running"
+  | "paused"
+  | "cooldown"
+  | "stopping"
+  | "error";
 
-export type EvaluationDimension =
-  | "goal_alignment"
-  | "causal_validity"
-  | "constraint_compliance"
-  | "risk_externality"
-  | "reversibility_resilience"
-  | "learning_yield";
-
-
-export interface BudgetLimits {
-  usdPerRound: number;
-  timeMinutes: number;
-  actions: number;
+export interface ActionRecord {
+  tool: string;
+  input?: any;
+  args?: any; // Compatibility
+  output: string;
+  status?: "success" | "failure";
+  ok?: boolean; // Compatibility
+  duration_ms?: number;
+  error?: string; // Compatibility
 }
 
-export interface BudgetUsage {
-  usdUsed: number;
-  actionsUsed: number;
-  elapsedMs: number;
+export interface SubTask {
+  rationale: string;
+  assignee: "executor" | "designer";
+  objective: string;
+  expected_outcome: string;
+  impacted_files: string[];
+  recommended_tools: string[];
+}
+
+export interface DimensionAssessment {
+  dimension: string;
+  decision: "pass" | "fail" | "warn" | "unknown";
+  score: number;
+  confidence: number;
+  justification: string;
+  evidence: string[];
+  blocking_issues: string[];
+  recommended_next_action: string;
+}
+
+export interface EvaluationResult {
+  decision: "pass" | "fail";
+  justification: string;
+  root_cause?: string;
+  evidence: string[];
+  recommended_next_action?: string;
+  dimensions?: DimensionAssessment[];
+  aggregate_score?: number;
+}
+
+export interface ToolResult {
+  status: "success" | "failure";
+  summary: string;
+  error?: {
+    type: string;
+    message: string;
+    stack?: string;
+  };
+  artifacts: {
+    log_path: string;
+    state_change_path: string;
+    bundle_path?: string;
+  };
+  next_state_hint?: "continue" | "pause" | "stop";
+  operational_evidence?: string[];
+}
+
+export interface PlannerContext {
+  goal: string;
+  instructions: string[];
+  round: number;
+  budget: BudgetLimits;
+  previous_tool_result: ToolResult | null;
+  previous_round_error: string | null;
+  consecutive_evaluator_failures: number;
+}
+
+export interface LeaderContext {
+  goal: string;
+  lastError: string | null;
+  previousEvaluationJustification: string | null;
+  previousEvaluationDimensions?: DimensionAssessment[];
+  stateChange: string | null;
+}
+
+export interface ExpertOpinion {
+  expert_role: "senior_dev" | "qa_lead" | "product_owner";
+  vote: "approve" | "reject";
+  rationale: string;
+  incapacity_flag: boolean;
+  remediation_hints?: string[];
+}
+
+export interface CCBResult {
+  decision: "approve" | "reject" | "escalate_to_human";
+  experts: ExpertOpinion[];
+  rationale: string;
+}
+
+export interface LeaderDecision {
+  rationale: string;
+  action: "resume" | "stop" | "escalate_to_ccb";
+  diagnosis_type: "implementation_failure" | "constitutional_conflict";
+  instructions: string[];
+  proposed_readme_change?: string;
+}
+
+export interface LoopPaths {
+  homeDir: string;
+  runsDir: string;
+  taskPath: string;
+  plannerRolePath: string;
+  executorRolePath: string;
+  designerRolePath: string;
+  evaluatorRolePath: string;
+  leaderRolePath: string;
+  instructionsPath: string;
+  legacyInstructionsPath: string;
+  statePath: string;
+  legacyStatePath: string;
+  pidPath: string;
+  stopFlagPath: string;
+  pauseFlagPath: string;
+  lockPath: string;
+  dbPath: string;
 }
 
 export interface LoopStateData {
@@ -36,110 +140,21 @@ export interface LoopStateData {
   } | null;
 }
 
-export interface SubTask {
-  rationale: string;
-  assignee: "executor" | "designer";
-  objective: string;
-  expected_outcome: string;
-  impacted_files: string[];
-  recommended_tools: string[];
+export interface BudgetLimits {
+  usdPerRound: number;
+  actions: number;
+  timeMinutes: number;
 }
 
-export interface PlannerContext {
-  goal: string;
-  instructions: string[];
-  round: number;
-  budget: BudgetLimits;
-  previous_tool_result: ToolResult | null;
-  previous_round_error: string | null;
-  consecutive_evaluator_failures: number;
+export interface BudgetUsage {
+  usdUsed: number;
+  actionsUsed: number;
+  elapsedMs: number;
 }
 
-export interface ToolCallResult {
-  ok: boolean;
-  output: string;
-  data?: unknown;
-  error?: string;
-}
+export type AgentRole = "planner" | "executor" | "evaluator" | "leader" | "designer" | "senior_dev" | "qa_lead" | "product_owner";
 
-export type AgentRole = "planner" | "executor" | "evaluator" | "leader" | "designer";
-
-export interface ToolContext {
-  role: AgentRole;
-  homeDir: string;
-}
-
-export interface Tool {
-  name: string;
-  description: string;
-  execute: (args: Record<string, unknown>, context: ToolContext) => Promise<ToolCallResult>;
-  costEstimate: (args: Record<string, unknown>) => number;
-}
-
-export interface ActionRecord {
-  tool: string;
-  args: Record<string, unknown>;
-  ok: boolean;
-  output: string;
-  error?: string;
-}
-
-export interface ToolResult {
-  status: "success" | "failure";
-  summary: string;
-  operational_evidence?: string[];
-  artifacts: {
-    state_change_path: string;
-    log_path: string;
-  };
-  error: {
-    type: string;
-    message: string;
-  } | null;
-  next_state_hint: "continue" | "pause" | "stop";
-}
-
-export interface EvaluationResult {
-  decision: "pass" | "fail";
-  justification: string;
-  evidence: string[];
-  recommended_next_action?: string;
-  dimensions?: DimensionAssessment[];
-  aggregate_score?: number;
-}
-
-export interface DimensionAssessment {
-  dimension: EvaluationDimension;
-  decision: "pass" | "fail" | "unknown";
-  score: number;
-  confidence: number;
-  justification: string;
-  evidence: string[];
-  blocking_issues: string[];
-  recommended_next_action: string;
-}
-
-export interface LeaderContext {
-  goal: string;
-  lastError: string | null;
-  previousEvaluationJustification: string | null;
-  previousEvaluationDimensions?: DimensionAssessment[];
-  stateChange: string | null;
-}
-
-export interface LeaderDecision {
-  rationale: string;
-  action: "resume" | "stop";
-  instructions: string[];
-}
-
-export interface RoundArtifacts {
-  logPath: string;
-  summaryPath: string;
-  metricsPath: string;
-  stateChangePath: string;
-  evaluationPath: string;
-}
+export type EvaluationDimension = string;
 
 export interface RoundEvaluationContext {
   subTask: SubTask;
@@ -149,5 +164,33 @@ export interface RoundEvaluationContext {
   runTimestamp: string;
   budgetLimits: BudgetLimits;
   budgetUsage: BudgetUsage;
-  onLog?: (message: string) => void | Promise<void>;
+  onLog: (message: string) => void | Promise<void>;
 }
+
+export interface RoundArtifacts {
+  logPath: string;
+  summaryPath: string;
+  metricsPath: string;
+  stateChangePath: string;
+  evaluationPath: string;
+  bundlePath?: string;
+}
+
+export interface Tool {
+  name: string;
+  description: string;
+  parameters: any;
+  execute: (args: any, context: ToolContext) => Promise<ToolResult>;
+}
+
+export interface ToolContext {
+  role: AgentRole;
+  round: number;
+  goal: string;
+  instructions: string[];
+  paths: LoopPaths;
+  guardrails: any;
+  onLog: (message: string) => void | Promise<void>;
+}
+
+export type ToolCallResult = ToolResult;

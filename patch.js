@@ -1,42 +1,60 @@
-const fs = require('fs');
+import fs from "node:fs/promises";
+import path from "node:path";
 
-let content = fs.readFileSync('src/loop/engine.ts', 'utf8');
+const files = [
+  "src/agent/designer.ts",
+  "src/agent/executor.ts",
+  "src/environment/workspace.test.ts",
+  "src/environment/workspace.ts",
+  "src/evaluation/evaluator.ts",
+  "src/evaluation/strategies/llm-judge.test.ts",
+  "src/evaluation/strategies/llm-judge.ts",
+  "src/evaluation/strategies/ui-evaluator.ts",
+  "src/loop/control.ts",
+  "src/loop/engine.budget.test.ts",
+  "src/loop/engine.summary-artifact.test.ts",
+  "src/loop/engine.test.ts",
+  "src/loop/loop.pause-on-evaluator-failures.test.ts",
+  "src/loop/scheduler.ts",
+  "src/loop/state.test.ts",
+  "src/reporting/summary.test.ts",
+  "src/reporting/summary.ts",
+  "src/server.test.ts"
+];
 
-// Import UIEvaluator
-content = content.replace(
-  'import { LeaderAgent } from "../agent/leader";',
-  'import { LeaderAgent } from "../agent/leader";\nimport { UIEvaluator } from "../evaluation/strategies/ui-evaluator";'
-);
+const replacements = [
+  {
+    old: /import type \{ ([^}]*LoopPaths[^}]*) \} from "(\.\.\/)*loop\/state"/g,
+    new: 'import type { $1 } from "$2types/contracts"'
+  },
+  {
+    old: /error: null,/g,
+    new: 'error: undefined,'
+  },
+  {
+    old: /"unknown"/g,
+    new: '"unknown"'
+  }
+];
 
-// Add uiEvaluator to class properties
-content = content.replace(
-  'private readonly evaluator;',
-  'private readonly evaluator;\n  private readonly uiEvaluator: UIEvaluator;'
-);
+async function patch() {
+  for (const file of files) {
+    try {
+      let content = await fs.readFile(file, "utf8");
+      let original = content;
 
-// Initialize uiEvaluator in constructor
-content = content.replace(
-  'this.evaluator = createEvaluator(config);',
-  'this.evaluator = createEvaluator(config);\n    this.uiEvaluator = new UIEvaluator(config.homeDir);'
-);
+      for (const r of replacements) {
+        content = content.replace(r.old, r.new);
+      }
 
-// Replace evaluation calls
-// First evaluation call
-content = content.replace(
-  'let evaluation: EvaluationResult = await this.evaluator.evaluate({',
-  'const activeEvaluator = subTask.assignee === "designer" ? this.uiEvaluator : this.evaluator;\n      let evaluation: EvaluationResult = await activeEvaluator.evaluate({'
-);
+      if (content !== original) {
+        await fs.writeFile(file, content, "utf8");
+        console.log(`Patched: ${file}`);
+      }
+    } catch (e) {
+      console.error(`Failed to patch ${file}: ${e.message}`);
+    }
+  }
+}
 
-// Remediation evaluation call
-content = content.replace(
-  'evaluation = await this.evaluator.evaluate({',
-  'const remediationEvaluator = remediationTask.assignee === "designer" ? this.uiEvaluator : this.evaluator;\n          evaluation = await remediationEvaluator.evaluate({'
-);
-
-// Rework evaluation call
-content = content.replace(
-  /await enforceBudgetBeforeAction\(`evaluator\.evaluate auto-rework \$\{attempt\}`\);\n\s*evaluation = await this\.evaluator\.evaluate\(\{/g,
-  'const reworkEvaluator = reworkTask.assignee === "designer" ? this.uiEvaluator : this.evaluator;\n          await enforceBudgetBeforeAction(`evaluator.evaluate auto-rework ${attempt}`);\n          evaluation = await reworkEvaluator.evaluate({'
-);
-
-fs.writeFileSync('src/loop/engine.ts', content);
+patch();

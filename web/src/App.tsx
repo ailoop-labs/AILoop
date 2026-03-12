@@ -87,6 +87,14 @@ interface ProjectRoleItem {
   definition: string;
 }
 
+interface FrictionIndex {
+  reworkChurnRate: number;
+  averageActions: number;
+  leaderInterventionCount: number;
+  overEngineeringCount: number;
+  healthStatus: "healthy" | "at_risk";
+}
+
 const stateTone: Record<LoopStateName, string> = {
   idle: "bg-slate text-mist",
   starting: "bg-sky-300/20 text-sky-100",
@@ -245,6 +253,7 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [status, setStatus] = useState<LoopStatus | null>(null);
+  const [frictionIndex, setFrictionIndex] = useState<FrictionIndex | null>(null);
   const [goal, setGoal] = useState("");
   const [roles, setRoles] = useState<ProjectRoleItem[]>([]);
   const [runs, setRuns] = useState<RunHistoryItem[]>([]);
@@ -314,18 +323,20 @@ export default function App() {
   const refresh = async (tokenOverride?: string): Promise<void> => {
     const activeToken = tokenOverride ?? authToken;
     try {
-      const [nextStatus, nextGoal, nextRuns, nextLogs, nextRoles] = await Promise.all([
+      const [nextStatus, nextGoal, nextRuns, nextLogs, nextRoles, nextFriction] = await Promise.all([
         api<LoopStatus>("/api/status", undefined, activeToken),
         api<GoalResponse>("/api/goal", undefined, activeToken),
         api<RunHistoryItem[]>("/api/runs?limit=20", undefined, activeToken),
         api<{ lines: string[] }>("/api/logs/tail?lines=120", undefined, activeToken),
-        api<ProjectRoleResponse>("/api/roles", undefined, activeToken)
+        api<ProjectRoleResponse>("/api/roles", undefined, activeToken),
+        api<FrictionIndex>("/api/metrics/friction-index", undefined, activeToken).catch(() => null)
       ]);
       setStatus(nextStatus);
       setGoal(nextGoal.goal ?? "");
       setRuns(nextRuns);
       setLogs(nextLogs.lines);
       setRoles(nextRoles.roles ?? []);
+      setFrictionIndex(nextFriction);
       setError(null);
       setAuthError(null);
     } catch (requestError) {
@@ -713,6 +724,37 @@ export default function App() {
             Evaluator failures: {status?.consecutive_evaluator_failures ?? 0}
           </div>
         </div>
+
+        {frictionIndex && (
+          <div className="mt-4 rounded-xl border border-white/10 bg-ink/60 p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs uppercase tracking-[0.2em] text-mist/70">System Health (Friction Index)</p>
+              <span className={`h-2 w-2 rounded-full ${frictionIndex.healthStatus === 'healthy' ? 'bg-accent shadow-[0_0_8px_rgba(102,255,187,0.6)]' : 'bg-ember animate-pulse shadow-[0_0_8px_rgba(255,102,102,0.6)]'}`} />
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-4 md:grid-cols-4">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-mist/50">Rework Churn</p>
+                <p className={`text-lg font-bold ${(frictionIndex.reworkChurnRate > 0.4) ? 'text-ember' : 'text-mist'}`}>
+                  {(frictionIndex.reworkChurnRate * 100).toFixed(0)}%
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-mist/50">Avg Actions</p>
+                <p className={`text-lg font-bold ${(frictionIndex.averageActions > 50) ? 'text-warning' : 'text-mist'}`}>
+                  {frictionIndex.averageActions.toFixed(1)}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-mist/50">Interventions</p>
+                <p className="text-lg font-bold text-mist">{frictionIndex.leaderInterventionCount}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-mist/50">Over-Engineering</p>
+                <p className="text-lg font-bold text-mist">{frictionIndex.overEngineeringCount}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="mt-4 rounded-xl border border-white/10 bg-ink/60 p-4">
           <div className="flex items-center justify-between gap-3">
@@ -1143,7 +1185,7 @@ export default function App() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.2em] text-mist/55">
-                        Run #{runHistoryPagination.startIndex + index + 1}
+                        Run {run.round !== undefined ? `#${run.round}` : `#${runHistoryPagination.startIndex + index + 1}`}
                       </p>
                       <p className="text-xs uppercase tracking-[0.2em] text-accent/80">
                         {parsedTimestamp ? displayTimestamp : run.timestamp}
@@ -1179,6 +1221,9 @@ export default function App() {
                   </p>
                   <p className="mt-2 text-xs text-mist/65">Score: {report.aggregateScore}</p>
                   <p className="mt-2 text-xs text-mist/65">Why: {report.justification}</p>
+                  {report.decision === "fail" && report.rootCause !== "none" ? (
+                    <p className="mt-2 text-xs font-semibold text-ember">Root Cause: {report.rootCause}</p>
+                  ) : null}
                   <p className="mt-2 text-xs text-mist/65">Evidence: {report.evidence}</p>
                   {report.dimensionBreakdown.length > 0 ? (
                     <div className="mt-3 grid gap-2 lg:grid-cols-2">
@@ -1364,6 +1409,9 @@ export default function App() {
                         </div>
                       </div>
                       <p className="mt-3 text-sm text-mist/85">Why: {selectedArtifactsReport.justification}</p>
+                      {selectedArtifactsReport.decision === "fail" && selectedArtifactsReport.rootCause !== "none" ? (
+                        <p className="mt-2 text-sm font-semibold text-ember">Root Cause: {selectedArtifactsReport.rootCause}</p>
+                      ) : null}
                       <p className="mt-2 text-sm text-mist/75">Evidence: {selectedArtifactsReport.evidence}</p>
                       <p className="mt-2 text-sm text-mist/75">Next: {selectedArtifactsReport.nextRecommendation}</p>
                       {selectedArtifactsReport.dimensionBreakdown.length > 0 ? (

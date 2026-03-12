@@ -49,7 +49,7 @@ function makeSummaryInput(autoReworkAttempts: string[]): SummaryInput {
         state_change_path: ".ailoop/runs/example.round.state_change.txt",
         log_path: ".ailoop/runs/example.round.log"
       },
-      error: null,
+      error: undefined,
       next_state_hint: "continue"
     },
     evaluation: {

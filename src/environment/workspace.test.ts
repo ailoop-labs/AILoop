@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { execSync } from "node:child_process";
 import { describe, expect, test } from "bun:test";
-import type { LoopPaths } from "../loop/state";
+import type { LoopPaths } from "../types/contracts";
 import { WorkspaceManager } from "./workspace";
 
 function run(cmd: string, cwd: string): void {
@@ -26,10 +26,12 @@ function createLoopPaths(homeDir: string): LoopPaths {
     instructionsPath: path.join(homeDir, "instructions.queue.json"),
     legacyInstructionsPath: path.join(homeDir, "instructions.json"),
     statePath: path.join(homeDir, "state.json"),
+    legacyStatePath: path.join(homeDir, "loop.state"),
     pidPath: path.join(homeDir, "loop.pid"),
     lockPath: path.join(homeDir, "loop.lock"),
     pauseFlagPath: path.join(homeDir, "loop.pause"),
-    stopFlagPath: path.join(homeDir, "loop.stop")
+    stopFlagPath: path.join(homeDir, "loop.stop"),
+    dbPath: path.join(homeDir, "ailoop.db")
   };
 }
 

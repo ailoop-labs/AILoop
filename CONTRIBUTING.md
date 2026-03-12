@@ -150,6 +150,7 @@ Before opening a Pull Request, make sure you can answer yes to the following:
 - You verified the change with concrete commands.
 - You did not introduce secrets or private endpoints.
 - You documented any tradeoffs, residual risks, or follow-up work.
+- **[UI/UX Parity]:** If your change affects core logic or the Web Console, does it adhere to the "High-Bandwidth Observability" mandate? (i.e., Did you use visual patterns like timelines, colors, or graphs instead of forcing humans to read raw text/JSON?)
 
 In the Pull Request description, include:
 

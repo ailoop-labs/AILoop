@@ -67,7 +67,7 @@ describe("loop state persistence", () => {
         state_change_path: "state_change.txt",
         log_path: "round.log"
       },
-      error: null,
+      error: undefined,
       next_state_hint: "continue"
     };
     await writeLoopState(paths, state);
@@ -141,6 +141,85 @@ describe("loop state persistence", () => {
     expect(migrated.round).toBe(7);
     expect(migrated.last_error).toBe("legacy state");
     expect(migrated.pid).toBe(4321);
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("ensureLoopHome removes legacy loop.state when canonical state.json already exists", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-state-clean-legacy-state-"));
+    const paths = buildLoopPaths(homeDir);
+
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(
+      paths.statePath,
+      JSON.stringify(
+        {
+          state: "running",
+          round: 11,
+          updated_at: "2026-03-12T00:00:00.000Z",
+          pid: 8765,
+          last_error: "canonical state"
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+    await fs.writeFile(
+      paths.legacyStatePath,
+      JSON.stringify(
+        {
+          state: "paused",
+          round: 3,
+          updated_at: "2026-03-11T00:00:00.000Z",
+          pid: 1234,
+          last_error: "stale legacy state"
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    await ensureLoopHome(paths);
+
+    expect(await readLoopState(paths)).toMatchObject({
+      state: "running",
+      round: 11,
+      pid: 8765,
+      last_error: "canonical state"
+    });
+    expect(await fs.stat(paths.statePath)).toBeDefined();
+    await expect(fs.access(paths.legacyStatePath)).rejects.toThrow();
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("ensureLoopHome preserves legacy loop.state when canonical state.json is invalid", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-state-invalid-canonical-state-"));
+    const paths = buildLoopPaths(homeDir);
+
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(paths.statePath, "{\n", "utf8");
+    await fs.writeFile(
+      paths.legacyStatePath,
+      JSON.stringify(
+        {
+          state: "paused",
+          round: 5,
+          updated_at: "2026-03-12T00:00:00.000Z",
+          pid: 5555,
+          last_error: "legacy state"
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    await ensureLoopHome(paths);
+
+    expect(await fs.readFile(paths.legacyStatePath, "utf8")).toContain("\"round\": 5");
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });

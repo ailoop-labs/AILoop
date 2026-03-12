@@ -7,13 +7,15 @@ const LEADER_DECISION_SCHEMA: JsonSchema = {
   type: "object",
   properties: {
     rationale: { type: "string" },
-    action: { type: "string", enum: ["resume", "stop"] },
+    action: { type: "string", enum: ["resume", "stop", "escalate_to_ccb"] },
+    diagnosis_type: { type: "string", enum: ["implementation_failure", "constitutional_conflict"] },
     instructions: {
       type: "array",
       items: { type: "string" }
-    }
+    },
+    proposed_readme_change: { type: "string" }
   },
-  required: ["rationale", "action", "instructions"],
+  required: ["rationale", "action", "diagnosis_type", "instructions"],
   additionalProperties: false
 };
 
@@ -30,23 +32,14 @@ function buildLeaderPrompt(context: LeaderContext, roleDefinition: string): stri
     "## Current State",
     `- Goal: ${context.goal}`,
     `- Last Error: ${context.lastError ?? "None"}`,
-    `- Previous Evaluator Justification: ${context.previousEvaluationJustification ?? "None"}`,
-    "",
-    "## Evaluation Dimensions Breakdown",
+    `- Previous Evaluation Dimensions:`,
     dimensionsSummary,
     "",
-    "## Workspace Changes (Diff)",
-    context.stateChange ?? "No changes.",
-    "",
     "## Task",
-    "You are the Leader. The AILoop is currently PAUSED because of the errors/failures above.",
-    "Your job is to diagnose the root cause and provide strategic instructions to unblock the loop.",
-    "1. Read necessary logs, source code or configuration to understand what went wrong.",
-    "2. If needed, write to README.md, GOAL.md or ARCHITECTURE.md to adjust the strategy.",
-    "3. Provide concrete instructions for the Planner and Executor for the next round.",
-    "4. Return a JSON object with your rationale, action ('resume' or 'stop'), and the instructions.",
-    "",
-    "IMPORTANT: You MUST NOT modify source code or tests. You may only modify directional documents."
+    "Analyze the situation and decide the next move.",
+    "1. If it's an 'implementation_failure', provide strategic instructions for the Executor and set action='resume'.",
+    "2. If the goal in README.md is unreachable given the current constraints/logic, it's a 'constitutional_conflict'. Set action='escalate_to_ccb' and propose a change to README.md.",
+    "3. Return the decision as JSON."
   ].join("\n");
 }
 
@@ -62,7 +55,6 @@ export class LeaderAgent {
 
   constructor(private readonly config: AppConfig) {
     this.codex = new CodexClient(config.codex);
-    // Leader needs workspace write access to modify ARCHITECTURE.md
     this.sandbox = "workspace-write";
   }
 
@@ -70,36 +62,25 @@ export class LeaderAgent {
     const roleDefinition = await loadProjectRoleDefinition(options.paths.homeDir, "leader");
     const prompt = buildLeaderPrompt(options.context, roleDefinition);
 
-    await options.onLog("Leader started Codex execution to unblock the loop.");
-    const heartbeatStartedAt = Date.now();
-    const heartbeat = setInterval(() => {
-      const elapsedSeconds = Math.floor((Date.now() - heartbeatStartedAt) / 1000);
-      options.onLog(`Leader running... ${elapsedSeconds}s elapsed.`);
-    }, 15_000);
-
+    await options.onLog("Leader analyzing failures and formulating strategy...");
+    
     try {
       const result = await this.codex.runJson<LeaderDecision>({
         prompt,
         schema: LEADER_DECISION_SCHEMA,
         cwd: process.cwd(),
-        sandbox: this.sandbox,
-        onStdoutChunk: (chunk) => {
-          options.onLog(`[stdout] ${chunk.trim()}`);
-        },
-        onStderrChunk: (chunk) => {
-          options.onLog(`[stderr] ${chunk.trim()}`);
-        }
+        sandbox: this.sandbox
       });
 
-      await options.onLog(`Leader Codex execution finished (ok=${result.ok}).`);
-
       if (!result.ok || !result.data) {
-        throw new Error(result.error ?? result.stderr ?? "Leader execution failed");
+        throw new Error(result.error ?? result.stderr ?? "Leader strategy execution failed");
       }
 
+      await options.onLog(`Leader Diagnosis: ${result.data.diagnosis_type}. Action: ${result.data.action}.`);
       return result.data;
-    } finally {
-      clearInterval(heartbeat);
+    } catch (err) {
+      await options.onLog(`Leader Error: ${(err as Error).message}`);
+      throw err;
     }
   }
 }

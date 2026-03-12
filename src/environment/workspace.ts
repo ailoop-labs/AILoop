@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import type { Stats } from "node:fs";
 import path from "node:path";
-import type { LoopPaths } from "../loop/state";
+import type { LoopPaths } from "../types/contracts";
 import { runShellCommand } from "../utils/exec";
 import { fileExists, readTextFile, writeTextFile } from "../utils/fs";
 

@@ -160,7 +160,7 @@ async function seedLoopEntrypoint(workspaceRoot: string) {
       "    ...current,",
       '    state: "running",',
       "    pid: process.pid,",
-      "    last_error: null,",
+      "    last_error: undefined,",
       "    updated_at: updatedAt",
       "  }, null, 2)}\\n`,",
       '  "utf8"',
@@ -327,7 +327,7 @@ describe("console server API contract", () => {
           state_change_path: "state-change.txt",
           log_path: "round.log"
         },
-        error: null,
+        error: undefined,
         next_state_hint: "continue"
       },
       current_budget: {
@@ -362,7 +362,7 @@ describe("console server API contract", () => {
           state_change_path: "state-change.txt",
           log_path: "round.log"
         },
-        error: null,
+        error: undefined,
         next_state_hint: "continue"
       },
       current_budget: {

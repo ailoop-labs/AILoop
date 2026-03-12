@@ -1,6 +1,7 @@
 export interface RunEvaluation {
   decision: "pass" | "fail";
   justification: string;
+  root_cause?: string;
   evidence: string[];
   aggregate_score?: number;
   dimensions?: RunEvaluationDimension[];
@@ -20,6 +21,7 @@ export interface RunEvaluationDimension {
 
 export interface RunHistoryItem {
   timestamp: string;
+  round?: number;
   summary: string;
   metrics: Record<string, unknown> | null;
   evaluation: RunEvaluation | null;
@@ -44,6 +46,7 @@ export interface RoundReport {
   error: string;
   decision: string;
   justification: string;
+  rootCause: string;
   evidence: string;
   aggregateScore: string;
   budgetCost: string;
@@ -86,10 +89,12 @@ function parseRoundReport(summary: string): RoundReport {
     error: extractBulletValue(summary, "Error") ?? "none",
     decision: extractBulletValue(summary, "Decision") ?? "unknown",
     justification: extractBulletValue(summary, "Justification") ?? "No evaluator justification captured",
+    rootCause: extractBulletValue(summary, "Root Cause") ?? "none",
     evidence: extractBulletValue(summary, "Evidence") ?? "No evaluator evidence captured",
     budgetCost: extractBulletValue(summary, "Cost USD") ?? "N/A",
     budgetTime: extractBulletValue(summary, "Time ms") ?? "N/A",
     budgetActions: extractBulletValue(summary, "Actions") ?? "N/A",
+    dimensionBreakdown: [],
     nextRecommendation: extractMarkdownSection(summary, "Next Round Recommendation") || "No recommendation captured"
   };
 }
@@ -157,6 +162,7 @@ export function projectRunHistoryReport(run: RunHistoryItem): RoundReport {
     ...fallback,
     decision: preferStructuredValue(run.evaluation?.decision, fallback.decision),
     justification: preferStructuredValue(run.evaluation?.justification, fallback.justification),
+    rootCause: preferStructuredValue(run.evaluation?.root_cause, fallback.rootCause),
     evidence: preferStructuredEvidence(run.evaluation, fallback.evidence),
     aggregateScore: preferStructuredAggregateScore(run.evaluation),
     dimensionBreakdown: preferStructuredDimensionBreakdown(run.evaluation),

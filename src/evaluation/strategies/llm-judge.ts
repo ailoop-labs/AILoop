@@ -310,6 +310,7 @@ export function aggregateDimensionAssessments(
 ): {
   decision: EvaluationResult["decision"];
   justification: string;
+  root_cause: string;
   evidence: string[];
   recommended_next_action: string;
   aggregateScore: number;
@@ -337,6 +338,7 @@ export function aggregateDimensionAssessments(
     return {
       decision: "fail",
       justification: `Hard gate failed in ${hardGateFailure.dimension}. ${hardGateReason}`,
+      root_cause: `hard_gate_violation:${hardGateFailure.dimension}`,
       evidence: withDetailedEvidence([...evidence, hardGateReason], [hardGateFailure]),
       recommended_next_action: followUpActions,
       aggregateScore: score
@@ -352,6 +354,7 @@ export function aggregateDimensionAssessments(
     return {
       decision: "fail",
       justification: `Insufficient evidence for key dimensions: ${missing}.`,
+      root_cause: `insufficient_evidence:${unknownKeyDimensions[0].dimension}`,
       evidence: withDetailedEvidence(evidence, unknownKeyDimensions),
       recommended_next_action: followUpActions
         ? `pause and gather evidence: ${followUpActions}`
@@ -366,9 +369,11 @@ export function aggregateDimensionAssessments(
   const blockingIssue = adjusted.flatMap((assessment) => assessment.blocking_issues).find(Boolean);
   if (blockingIssue) {
     const followUpActions = toFollowUpActions(keyDimensionsWithBlockingIssues);
+    const primaryDimension = keyDimensionsWithBlockingIssues[0]?.dimension ?? adjusted.find(a => a.blocking_issues.length > 0)?.dimension ?? "unknown";
     return {
       decision: "fail",
       justification: "Blocking issues were reported by dimension evaluators.",
+      root_cause: `blocking_issue:${primaryDimension}`,
       evidence: withDetailedEvidence([...evidence, blockingIssue], keyDimensionsWithBlockingIssues),
       recommended_next_action: followUpActions || blockingIssue,
       aggregateScore: score
@@ -382,6 +387,7 @@ export function aggregateDimensionAssessments(
     return {
       decision: "fail",
       justification: `One or more dimensions failed: ${failedDimensions.map((item) => item.dimension).join(", ")}.`,
+      root_cause: `dimension_failure:${failedDimensions[0].dimension}`,
       evidence: withDetailedEvidence(evidence, failedKeyDimensions),
       recommended_next_action: followUpActions || choosePriorityAction(failedDimensions),
       aggregateScore: score
@@ -392,6 +398,7 @@ export function aggregateDimensionAssessments(
     return {
       decision: "fail",
       justification: `Aggregate score ${score.toFixed(2)} is below threshold ${minPassScore.toFixed(2)}.`,
+      root_cause: "low_aggregate_score",
       evidence,
       recommended_next_action: choosePriorityAction(adjusted),
       aggregateScore: score
@@ -401,6 +408,7 @@ export function aggregateDimensionAssessments(
   return {
     decision: "pass",
     justification: `All evaluated dimensions passed with aggregate score ${score.toFixed(2)}.`,
+    root_cause: "none",
     evidence,
     recommended_next_action: "continue",
     aggregateScore: score
@@ -544,6 +552,7 @@ export class LLMJudgeEvaluator implements Evaluator {
     return {
       decision: aggregate.decision,
       justification: aggregate.justification,
+      root_cause: aggregate.root_cause,
       evidence: aggregate.evidence,
       recommended_next_action: aggregate.recommended_next_action,
       dimensions: assessments,

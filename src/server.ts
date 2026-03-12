@@ -3,6 +3,7 @@ import path from "node:path";
 import { loadConfig, type AppConfig } from "./config/env";
 import { patchRuntimeLoopConfig, readRuntimeLoopConfig, resetRuntimeLoopConfig } from "./config/runtime";
 import { isDateBasedAdminTokenExpired } from "./auth/admin-token";
+import { DatabaseManager } from "./utils/db";
 import {
   getLoopStatus,
   getRunArtifacts,
@@ -57,6 +58,7 @@ interface ConsoleRuntime {
   adminToken: string;
   tokenAuthEnabled: boolean;
   adminTokenIssuedDate: string;
+  db: DatabaseManager;
 }
 
 interface CreateConsoleFetchOptions {
@@ -67,13 +69,15 @@ interface CreateConsoleFetchOptions {
 function createConsoleRuntime(options: CreateConsoleFetchOptions = {}): ConsoleRuntime {
   const config = options.config ?? loadConfig();
   const adminToken = config.consoleAdminToken.trim();
+  const dbPath = path.join(config.homeDir, "ailoop.db");
 
   return {
     config,
     adminToken,
     tokenAuthEnabled: adminToken.length > 0,
     adminTokenIssuedDate:
-      options.adminTokenIssuedDate ?? (process.env.AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE ?? "").trim()
+      options.adminTokenIssuedDate ?? (process.env.AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE ?? "").trim(),
+    db: new DatabaseManager({ dbPath })
   };
 }
 
@@ -118,10 +122,10 @@ async function serveStaticFromDist(urlPath: string): Promise<Response | null> {
 function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
   return async function fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const { config, adminToken, tokenAuthEnabled, adminTokenIssuedDate } = runtime;
+    const { config, adminToken, tokenAuthEnabled, adminTokenIssuedDate, db } = runtime;
 
     if (url.pathname === "/api/health" && request.method === "GET") {
-      return json({ ok: true, service: "ailoop-console" });
+      return json({ ok: true, service: "ailoop-console", db: "connected" });
     }
 
     if (url.pathname === "/api/auth/status" && request.method === "GET") {
@@ -160,7 +164,20 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
     }
 
     if (url.pathname === "/api/status" && request.method === "GET") {
-      return json(await getLoopStatus(config));
+      const dbState = await db.getLoopState();
+      const fsStatus = await getLoopStatus(config);
+      
+      // Merge: DB is authoritative for history/metrics, FS is authoritative for PID/Process status
+      return json({
+        ...fsStatus,
+        ...dbState,
+        pid: fsStatus.pid,
+        pid_alive: fsStatus.pid_alive
+      });
+    }
+
+    if (url.pathname === "/api/metrics/friction-index" && request.method === "GET") {
+      return json(await db.getFrictionIndex());
     }
 
     if (url.pathname === "/api/config" && request.method === "GET") {
@@ -218,6 +235,26 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
     if (url.pathname === "/api/runs" && request.method === "GET") {
       const limitRaw = Number(url.searchParams.get("limit") ?? "20");
       const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, limitRaw)) : 20;
+      
+      const dbRuns = await db.getLatestRounds(limit);
+      if (dbRuns.length > 0) {
+        return json(dbRuns.map(r => ({
+          timestamp: r.run_timestamp,
+          round: r.round_id,
+          summary: `Round ${r.round_id}: ${r.state}`,
+          metrics: {
+            usd_used: r.usd_used,
+            actions_used: r.actions_used,
+            elapsed_ms: r.elapsed_ms
+          },
+          evaluation: {
+            decision: r.decision,
+            justification: r.justification,
+            root_cause: r.root_cause
+          }
+        })));
+      }
+      
       return json(await listRuns(config, limit));
     }
 

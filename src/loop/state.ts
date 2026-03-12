@@ -1,26 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { LoopStateData, LoopStateName } from "../types/contracts";
+import { DatabaseManager } from "../utils/db";
+import type { LoopPaths, LoopStateData, LoopStateName } from "../types/contracts";
+export type { LoopPaths, LoopStateData };
 import { ensureDir, ensureRegularFile, fileExists, readJsonFile, readTextFile, writeJsonFile } from "../utils/fs";
-
-export interface LoopPaths {
-  homeDir: string;
-  runsDir: string;
-  taskPath: string;
-  plannerRolePath: string;
-  executorRolePath: string;
-  designerRolePath: string;
-  evaluatorRolePath: string;
-  leaderRolePath: string;
-  instructionsPath: string;
-  legacyInstructionsPath: string;
-  statePath: string;
-  legacyStatePath: string;
-  pidPath: string;
-  stopFlagPath: string;
-  pauseFlagPath: string;
-  lockPath: string;
-}
 
 const INTERRUPTED_LOOP_STATES = new Set<LoopStateName>(["starting", "running", "cooldown", "stopping"]);
 
@@ -36,12 +19,13 @@ export function buildLoopPaths(homeDir: string): LoopPaths {
     leaderRolePath: path.join(homeDir, "LEADER_ROLE.md"),
     instructionsPath: path.join(homeDir, "instructions.queue.json"),
     legacyInstructionsPath: path.join(homeDir, "instructions.json"),
-    statePath: path.join(homeDir, "state.json"),
+    statePath: path.join(homeDir, "state.json"), // Maintained for transition/compat but not authoritative
     legacyStatePath: path.join(homeDir, "loop.state"),
     pidPath: path.join(homeDir, "loop.pid"),
     stopFlagPath: path.join(homeDir, "loop.stop"),
     pauseFlagPath: path.join(homeDir, "loop.pause"),
-    lockPath: path.join(homeDir, "loop.lock")
+    lockPath: path.join(homeDir, "loop.lock"),
+    dbPath: path.join(homeDir, "ailoop.db")
   };
 }
 
@@ -78,16 +62,32 @@ async function writeInstructionQueue(paths: LoopPaths, queue: string[]): Promise
 }
 
 async function migrateLegacyLoopState(paths: LoopPaths): Promise<void> {
-  if (await fileExists(paths.statePath)) {
-    return;
+  // Try to bootstrap Database from state.json if DB is empty
+  const db = new DatabaseManager({ dbPath: paths.dbPath });
+  const existingDbState = await db.getLoopState();
+  
+  if (!existingDbState) {
+    const jsonState = await readJsonFile<Partial<LoopStateData>>(paths.statePath, {});
+    if (Object.keys(jsonState).length > 0) {
+      console.log("[DB BOOTSTRAP] Initializing database from state.json");
+      await db.setLoopState(normalizeLoopState(jsonState));
+    } else if (await fileExists(paths.legacyStatePath)) {
+      const legacyState = await readJsonFile<Partial<LoopStateData>>(paths.legacyStatePath, defaultLoopState());
+      console.log("[DB BOOTSTRAP] Initializing database from legacy loop.state");
+      await db.setLoopState(normalizeLoopState(legacyState));
+    }
   }
 
-  if (!(await fileExists(paths.legacyStatePath))) {
-    return;
-  }
+  db.close();
 
-  const legacyState = normalizeLoopState(await readJsonFile<Partial<LoopStateData>>(paths.legacyStatePath, defaultLoopState()));
-  await writeJsonFile(paths.statePath, legacyState);
+  // Cleanup legacy files once DB is confirmed to have state
+  const confirmedDb = new DatabaseManager({ dbPath: paths.dbPath });
+  const finalState = await confirmedDb.getLoopState();
+  if (finalState) {
+    if (await fileExists(paths.statePath)) await fs.unlink(paths.statePath).catch(() => {});
+    if (await fileExists(paths.legacyStatePath)) await fs.unlink(paths.legacyStatePath).catch(() => {});
+  }
+  confirmedDb.close();
 }
 
 export async function ensureLoopHome(paths: LoopPaths): Promise<void> {
@@ -134,8 +134,11 @@ function normalizeLoopState(raw: Partial<LoopStateData> | null | undefined): Loo
 }
 
 export async function readLoopState(paths: LoopPaths): Promise<LoopStateData> {
-  const raw = await readJsonFile<Partial<LoopStateData>>(paths.statePath, defaultLoopState());
-  return normalizeLoopState(raw);
+  const db = new DatabaseManager({ dbPath: paths.dbPath });
+  const raw = await db.getLoopState();
+  db.close();
+  
+  return normalizeLoopState(raw as any);
 }
 
 export async function writeLoopState(paths: LoopPaths, state: LoopStateData): Promise<void> {
@@ -143,7 +146,16 @@ export async function writeLoopState(paths: LoopPaths, state: LoopStateData): Pr
     ...state,
     updated_at: new Date().toISOString()
   };
-  await writeJsonFile(paths.statePath, nextState);
+  
+  const db = new DatabaseManager({ dbPath: paths.dbPath });
+  await db.setLoopState(nextState);
+  db.close();
+}
+
+export async function saveEvaluation(paths: LoopPaths, roundId: number, evaluation: any): Promise<void> {
+  const db = new DatabaseManager({ dbPath: paths.dbPath });
+  await db.saveEvaluation(roundId, evaluation);
+  db.close();
 }
 
 export async function updateLoopState(

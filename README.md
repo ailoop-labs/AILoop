@@ -25,10 +25,18 @@ Design principles:
 *Our philosophy is to empower the agent with generalized tools while strictly limiting the "blast radius" via budgets and ensuring recoverability, rather than attempting to aggressively sandbox every possible action.*
 
 **Hard Rules (System Enforced):**
+- **Constitutional Integrity (README.md):** The `README.md` file is the system's "Constitution." Agents are prohibited from modifying it directly to lower goals or expectations. Any modification to the Constitution must be approved by the **Change Control Board (CCB)** consisting of specialized expert agents (Dev, QA, PO).
+- **Ruthless Simplicity (YAGNI):** Code is a liability. Agents MUST implement the dumbest, simplest, most literal solution that satisfies the current objective. "Future-proofing", building speculative abstractions, or handling out-of-scope edge cases is strictly prohibited. If a simpler native feature exists, use it instead of introducing new dependencies or design patterns.
+- **Tiered Governance Loop:** 
+    1. **Auto-Rework:** 2 attempts for the Executor to self-correct based on Evaluator feedback.
+    2. **Leader Intervention:** Diagnosis and strategic instructions from the Leader.
+    3. **CCB Consensus:** Expert panel review before any change to the core mission or "Constitution."
+- **Expert Escalation:** If CCB experts identify a task beyond current AI capability, they must trigger a **Hard Pause** for human intervention.
 - **Budget Breaker:** Pause execution immediately if Cost (USD), Time, or Action count limits are breached during a round. Require human approval to resume.
 - **Recoverable Rounds:** Where the environment permits (e.g., Git repositories, transactional databases), the engine must attempt to rollback state changes if evaluation fails catastrophically or budgets are broken.
 - **Silent Secret Redaction:** Logs and artifacts must automatically mask known environment secrets (e.g., variables containing `TOKEN`, `KEY`, `SECRET`) before writing to disk, allowing the agent to use API keys without leaking them.
-- **Evaluation Loop:** Pause automatically on repeated evaluator failures (e.g., failing to meet the success criteria after 3 consecutive attempts).
+- **Evaluation Loop:** Pause automatically on repeated evaluator failures (e.g., failing to meet the success criteria after the full governance cycle).
+- **Observability Parity & High-Bandwidth UX:** The Web Console is a first-class citizen for human governance. Because human information bandwidth is narrow, the UI must prioritize **pattern recognition** (e.g., visual timelines, color-coded health dashboards, semantic diffs) over raw text parsing. Any changes to core state logic (SQLite schema, governance flows) MUST be reflected in the Web Console with these usability principles in mind. Failure to maintain UI alignment or degrading human UX is a constitutional violation.
 - **Crash Recovery:** If the engine process dies during a round, it must detect the interrupted state on restart and safely pause or revert to prevent corruption.
 
 ## 3. Scope

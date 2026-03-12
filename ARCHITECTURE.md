@@ -467,7 +467,26 @@ Suggested module boundaries for implementation:
 
 These file names are implementation guidance, not a public API guarantee, but they reflect the intended decomposition of the MVP.
 
-## 14. Definition of Done for This Architecture Contract
+## 14. Architectural Evolution & Refactoring (Strangler Fig)
+
+Big Bang Rewrites (e.g., rewriting the entire frontend in one round) are strictly prohibited as they violate the "Small, Safe Iterations" mandate. Architectural evolution must be driven by quantitative pain (Telemetry) and executed incrementally.
+
+### 14.1 The Friction Index (Telemetry-Driven Triggers)
+The system leverages SQLite to aggregate historical performance data. The `Leader` agent must query these metrics to calculate the **Friction Index**, composed of:
+- **Rework Churn Rate:** The frequency of `Auto-Rework` or `Leader Intervention` triggered over the last 10-20 rounds.
+- **Action Bloat:** The upward trend in `action_count` required to complete similar UI or logic tasks.
+- **Hot-file Mutation Rate:** The frequency at which "God Objects" (monolithic files) are patched, indicating a need for modularization.
+
+**Concrete Trigger:** The Leader MUST propose an `Architectural Migration` to the CCB if a specific component causes >3 failures or interventions within 5 consecutive rounds due to technical debt (e.g., `DOM_complexity`, `type_mismatch` as flagged by the Evaluator), OR if the cost to modify a file exceeds 200% of its historical baseline.
+
+### 14.2 The Strangler Fig Protocol
+If the CCB approves a refactor, it must be executed using the **Strangler Fig Pattern**, bounded by per-round budgets:
+1.  **Phase 1 (Infrastructure):** Introduce new dependencies (e.g., React, Vite) alongside the old system. Ensure the build passes without touching legacy code.
+2.  **Phase 2 (Coexistence):** Mount a minimal root node of the new stack within the legacy application. Verify both run simultaneously.
+3.  **Phase 3 (Slice Migration):** Migrate one isolated component/slice per round. The `Evaluator` must ensure regression tests pass for both old and new slices.
+4.  **Phase 4 (Cleanup):** Remove the legacy code only after all slices are migrated.
+
+## 15. Definition of Done for This Architecture Contract
 
 The architecture is sufficient for MVP implementation when it clearly answers all of the following:
 

@@ -1,6 +1,6 @@
 import type { AppConfig } from "../config/env";
 import { resolveCodexBin } from "../config/env";
-import type { LoopPaths } from "../loop/state";
+import type { LoopPaths } from "../types/contracts";
 import type { ActionRecord, SubTask, ToolResult } from "../types/contracts";
 import type { Guardrails } from "./guardrails";
 import { CodexClient, type JsonSchema } from "./codex-client";
@@ -281,7 +281,7 @@ export class DesignerAgent {
           state_change_path: "",
           log_path: ""
         },
-        error: safeError,
+        error: safeError ?? undefined,
         next_state_hint: codexResult.data.next_state_hint ?? (safeStatus === "success" ? "continue" : "pause")
       }
     };

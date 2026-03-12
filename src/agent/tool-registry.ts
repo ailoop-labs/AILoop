@@ -1,15 +1,8 @@
+import fs from "node:fs/promises";
 import path from "node:path";
-import type { Tool, ToolCallResult, ToolContext } from "../types/contracts";
-import { readTextFile, writeTextFile } from "../utils/fs";
 import { runShellCommand } from "../utils/exec";
-
-function toStringArg(args: Record<string, unknown>, key: string): string {
-  const value = args[key];
-  if (typeof value !== "string") {
-    throw new Error(`Invalid '${key}' argument`);
-  }
-  return value;
-}
+import type { Tool, ToolContext, ToolResult, AgentRole } from "../types/contracts";
+import { SkillManager } from "./skills/manager";
 
 function normalizePath(homeDir: string, requestedPath: string): string {
   if (path.isAbsolute(requestedPath)) {
@@ -18,64 +11,64 @@ function normalizePath(homeDir: string, requestedPath: string): string {
   return path.resolve(homeDir, requestedPath);
 }
 
-function ok(output: string, data?: unknown): ToolCallResult {
-  return { ok: true, output, data };
+function ok(output: string): ToolResult {
+  return { status: "success", summary: output, artifacts: { log_path: "", state_change_path: "" } };
 }
 
-function fail(message: string): ToolCallResult {
-  return { ok: false, output: "", error: message };
+function fail(message: string): ToolResult {
+  return { status: "failure", summary: "", error: { type: "ToolExecutionError", message }, artifacts: { log_path: "", state_change_path: "" } };
 }
-
-import { SkillManager } from "./skills/manager";
 
 export class ToolRegistry {
   private readonly tools = new Map<string, Tool>();
   private readonly skillManager: SkillManager;
 
-  constructor(workspaceRoot: string = process.cwd()) {
-    this.skillManager = new SkillManager(workspaceRoot);
-    this.registerBuiltins();
+  constructor() {
+    this.registerBuiltinTools();
+    // Dummy path for now, should be set per context ideally but SkillManager is being refactored
+    this.skillManager = new SkillManager(""); 
   }
 
-  async initialize(): Promise<void> {
-    await this.skillManager.initialize();
+  async initialize() {
+    // No-op for now but required for interface compatibility
   }
 
-  getSkillManager(): SkillManager {
+  getSkillManager() {
     return this.skillManager;
-  }
-
-  getTool(name: string): Tool | undefined {
-    return this.tools.get(name);
   }
 
   listTools(): Tool[] {
     return Array.from(this.tools.values());
   }
 
-  register(tool: Tool): void {
+  register(tool: Tool) {
     this.tools.set(tool.name, tool);
   }
 
-  async call(name: string, args: Record<string, unknown>, context: ToolContext): Promise<ToolCallResult> {
-    const tool = this.tools.get(name);
-    if (!tool) {
-      return fail(`Unknown tool: ${name}`);
-    }
-
-    return tool.execute(args, context);
+  getTool(name: string): Tool | undefined {
+    return this.tools.get(name);
   }
 
-  private registerBuiltins(): void {
+  getAllTools(): Tool[] {
+    return Array.from(this.tools.values());
+  }
+
+  private registerBuiltinTools() {
     this.register({
       name: "activate_skill",
-      description: "Activates a specialized agent skill by name. Returns the skill's instructions wrapped in <activated_skill> tags. Use this when you identify a task that matches a skill's description. You only need to activate a skill once per session.",
-      costEstimate: () => 0,
-      execute: async (args: Record<string, unknown>) => {
+      description: "Activates a specialized skill by name to receive procedural guidance and resources.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "The name of the skill to activate." }
+        },
+        required: ["name"]
+      },
+      execute: async (args: { name: string }, context: ToolContext) => {
+        const manager = new SkillManager(context.paths.homeDir);
         try {
-          const name = toStringArg(args, "name");
-          const output = await this.skillManager.activateSkill(name);
-          return ok(`Skill '${name}' activated successfully.`, { output });
+          const instructions = await manager.activateSkill(args.name);
+          return ok(instructions);
         } catch (error) {
           return fail((error as Error).message);
         }
@@ -84,111 +77,76 @@ export class ToolRegistry {
 
     this.register({
       name: "read_file",
-      description: "Read a UTF-8 text file.",
-      costEstimate: () => 0,
-      execute: async (args: Record<string, unknown>, context: ToolContext) => {
+      description: "Reads and returns the content of a specified file.",
+      parameters: {
+        type: "object",
+        properties: {
+          file_path: { type: "string", description: "The path to the file to read." }
+        },
+        required: ["file_path"]
+      },
+      execute: async (args: { file_path: string }, context: ToolContext) => {
+        const fullPath = normalizePath(context.paths.homeDir, args.file_path);
         try {
-          const requestedPath = toStringArg(args, "path");
-          const fullPath = normalizePath(context.homeDir, requestedPath);
-          const content = await readTextFile(fullPath, "");
-          return ok(`Read ${fullPath}`, { path: fullPath, content });
+          const content = await fs.readFile(fullPath, "utf8");
+          return ok(content);
         } catch (error) {
-          return fail((error as Error).message);
+          return fail(`Could not read file: ${(error as Error).message}`);
         }
       }
     });
 
     this.register({
       name: "write_file",
-      description: "Write UTF-8 text content to a file.",
-      costEstimate: () => 0,
-      execute: async (args: Record<string, unknown>, context: ToolContext) => {
+      description: "Writes the complete content to a file, creating parent directories if missing.",
+      parameters: {
+        type: "object",
+        properties: {
+          file_path: { type: "string", description: "Path to the file." },
+          content: { type: "string", description: "Complete content to write." }
+        },
+        required: ["file_path", "content"]
+      },
+      execute: async (args: { file_path: string; content: string }, context: ToolContext) => {
+        const fullPath = normalizePath(context.paths.homeDir, args.file_path);
+        
+        // Safety: Leader can only write directional docs
+        const relPath = path.relative(process.cwd(), fullPath);
+        const isDirectionalDoc = ["README.md", "GOAL.md", "ARCHITECTURE.md"].includes(relPath) || relPath.endsWith(".queue.json");
+        
+        if (context.role === "leader" && !isDirectionalDoc) {
+          return fail(`Permission denied: Leader should only modify directional documents, not source code (${relPath}).`);
+        }
+
         try {
-          const requestedPath = toStringArg(args, "path");
-          const content = toStringArg(args, "content");
-          const fullPath = normalizePath(context.homeDir, requestedPath);
-          const relPath = path.relative(process.cwd(), fullPath);
-
-          if (context.role === "evaluator" || context.role === "planner") {
-            return fail(`Permission denied: The '${context.role}' role is read-only and cannot modify files.`);
-          }
-
-          const isDirectionalDoc =
-            ["README.md", "GOAL.md", "ARCHITECTURE.md"].includes(relPath) ||
-            relPath.endsWith("instructions.queue.json") ||
-            relPath.endsWith("instructions.json");
-
-          if (context.role === "leader" && !isDirectionalDoc) {
-            return fail(`Permission denied: Leader should only modify directional documents, not actual source code (${relPath}).`);
-          }
-
-          if (context.role === "executor" && isDirectionalDoc) {
-            return fail(`Permission denied: Executor cannot modify core directional documents (${relPath}). If the goal or architecture is wrong, ask the Leader to change it.`);
-          }
-
-          await writeTextFile(fullPath, content);
-          return ok(`Wrote ${fullPath}`);
+          await fs.mkdir(path.dirname(fullPath), { recursive: true });
+          await fs.writeFile(fullPath, args.content, "utf8");
+          return ok(`Successfully wrote to ${args.file_path}`);
         } catch (error) {
-          return fail((error as Error).message);
+          return fail(`Could not write file: ${(error as Error).message}`);
         }
       }
     });
 
     this.register({
-      name: "run_shell",
-      description: "Run a shell command in the workspace.",
-      costEstimate: () => 0,
-      execute: async (args: Record<string, unknown>, context: ToolContext) => {
-        try {
-          if (context.role === "planner") {
-            return fail(`Permission denied: The 'planner' role cannot execute shell commands.`);
-          }
-          if (context.role === "leader") {
-            return fail(`Permission denied: The 'leader' role cannot execute shell commands. It should only adjust directional documents and provide instructions.`);
-          }
-
-          const cmd = toStringArg(args, "cmd");
-          const cwdRaw = typeof args.cwd === "string" ? args.cwd : context.homeDir;
-          const cwd = normalizePath(context.homeDir, cwdRaw);
-          const result = await runShellCommand(cmd, cwd);
-          const output = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
-          if (result.code === 0) {
-            return ok(output || `Command succeeded: ${cmd}`, { code: result.code });
-          }
-          return fail(output || `Command failed with exit code ${result.code}`);
-        } catch (error) {
-          return fail((error as Error).message);
+      name: "run_shell_command",
+      description: "Executes a shell command in the workspace.",
+      parameters: {
+        type: "object",
+        properties: {
+          command: { type: "string", description: "The bash command to execute." }
+        },
+        required: ["command"]
+      },
+      execute: async (args: { command: string }, context: ToolContext) => {
+        if (context.role === "leader") {
+          return fail("Permission denied: Leader role cannot execute shell commands.");
         }
-      }
-    });
-
-    this.register({
-      name: "http_request",
-      description: "Perform an HTTP request.",
-      costEstimate: () => 0,
-      execute: async (args: Record<string, unknown>) => {
-        try {
-          const url = toStringArg(args, "url");
-          const method = typeof args.method === "string" ? args.method.toUpperCase() : "GET";
-          const headers = (typeof args.headers === "object" && args.headers !== null
-            ? (args.headers as Record<string, string>)
-            : {}) as HeadersInit;
-          const body = typeof args.body === "string" ? args.body : undefined;
-
-          const response = await fetch(url, { method, headers, body });
-          const text = await response.text();
-          const output = `HTTP ${response.status} ${response.statusText}`;
-          if (!response.ok) {
-            return fail(`${output}\n${text}`.trim());
-          }
-
-          return ok(output, {
-            status: response.status,
-            body: text
-          });
-        } catch (error) {
-          return fail((error as Error).message);
+        const result = await runShellCommand(args.command, context.paths.homeDir);
+        if (result.code !== 0) {
+          return fail(`Command failed with code ${result.code}: ${result.stderr}`);
         }
+        return ok(result.stdout);
       }
     });
   }
