@@ -231,10 +231,49 @@ export class DatabaseManager {
     return this.db.query(`
       SELECT r.*, e.decision, e.justification, e.root_cause
       FROM rounds r
-      LEFT JOIN evaluations e ON r.round_id = e.round_id
+      LEFT JOIN (
+        -- Get the latest evaluation per round
+        SELECT * FROM evaluations WHERE id IN (SELECT MAX(id) FROM evaluations GROUP BY round_id)
+      ) e ON r.round_id = e.round_id
       ORDER BY r.round_id DESC
       LIMIT ?
     `).all(limit);
+  }
+
+  async getGovernanceDetails(roundId: number) {
+    const leaderStrategy = this.db.query(`
+      SELECT * FROM leader_strategies WHERE round_id = ? ORDER BY created_at DESC LIMIT 1
+    `).get(roundId) as any;
+
+    const ccbSession = this.db.query(`
+      SELECT * FROM ccb_sessions WHERE round_id = ? ORDER BY created_at DESC LIMIT 1
+    `).get(roundId) as any;
+
+    let experts = [];
+    if (ccbSession) {
+      experts = this.db.query(`
+        SELECT * FROM expert_opinions WHERE session_id = ?
+      `).all(ccbSession.id) as any[];
+    }
+
+    return {
+      leader: leaderStrategy ? {
+        rationale: leaderStrategy.rationale,
+        action: leaderStrategy.action,
+        diagnosis_type: leaderStrategy.diagnosis_type,
+        instructions: leaderStrategy.instructions_json ? JSON.parse(leaderStrategy.instructions_json) : []
+      } : null,
+      ccb: ccbSession ? {
+        proposed_change: ccbSession.proposed_change,
+        final_decision: ccbSession.final_decision,
+        experts: experts.map(e => ({
+          expert_role: e.expert_role,
+          vote: e.vote,
+          rationale: e.rationale,
+          incapacity_flag: Boolean(e.incapacity_flag)
+        }))
+      } : null
+    };
   }
 
   close() {

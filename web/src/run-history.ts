@@ -19,12 +19,34 @@ export interface RunEvaluationDimension {
   recommended_next_action?: string;
 }
 
+export interface ExpertOpinion {
+  expert_role: string;
+  vote: "approve" | "reject";
+  rationale: string;
+  incapacity_flag: boolean;
+}
+
+export interface GovernanceDetails {
+  leader: {
+    rationale: string;
+    action: string;
+    diagnosis_type: string;
+    instructions: string[];
+  } | null;
+  ccb: {
+    proposed_change: string;
+    final_decision: string;
+    experts: ExpertOpinion[];
+  } | null;
+}
+
 export interface RunHistoryItem {
   timestamp: string;
   round?: number;
   summary: string;
   metrics: Record<string, unknown> | null;
   evaluation: RunEvaluation | null;
+  has_governance?: boolean;
 }
 
 export interface RoundReportDimension {
@@ -94,6 +116,7 @@ function parseRoundReport(summary: string): RoundReport {
     budgetCost: extractBulletValue(summary, "Cost USD") ?? "N/A",
     budgetTime: extractBulletValue(summary, "Time ms") ?? "N/A",
     budgetActions: extractBulletValue(summary, "Actions") ?? "N/A",
+    aggregateScore: "N/A",
     dimensionBreakdown: [],
     nextRecommendation: extractMarkdownSection(summary, "Next Round Recommendation") || "No recommendation captured"
   };

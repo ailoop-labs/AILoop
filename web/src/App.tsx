@@ -6,7 +6,7 @@ import { buildLogViewerText } from "./log-lines";
 import { resolveLogTailFollowBehavior } from "./log-follow";
 import { GoalMarkdown } from "./goal-markdown";
 import { deriveRoundProgress } from "./round-progress";
-import { projectRunHistoryReport, type RunHistoryItem } from "./run-history";
+import { projectRunHistoryReport, type RunHistoryItem, type GovernanceDetails, type ExpertOpinion } from "./run-history";
 import { paginateRunHistory, RUN_HISTORY_PAGE_SIZE } from "./run-history-pagination";
 
 type LoopStateName = "idle" | "starting" | "running" | "cooldown" | "paused" | "stopping" | "error";
@@ -224,7 +224,7 @@ function resolveRoleRuntimeCurrentIndex(phase: ReturnType<typeof deriveRoundProg
 interface RunArtifactBundle {
   timestamp: string;
   summary: string;
-  metrics: Record<string, unknown>;
+  metrics: Record<string, unknown> | null;
   log: string;
   state_change: string;
   evaluation: {
@@ -243,7 +243,7 @@ interface RunArtifactBundle {
       recommended_next_action?: string;
     }>;
     recommended_next_action?: string;
-  };
+  } | null;
 }
 
 export default function App() {
@@ -262,6 +262,7 @@ export default function App() {
   const [selectedRole, setSelectedRole] = useState<ProjectRoleItem | null>(null);
   const [selectedRun, setSelectedRun] = useState<RunHistoryItem | null>(null);
   const [selectedArtifacts, setSelectedArtifacts] = useState<RunArtifactBundle | null>(null);
+  const [selectedGovernance, setSelectedGovernance] = useState<GovernanceDetails | null>(null);
   const [artifactsBusy, setArtifactsBusy] = useState(false);
   const [runHistoryPage, setRunHistoryPage] = useState(1);
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeLoopConfig | null>(null);
@@ -617,11 +618,22 @@ export default function App() {
     }
   };
 
-  const fetchArtifacts = async (timestamp: string): Promise<void> => {
+  const fetchArtifacts = async (run: RunHistoryItem): Promise<void> => {
     try {
       setArtifactsBusy(true);
-      const bundle = await api<RunArtifactBundle>(`/api/runs/${timestamp}/artifacts`, undefined, authToken);
-      setSelectedArtifacts(bundle);
+      setSelectedGovernance(null);
+      const [bundle, governance] = await Promise.all([
+        api<RunArtifactBundle>(`/api/runs/${run.timestamp}/artifacts`, undefined, authToken),
+        run.has_governance ? api<GovernanceDetails>(`/api/runs/${run.round}/governance`, undefined, authToken).catch(() => null) : Promise.resolve(null)
+      ]);
+      setSelectedArtifacts({
+        ...bundle,
+        timestamp: run.timestamp,
+        summary: run.summary,
+        metrics: run.metrics,
+        evaluation: run.evaluation
+      });
+      setSelectedGovernance(governance);
       setError(null);
     } catch (requestError) {
       handleRequestError(requestError, "无法获取运行详情：请重试或重新登录。");
@@ -1260,7 +1272,7 @@ export default function App() {
                     <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">Actions: {report.budgetActions}</p>
                   </div>
                   <button
-                    onClick={() => void fetchArtifacts(run.timestamp)}
+                    onClick={() => void fetchArtifacts(run)}
                     disabled={artifactsBusy}
                     className="mt-4 rounded-lg border border-white/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-mist/70 transition hover:border-accent hover:text-accent disabled:opacity-50"
                   >
@@ -1447,6 +1459,109 @@ export default function App() {
                     </div>
                   </section>
                 ) : null}
+
+                {selectedGovernance && (
+                  <section>
+                    <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">Governance Lifecycle</h4>
+                    <div className="rounded-2xl border border-white/10 bg-ink/60 p-6 shadow-inner">
+                      <div className="flex flex-col gap-6 relative before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-[1px] before:bg-white/10">
+                        
+                        {/* Tactical Step */}
+                        <div className="relative pl-8">
+                          <span className="absolute left-0 top-1 h-6 w-6 rounded-full border border-white/20 bg-ink flex items-center justify-center">
+                            <span className="h-2 w-2 rounded-full bg-accent" />
+                          </span>
+                          <p className="text-xs font-bold uppercase tracking-widest text-mist/80">1. Tactical Execution</p>
+                          <p className="mt-1 text-xs text-mist/60">Executor attempted the sub-task using specified tools.</p>
+                        </div>
+
+                        {/* Evaluation Step */}
+                        <div className="relative pl-8">
+                          <span className={`absolute left-0 top-1 h-6 w-6 rounded-full border border-white/20 bg-ink flex items-center justify-center`}>
+                            <span className={`h-2 w-2 rounded-full ${selectedArtifactsReport?.decision === 'pass' ? 'bg-accent' : 'bg-ember'}`} />
+                          </span>
+                          <p className="text-xs font-bold uppercase tracking-widest text-mist/80">2. Evaluation: {selectedArtifactsReport?.decision.toUpperCase() || 'UNKNOWN'}</p>
+                          <p className="mt-1 text-xs text-mist/60">{selectedArtifactsReport?.justification}</p>
+                        </div>
+
+                        {/* Leader Step */}
+                        {selectedGovernance.leader && (
+                          <div className="relative pl-8">
+                            <span className="absolute left-0 top-1 h-6 w-6 rounded-full border border-white/20 bg-ink flex items-center justify-center">
+                              <span className="h-2 w-2 rounded-full bg-warning" />
+                            </span>
+                            <div className="rounded-xl border border-warning/30 bg-warning/5 p-4 shadow-sm">
+                              <div className="flex items-center justify-between">
+                                <p className="text-xs font-bold uppercase tracking-widest text-warning/90">3. Leader Diagnosis: {selectedGovernance.leader.diagnosis_type.replace('_', ' ')}</p>
+                                <span className="rounded bg-warning/20 px-2 py-0.5 text-[10px] text-warning uppercase font-bold tracking-tighter">Action: {selectedGovernance.leader.action}</span>
+                              </div>
+                              <p className="mt-3 text-sm text-mist/90 italic leading-relaxed">"{selectedGovernance.leader.rationale}"</p>
+                              {selectedGovernance.leader.instructions.length > 0 && (
+                                <div className="mt-4 pt-3 border-t border-warning/20">
+                                  <p className="text-[10px] uppercase tracking-widest text-mist/50 font-bold">Strategic Recovery Instructions:</p>
+                                  <ul className="mt-2 space-y-2">
+                                    {selectedGovernance.leader.instructions.map((inst: string, i: number) => (
+                                      <li key={i} className="flex items-start gap-2 text-xs text-mist/80">
+                                        <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-warning/40" />
+                                        {inst}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* CCB Step */}
+                        {selectedGovernance.ccb && (
+                          <div className="relative pl-8">
+                            <span className="absolute left-0 top-1 h-6 w-6 rounded-full border border-white/20 bg-ink flex items-center justify-center">
+                              <span className="h-2 w-2 rounded-full bg-sky-400" />
+                            </span>
+                            <div className="rounded-xl border border-sky-400/30 bg-sky-400/5 p-4 shadow-sm">
+                              <p className="text-xs font-bold uppercase tracking-widest text-sky-400/90">4. CCB Expert Consensus</p>
+                              <div className="mt-3">
+                                <p className="text-[10px] uppercase tracking-widest text-mist/50 font-bold">Proposed Constitutional Modification:</p>
+                                <div className="mt-2 rounded-lg border border-white/5 bg-ink/40 p-3 text-xs text-mist/70 font-mono leading-relaxed">
+                                  {selectedGovernance.ccb.proposed_change}
+                                </div>
+                              </div>
+                              
+                              <div className="mt-5 grid gap-4 md:grid-cols-3">
+                                {selectedGovernance.ccb.experts.map((expert: ExpertOpinion, i: number) => (
+                                  <div key={i} className="rounded-xl border border-white/5 bg-ink/60 p-3 shadow-inner">
+                                    <div className="flex items-center justify-between">
+                                      <p className="text-[10px] uppercase tracking-widest text-mist/40 font-bold">{expert.expert_role.replace('_', ' ')}</p>
+                                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-black uppercase ${expert.vote === 'approve' ? 'bg-accent/20 text-accent' : 'bg-ember/20 text-ember'}`}>
+                                        {expert.vote}
+                                      </span>
+                                    </div>
+                                    <p className="mt-2 text-[11px] text-mist/70 leading-relaxed italic" title={expert.rationale}>
+                                      "{expert.rationale}"
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+
+                              <div className="mt-5 flex items-center justify-between border-t border-sky-400/20 pt-4">
+                                <div className="flex items-center gap-2">
+                                  <span className={`h-2 w-2 rounded-full ${selectedGovernance.ccb.final_decision === 'approve' ? 'bg-accent' : 'bg-ember'}`} />
+                                  <p className="text-xs font-bold text-mist/90 uppercase tracking-widest">Final Decision:</p>
+                                </div>
+                                <span className={`rounded-lg px-4 py-1 text-xs font-black uppercase tracking-[0.2em] ${selectedGovernance.ccb.final_decision === 'approve' ? 'bg-accent text-ink shadow-[0_0_12px_rgba(102,255,187,0.4)]' : 'bg-ember text-mist'}`}>
+                                  {selectedGovernance.ccb.final_decision}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                      </div>
+                    </div>
+                  </section>
+                )}
+
                 <div className="grid gap-6 lg:grid-cols-2">
                   <section>
                     <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">Round Log</h4>

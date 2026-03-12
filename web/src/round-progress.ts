@@ -64,7 +64,7 @@ function parseAutoReworkAttempt(line: string): { attempt: number; total: number;
 
 export function deriveRoundProgress(input: RoundProgressInput): RoundProgressView {
   const normalizedLogs = input.logs.map(stripLogPrefix);
-  const lastLine = normalizedLogs.at(-1) ?? "";
+  const lastLine = normalizedLogs[normalizedLogs.length - 1] ?? "";
   const roundLabel = Number.isFinite(input.round) && (input.round ?? 0) > 0 ? `Round ${input.round}` : "Round -";
 
   if (input.state === "cooldown") {

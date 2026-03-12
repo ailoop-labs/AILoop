@@ -232,6 +232,15 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
       return json({ ok: true });
     }
 
+    if (url.pathname.startsWith("/api/runs/") && url.pathname.endsWith("/governance") && request.method === "GET") {
+      const parts = url.pathname.split("/");
+      const roundId = Number(parts[3]);
+      if (Number.isFinite(roundId)) {
+        return json(await db.getGovernanceDetails(roundId));
+      }
+      return json({ error: "Invalid round ID" }, { status: 400 });
+    }
+
     if (url.pathname === "/api/runs" && request.method === "GET") {
       const limitRaw = Number(url.searchParams.get("limit") ?? "20");
       const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, limitRaw)) : 20;
@@ -251,7 +260,9 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
             decision: r.decision,
             justification: r.justification,
             root_cause: r.root_cause
-          }
+          },
+          // Hint: If round state is not 'idle', 'running', it might have governance
+          has_governance: true 
         })));
       }
       
