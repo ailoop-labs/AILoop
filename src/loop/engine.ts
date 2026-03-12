@@ -178,11 +178,29 @@ export async function collectOperationalEvidence(
   runner: CommandRunner = (command) => runShellCommand(command, process.cwd()),
   healthChecker: HealthChecker = () => checkConsoleHealth(context.consolePort)
 ): Promise<OperationalEvidence> {
+  const normalizeCommandOutput = (result: ExecResult): string => {
+    const text = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+    return text ? text.replace(/\s+/g, " ") : `exit ${result.code}`;
+  };
+  const parseRestartDetails = (output: string): { pid: string | null; logPath: string | null } => {
+    const pidMatch = output.match(/PID:\s*([^\s]+)/);
+    const logMatch = output.match(/Log:\s*(.+)/);
+    return {
+      pid: pidMatch?.[1] ?? null,
+      logPath: logMatch?.[1]?.trim() ?? null
+    };
+  };
+  const logStep = async (message: string): Promise<void> => {
+    if (context.log) {
+      await context.log(message);
+    }
+  };
   const lines: string[] = [];
   const stateChangeNotes: string[] = [];
   const summaryNotes: string[] = [];
   const commitMessage = `AILoop Round ${context.round}: ${context.objective}\n\n${context.expectedOutcome}`;
 
+  await logStep("Collecting post-pass operational evidence.");
   await runner("git add .");
   const stagedDiff = await runner("git diff --cached --quiet");
 
@@ -190,15 +208,45 @@ export async function collectOperationalEvidence(
     return { summaryNote: "no new commit", lines: ["Commit: none"], stateChangeNotes: [] };
   }
 
-  await runner(`git commit -m "${commitMessage.replace(/"/g, '\\"')}"`);
+  const commitResult = await runner(`git commit -m "${commitMessage.replace(/"/g, '\\"')}"`);
   const hash = (await runner("git rev-parse --short HEAD")).stdout.trim();
-  lines.push(`Commit: ${hash}`);
-  
-  await runner("git push origin HEAD");
-  lines.push(`Push: ok`);
+  const subject = (await runner("git log -1 --pretty=%s")).stdout.trim();
+  const commitOutput = normalizeCommandOutput(commitResult);
+  summaryNotes.push(`commit ${hash}`);
+  lines.push(`Commit: ${hash}${subject ? ` ${subject}` : ""}`);
+  stateChangeNotes.push(`Shell: git commit -m ... -> ${commitResult.code === 0 ? "ok" : `failed (${commitOutput})`}`);
+
+  const pushResult = await runner("git push origin HEAD");
+  const pushOutput = normalizeCommandOutput(pushResult);
+  summaryNotes.push(pushResult.code === 0 ? "push ok" : "push failed");
+  lines.push(`Push: ${pushOutput}`);
+  stateChangeNotes.push(`Shell: git push origin HEAD -> ${pushResult.code === 0 ? "ok" : "failed"} (${pushOutput})`);
+
+  const restartResult = await runner("bash scripts/prod.sh restart");
+  const restartOutput = normalizeCommandOutput(restartResult);
+  const restartDetails = parseRestartDetails(restartOutput);
+  summaryNotes.push(restartResult.code === 0 ? "restart ok" : "restart failed");
+  if (restartDetails.pid && restartDetails.logPath) {
+    lines.push(`Restart: PID ${restartDetails.pid}, log ${restartDetails.logPath}`);
+  } else {
+    lines.push(`Restart: ${restartOutput}`);
+  }
+  stateChangeNotes.push(
+    `Shell: bash scripts/prod.sh restart -> ${restartResult.code === 0 ? "ok" : "failed"} (${restartOutput})`
+  );
+
+  const health = await healthChecker();
+  summaryNotes.push(health.ok ? "health check ok" : "health check failed");
+  lines.push(`Health Check: GET /api/health -> ${health.status} ${health.ok ? "OK" : "FAIL"}`);
+  stateChangeNotes.push(
+    `Health: GET /api/health -> ${health.status} ${health.ok ? "ok" : "failed"} (${health.body.trim() || "no body"})`
+  );
+
+  lines.push(`Rollback: git revert --no-edit ${hash} && bash scripts/prod.sh restart`);
+  await logStep(`Operational evidence collected for commit ${hash}.`);
 
   return {
-    summaryNote: `commit ${hash}`,
+    summaryNote: summaryNotes.join(", "),
     lines,
     stateChangeNotes
   };
@@ -275,6 +323,12 @@ export class LoopEngine {
             });
 
             await saveLeaderStrategy(this.paths, currentStateData.round, decision);
+
+            // Check stop flag AGAIN after leader execution as it might take time
+            if (await hasFlag(this.paths.stopFlagPath)) {
+              await this.setState("stopping");
+              break;
+            }
 
             if (decision.action === "escalate_to_ccb" || (decision.action === "resume" && leaderReworkCount >= LEADER_REWORK_LIMIT)) {
               // --- GOVERNANCE STEP 4: CCB Meeting ---
