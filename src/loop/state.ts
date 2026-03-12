@@ -15,6 +15,7 @@ export interface LoopPaths {
   instructionsPath: string;
   legacyInstructionsPath: string;
   statePath: string;
+  legacyStatePath: string;
   pidPath: string;
   stopFlagPath: string;
   pauseFlagPath: string;
@@ -36,6 +37,7 @@ export function buildLoopPaths(homeDir: string): LoopPaths {
     instructionsPath: path.join(homeDir, "instructions.queue.json"),
     legacyInstructionsPath: path.join(homeDir, "instructions.json"),
     statePath: path.join(homeDir, "state.json"),
+    legacyStatePath: path.join(homeDir, "loop.state"),
     pidPath: path.join(homeDir, "loop.pid"),
     stopFlagPath: path.join(homeDir, "loop.stop"),
     pauseFlagPath: path.join(homeDir, "loop.pause"),
@@ -75,6 +77,19 @@ async function writeInstructionQueue(paths: LoopPaths, queue: string[]): Promise
   }
 }
 
+async function migrateLegacyLoopState(paths: LoopPaths): Promise<void> {
+  if (await fileExists(paths.statePath)) {
+    return;
+  }
+
+  if (!(await fileExists(paths.legacyStatePath))) {
+    return;
+  }
+
+  const legacyState = normalizeLoopState(await readJsonFile<Partial<LoopStateData>>(paths.legacyStatePath, defaultLoopState()));
+  await writeJsonFile(paths.statePath, legacyState);
+}
+
 export async function ensureLoopHome(paths: LoopPaths): Promise<void> {
   await ensureDir(paths.homeDir);
   await ensureDir(paths.runsDir);
@@ -82,6 +97,7 @@ export async function ensureLoopHome(paths: LoopPaths): Promise<void> {
   await ensureRegularFile(paths.taskPath, "# AILoop Task Log\n");
   await ensureRegularFile(paths.instructionsPath, "[]\n");
   await writeInstructionQueue(paths, await readMergedInstructionQueue(paths));
+  await migrateLegacyLoopState(paths);
 }
 
 export function defaultLoopState(pid: number | null = null): LoopStateData {

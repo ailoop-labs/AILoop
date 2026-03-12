@@ -113,6 +113,38 @@ describe("loop state persistence", () => {
     await fs.rm(homeDir, { recursive: true, force: true });
   });
 
+  test("migrates legacy loop.state into state.json", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-state-migrate-legacy-state-"));
+    const paths = buildLoopPaths(homeDir);
+
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, "loop.state"),
+      JSON.stringify(
+        {
+          state: "paused",
+          round: 7,
+          updated_at: "2026-03-12T00:00:00.000Z",
+          pid: 4321,
+          last_error: "legacy state"
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    await ensureLoopHome(paths);
+
+    const migrated = await readLoopState(paths);
+    expect(migrated.state).toBe("paused");
+    expect(migrated.round).toBe(7);
+    expect(migrated.last_error).toBe("legacy state");
+    expect(migrated.pid).toBe(4321);
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
   test("appendInstruction preserves legacy queued items and heals them to the canonical queue file", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-state-append-instructions-"));
     const paths = buildLoopPaths(homeDir);
