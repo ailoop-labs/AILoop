@@ -49,9 +49,6 @@ type SleepFn = (ms: number) => Promise<void>;
 
 const INTERFACE_ERROR_RETRY_DELAY_MS = 60_000;
 const INTERFACE_ERROR_MAX_RETRIES = 5;
-const CODEX_HOME_DIRNAME = "codex-home";
-const CODEX_AUTH_FILENAME = "auth.json";
-const CODEX_CONFIG_FILENAME = "config.toml";
 
 function parseJsonSafely<T>(payload: string): T | null {
   try {
@@ -346,64 +343,10 @@ function buildArgs(config: CodexConfig, options: CodexJsonCallOptions, schemaPat
   return args;
 }
 
-function resolveSourceCodexHome(env: NodeJS.ProcessEnv): string {
-  const configuredHome = env.CODEX_HOME?.trim();
-  if (configuredHome) {
-    return path.resolve(configuredHome);
-  }
-
-  const shellHome = env.HOME?.trim();
-  if (shellHome) {
-    return path.join(path.resolve(shellHome), ".codex");
-  }
-
-  return path.join(os.homedir(), ".codex");
-}
-
-function resolveIsolatedCodexHome(cwd: string, env: NodeJS.ProcessEnv): string {
-  const configuredAiloopHome = env.AILOOP_HOME?.trim();
-  const ailoopHome = configuredAiloopHome ? path.resolve(configuredAiloopHome) : path.resolve(cwd, ".ailoop");
-  return path.join(ailoopHome, CODEX_HOME_DIRNAME);
-}
-
-async function syncCodexConfigFiles(sourceCodexHome: string, targetCodexHome: string): Promise<void> {
-  await fs.mkdir(targetCodexHome, { recursive: true });
-
-  if (path.resolve(sourceCodexHome) === path.resolve(targetCodexHome)) {
-    return;
-  }
-
-  const filesToSync = [CODEX_AUTH_FILENAME, CODEX_CONFIG_FILENAME];
-
-  for (const filename of filesToSync) {
-    const sourcePath = path.join(sourceCodexHome, filename);
-    const targetPath = path.join(targetCodexHome, filename);
-
-    try {
-      const payload = await fs.readFile(sourcePath, "utf8");
-      await fs.writeFile(targetPath, payload, "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        throw error;
-      }
-    }
-  }
-}
-
-async function buildProcessEnv(config: CodexConfig, cwd: string, baseEnv: NodeJS.ProcessEnv = process.env): Promise<NodeJS.ProcessEnv> {
-  if (config.bin.endsWith("gemini")) {
-    return { ...baseEnv };
-  }
-
-  const isolatedCodexHome = resolveIsolatedCodexHome(cwd, baseEnv);
-  await syncCodexConfigFiles(resolveSourceCodexHome(baseEnv), isolatedCodexHome);
-
-  const env: NodeJS.ProcessEnv = {
-    ...baseEnv,
-    CODEX_HOME: isolatedCodexHome
-  };
-
-  return env;
+async function buildProcessEnv(config: CodexConfig, _cwd: string, baseEnv: NodeJS.ProcessEnv = process.env): Promise<NodeJS.ProcessEnv> {
+  // If we're using gemini or any other tool, we just pass through the environment.
+  // The Zero-Config model ensures process.env already has what it needs.
+  return { ...baseEnv };
 }
 
 

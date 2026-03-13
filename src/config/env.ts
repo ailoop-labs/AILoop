@@ -1,4 +1,5 @@
 import path from "node:path";
+import { hydrateEnvFromShell } from "../utils/env";
 import type { BudgetLimits, EvaluationDimension } from "../types/contracts";
 
 export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
@@ -75,6 +76,10 @@ function parseLlmEvaluatorDimensions(value: string | undefined): EvaluationDimen
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+  if (env === process.env) {
+    hydrateEnvFromShell();
+  }
+
   const get = (key: string): string | undefined => env[key];
 
   const homeDir = path.resolve(get("AILOOP_HOME") ?? "./.ailoop");
