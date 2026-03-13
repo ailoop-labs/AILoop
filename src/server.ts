@@ -164,16 +164,7 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
     }
 
     if (url.pathname === "/api/status" && request.method === "GET") {
-      const dbState = await db.getLoopState();
-      const fsStatus = await getLoopStatus(config);
-      
-      // Merge: DB is authoritative for history/metrics, FS is authoritative for PID/Process status
-      return json({
-        ...fsStatus,
-        ...dbState,
-        pid: fsStatus.pid,
-        pid_alive: fsStatus.pid_alive
-      });
+      return json(await getLoopStatus(config));
     }
 
     if (url.pathname === "/api/metrics/friction-index" && request.method === "GET") {
@@ -238,7 +229,7 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
       if (Number.isFinite(roundId)) {
         return json(await db.getGovernanceDetails(roundId));
       }
-      return json({ error: "Invalid round ID" }, { status: 400 });
+      return json({ error: "Invalid round ID" }, 400);
     }
 
     if (url.pathname === "/api/runs" && request.method === "GET") {

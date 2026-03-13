@@ -28,7 +28,7 @@ import {
   writeStateChangeFile,
   writeSummaryFile
 } from "../reporting/summary";
-import type { EvaluationResult, LoopStateName, SubTask, ToolResult, LeaderDecision, CCBResult } from "../types/contracts";
+import type { ActionRecord, EvaluationResult, LoopStateName, SubTask, ToolResult, LeaderDecision, CCBResult } from "../types/contracts";
 import type { ExecResult } from "../utils/exec";
 import { fileExists } from "../utils/fs";
 import { runShellCommand } from "../utils/exec";
@@ -47,7 +47,6 @@ import {
   readLoopState,
   recoverInterruptedLoopState,
   setFlag,
-  savePid,
   updateLoopState,
   writeLoopState,
   writePid,
@@ -58,7 +57,6 @@ import {
 } from "./state";
 
 const CONSECUTIVE_EVALUATOR_FAILURE_LIMIT = 3;
-const TACTICAL_REWORK_LIMIT = 2;
 const LEADER_REWORK_LIMIT = 2;
 
 interface OperationalEvidenceContext {
@@ -161,6 +159,20 @@ function buildEvaluatorReworkInstructions(
 export function resolveNextLastError(currentLastError: string | null, requestedLastError?: string | null): string | null {
   if (requestedLastError === undefined) return currentLastError;
   return requestedLastError;
+}
+
+function withConcreteArtifactPaths(
+  toolResult: ToolResult,
+  artifacts: { logPath: string; stateChangePath: string }
+): ToolResult {
+  return {
+    ...toolResult,
+    artifacts: {
+      ...toolResult.artifacts,
+      log_path: artifacts.logPath,
+      state_change_path: artifacts.stateChangePath
+    }
+  };
 }
 
 async function checkConsoleHealth(consolePort: number): Promise<HealthCheckResult> {
@@ -310,71 +322,87 @@ export class LoopEngine {
           
           if (this.config.enableLeader) {
             console.log(`[GOVERNANCE] Invoking Leader for diagnosis...`);
-            const decision = await this.leader.execute({
-              context: {
-                goal: goalContent,
-                lastError: currentStateData.last_error,
-                previousEvaluationJustification: currentStateData.last_error,
-                previousEvaluationDimensions: currentStateData.previous_evaluation_dimensions,
-                stateChange: null
-              },
-              paths: this.paths,
-              onLog: (msg) => console.log(`[LEADER] ${msg}`)
-            });
+            try {
+              const decision = await this.leader.execute({
+                context: {
+                  goal: goalContent,
+                  lastError: currentStateData.last_error,
+                  previousEvaluationJustification: currentStateData.last_error,
+                  previousEvaluationDimensions: currentStateData.previous_evaluation_dimensions,
+                  stateChange: null
+                },
+                paths: this.paths,
+                onLog: (msg) => console.log(`[LEADER] ${msg}`)
+              });
 
-            await saveLeaderStrategy(this.paths, currentStateData.round, decision);
+              await saveLeaderStrategy(this.paths, currentStateData.round, decision);
 
-            // Check stop flag AGAIN after leader execution as it might take time
-            if (await hasFlag(this.paths.stopFlagPath)) {
-              await this.setState("stopping");
-              break;
-            }
-
-            if (decision.action === "escalate_to_ccb" || (decision.action === "resume" && leaderReworkCount >= LEADER_REWORK_LIMIT)) {
-              // --- GOVERNANCE STEP 4: CCB Meeting ---
-              console.log(`[GOVERNANCE] Escalating to CCB...`);
-              const ccbResult = await this.ccb.run(currentStateData.round, decision, readmeContent);
-
-              await saveCCBSession(this.paths, currentStateData.round, ccbResult);
-              
-              if (ccbResult.decision === "approve") {
-                console.log(`[CCB] CHANGE APPROVED. Applying Constitution modification...`);
-                // Leader modifies README.md
-                await fs.writeFile(path.join(process.cwd(), "README.md"), decision.proposed_readme_change!, "utf8");
-                await clearFlag(this.paths.pauseFlagPath);
-                leaderReworkCount = 0;
-                continue;
-              } else if (ccbResult.decision === "escalate_to_human") {
-                console.log(`[CCB] EXPERT INCAPACITY. Escalating to human.`);
-                await this.setState("paused", `CCB Expert requested human intervention: ${ccbResult.rationale}`);
+              // Check stop flag AGAIN after leader execution as it might take time
+              if (await hasFlag(this.paths.stopFlagPath)) {
+                await this.setState("stopping");
                 break;
-              } else {
-                console.log(`[CCB] CHANGE REJECTED.`);
-                // Feed remediation hints back to instructions
-                for (const expert of ccbResult.experts) {
-                  if (expert.remediation_hints) {
-                    for (const hint of expert.remediation_hints) await appendInstruction(this.paths, `[CCB Hint from ${expert.expert_role}]: ${hint}`);
-                  }
-                }
-                await clearFlag(this.paths.pauseFlagPath);
-                continue;
               }
-            } else if (decision.action === "resume") {
-              // Leader issues strategic instructions
-              console.log(`[LEADER] Strategy: ${decision.rationale}`);
-              for (const inst of decision.instructions) await appendInstruction(this.paths, inst);
-              await clearFlag(this.paths.pauseFlagPath);
-              leaderReworkCount++;
+
+              if (decision.action === "escalate_to_ccb" || (decision.action === "resume" && leaderReworkCount >= LEADER_REWORK_LIMIT)) {
+                // --- GOVERNANCE STEP 4: CCB Meeting ---
+                console.log(`[GOVERNANCE] Escalating to CCB...`);
+                const ccbResult = await this.ccb.run(currentStateData.round, decision, readmeContent);
+
+                await saveCCBSession(this.paths, currentStateData.round, ccbResult);
+                
+                if (ccbResult.decision === "approve") {
+                  console.log(`[CCB] CHANGE APPROVED. Applying Constitution modification...`);
+                  // Leader modifies README.md
+                  await fs.writeFile(path.join(process.cwd(), "README.md"), decision.proposed_readme_change!, "utf8");
+                  await clearFlag(this.paths.pauseFlagPath);
+                  leaderReworkCount = 0;
+                  continue;
+                } else if (ccbResult.decision === "escalate_to_human") {
+                  console.log(`[CCB] EXPERT INCAPACITY. Escalating to human.`);
+                  await this.setState("paused", `CCB Expert requested human intervention: ${ccbResult.rationale}`);
+                  break;
+                } else {
+                  console.log(`[CCB] CHANGE REJECTED.`);
+                  // Feed remediation hints back to instructions
+                  for (const expert of ccbResult.experts) {
+                    if (expert.remediation_hints) {
+                      for (const hint of expert.remediation_hints) await appendInstruction(this.paths, `[CCB Hint from ${expert.expert_role}]: ${hint}`);
+                    }
+                  }
+                  await clearFlag(this.paths.pauseFlagPath);
+                  continue;
+                }
+              } else if (decision.action === "resume") {
+                // Leader issues strategic instructions
+                console.log(`[LEADER] Strategy: ${decision.rationale}`);
+                for (const inst of decision.instructions) await appendInstruction(this.paths, inst);
+                await clearFlag(this.paths.pauseFlagPath);
+                leaderReworkCount++;
+                continue;
+              } else {
+                await this.setState("stopping");
+                break;
+              }
+            } catch (err) {
+              console.error(`[GOVERNANCE] Error during Leader/CCB execution:`, err);
+              await this.setState("paused", `Governance failed: ${(err as Error).message}`);
+              const pausedResult = await waitWhilePaused(this.paths);
+              if (pausedResult === "stopped") break;
+              await this.setState("running");
               continue;
-            } else {
-              await this.setState("stopping");
-              break;
             }
           } else {
             const pausedResult = await waitWhilePaused(this.paths);
             if (pausedResult === "stopped") break;
             await this.setState("running");
           }
+        }
+
+        if (currentStateData.consecutive_evaluator_failures >= CONSECUTIVE_EVALUATOR_FAILURE_LIMIT) {
+          const msg = `EvaluatorFailureLimit: The evaluation has failed ${CONSECUTIVE_EVALUATOR_FAILURE_LIMIT} consecutive times. Pausing the loop for human review.`;
+          await setFlag(this.paths.pauseFlagPath);
+          await this.setState("paused", msg);
+          continue;
         }
 
         const roundOutcome = await this.runRound(currentStateData.round + 1);
@@ -406,6 +434,14 @@ export class LoopEngine {
     const startedAt = Date.now();
     const runId = runTimestamp();
     const artifacts = buildRoundArtifactPaths(this.paths.runsDir, runId);
+    
+    const phaseTimings: RoundPhaseTimings = {
+      planning: 0,
+      execution: 0,
+      evaluation: 0,
+      operational_followup: 0
+    };
+    const autoReworkNotes: string[] = [];
     const logLines: string[] = [];
     const log = async (message: string): Promise<void> => {
       const ts = new Date().toISOString().slice(11, 19);
@@ -418,13 +454,57 @@ export class LoopEngine {
     const workspace = new WorkspaceManager(this.paths);
     const guardrails = new Guardrails(this.config.budget);
     
+    const pauseForBudgetBreach = async (
+      error: BudgetBreachError,
+      actionName: string,
+      source: "pre-action-time-guard" | "guardrails.checkBudget"
+    ): Promise<void> => {
+      await log(`Budget guard blocked ${actionName} (${source}): ${error.message}`);
+      await setFlag(this.paths.pauseFlagPath);
+      await this.setState("paused", error.message);
+    };
+
+    const enforceBudgetBeforeAction = async (actionName: string): Promise<void> => {
+      const elapsedMs = Date.now() - startedAt;
+      const timeLimitMs = this.config.budget.timeMinutes * 60_000;
+      if (elapsedMs > timeLimitMs) {
+        const timeBreach = new BudgetBreachError("time", "BudgetBreach: time budget exceeded");
+        await pauseForBudgetBreach(timeBreach, actionName, "pre-action-time-guard");
+        throw timeBreach;
+      }
+
+      try {
+        guardrails.checkBudget();
+      } catch (error) {
+        if (error instanceof BudgetBreachError) {
+          await pauseForBudgetBreach(error, actionName, "guardrails.checkBudget");
+        }
+        throw error;
+      }
+    };
+
+    let subTask: SubTask = {
+      assignee: "executor",
+      rationale: "Round initialization",
+      objective: "Initialize round context",
+      expected_outcome: "Context initialized",
+      impacted_files: [],
+      recommended_tools: []
+    };
+    let stateChange = "No state changes detected.\n";
+    let snapshot: any = null;
+
     try {
+      await enforceBudgetBeforeAction("round.bootstrap");
       const goal = await buildDeterministicGoal(process.cwd());
       const instructions = await drainInstructions(this.paths);
       const priorState = await readLoopState(this.paths);
+      const tacticalReworkLimit = Math.max(0, this.config.evaluatorReworkMaxAttempts);
 
       // --- TACTICAL STEP 1: Plan & Execute ---
-      let subTask = await this.planner.plan({ 
+      const planningStartedAt = Date.now();
+      await enforceBudgetBeforeAction("planner.plan");
+      subTask = await this.planner.plan({ 
         goal, 
         instructions, 
         round, 
@@ -433,28 +513,47 @@ export class LoopEngine {
         previous_round_error: priorState.last_error,
         consecutive_evaluator_failures: priorState.consecutive_evaluator_failures
       }, { onLog: log });
-      let snapshot = await workspace.createSnapshot(subTask.impacted_files.length > 0 ? subTask.impacted_files : extractSnapshotTargetsFromSubTask(subTask, process.cwd()));
+      phaseTimings.planning += Date.now() - planningStartedAt;
+      snapshot = await workspace.createSnapshot(subTask.impacted_files.length > 0 ? subTask.impacted_files : extractSnapshotTargetsFromSubTask(subTask, process.cwd()));
       
       const activeAgent = subTask.assignee === "designer" ? this.designer : this.executor;
+      const executionStartedAt = Date.now();
+      await enforceBudgetBeforeAction(`executor.execute`);
       let execution = await activeAgent.execute({ subTask, round, goal, instructions, guardrails, paths: this.paths, onLog: log });
-      let finalToolResult = { ...execution.toolResult };
-      let stateChange = await workspace.buildStateChange(snapshot);
+      phaseTimings.execution += Date.now() - executionStartedAt;
+      let finalToolResult = withConcreteArtifactPaths(execution.toolResult, artifacts);
+      stateChange = await workspace.buildStateChange(snapshot);
       
       const activeEvaluator = subTask.assignee === "designer" ? this.uiEvaluator : this.evaluator;
+      const evaluationStartedAt = Date.now();
+      await enforceBudgetBeforeAction(`evaluator.evaluate`);
       let evaluation = await activeEvaluator.evaluate({ subTask, toolResult: finalToolResult, stateChange, logLines, runTimestamp: runId, budgetLimits: guardrails.limitsSnapshot(), budgetUsage: guardrails.usage(), onLog: log });
+      phaseTimings.evaluation += Date.now() - evaluationStartedAt;
+      let autoReworkAttempts = 0;
 
       // --- TACTICAL STEP 2: Auto-Rework (Max 2) ---
       if (evaluation.decision === "fail" && finalToolResult.status === "success") {
-        for (let attempt = 1; attempt <= TACTICAL_REWORK_LIMIT; attempt++) {
-          await log(`[GOVERNANCE] Tactical Rework attempt ${attempt}/${TACTICAL_REWORK_LIMIT}`);
+        for (let attempt = 1; attempt <= tacticalReworkLimit; attempt++) {
+          autoReworkAttempts = attempt;
+          await log(`[GOVERNANCE] Tactical Rework attempt ${attempt}/${tacticalReworkLimit}`);
+          const priorJustification = evaluation.justification;
+          const reworkExecutionStartedAt = Date.now();
+          await enforceBudgetBeforeAction(`executor.execute auto-rework ${attempt}`);
           execution = await activeAgent.execute({ 
             subTask, round, goal, 
-            instructions: buildEvaluatorReworkInstructions(instructions, evaluation, attempt, TACTICAL_REWORK_LIMIT, stateChange), 
+            instructions: buildEvaluatorReworkInstructions(instructions, evaluation, attempt, tacticalReworkLimit, stateChange), 
             guardrails, paths: this.paths, onLog: log 
           });
-          finalToolResult = { ...execution.toolResult };
+          phaseTimings.execution += Date.now() - reworkExecutionStartedAt;
+          finalToolResult = withConcreteArtifactPaths(execution.toolResult, artifacts);
           stateChange = await workspace.buildStateChange(snapshot);
+          const reworkEvaluationStartedAt = Date.now();
+          await enforceBudgetBeforeAction(`evaluator.evaluate auto-rework ${attempt}`);
           evaluation = await activeEvaluator.evaluate({ subTask, toolResult: finalToolResult, stateChange, logLines, runTimestamp: runId, budgetLimits: guardrails.limitsSnapshot(), budgetUsage: guardrails.usage(), onLog: log });
+          phaseTimings.evaluation += Date.now() - reworkEvaluationStartedAt;
+          autoReworkNotes.push(
+            `Attempt ${attempt}/${tacticalReworkLimit}: trigger='${priorJustification}' evaluation=${evaluation.decision}`
+          );
           if (evaluation.decision === "pass") break;
         }
       }
@@ -465,20 +564,164 @@ export class LoopEngine {
         // (Collect Operational Evidence, Commit, etc. omitted for brevity in this draft but should be present)
       }
 
-      await this.finalizeRoundArtifacts(round, runId, artifacts, finalToolResult, evaluation, guardrails, stateChange, logLines);
+      const metrics: RoundMetrics = {
+        round,
+        run_timestamp: runId,
+        duration_ms: Date.now() - startedAt,
+        budget_limits: guardrails.limitsSnapshot(),
+        budget_usage: guardrails.usage(),
+        evaluator_decision: evaluation.decision,
+        tool_status: finalToolResult.status,
+        retries: {
+          evidence_remediation_attempts: 0,
+          auto_rework_attempts: autoReworkAttempts,
+          auto_rework_limit: this.config.evaluatorReworkMaxAttempts
+        },
+        phase_timings_ms: phaseTimings
+      };
+
+      await this.finalizeRoundArtifacts(
+        round,
+        artifacts,
+        goal,
+        subTask,
+        execution.actions,
+        finalToolResult,
+        evaluation,
+        metrics,
+        stateChange,
+        logLines,
+        autoReworkNotes
+      );
       
       return { success: evaluation.decision === "pass", errorMessage: evaluation.justification };
     } catch (error) {
-      return { success: false, errorMessage: (error as Error).message };
+      const message = error instanceof BudgetBreachError ? error.message : (error as Error).message;
+      const errorType = error instanceof BudgetBreachError ? "BudgetBreach" : "RoundExecutionError";
+      const failureToolResult: ToolResult = {
+        status: "failure",
+        summary: "Round failed before evaluation completed.",
+        artifacts: {
+          log_path: artifacts.logPath,
+          state_change_path: artifacts.stateChangePath
+        },
+        error: {
+          type: errorType,
+          message
+        },
+        next_state_hint: error instanceof BudgetBreachError ? "pause" : "continue"
+      };
+
+      if (snapshot) {
+        await workspace.rollback(snapshot);
+      }
+      stateChange = `${stateChange}\nRollback: workspace snapshot restored after round error.\n`;
+
+      const usage = guardrails.usage();
+      const metrics: RoundMetrics = {
+        round,
+        run_timestamp: runId,
+        duration_ms: Date.now() - startedAt,
+        budget_limits: guardrails.limitsSnapshot(),
+        budget_usage: usage,
+        evaluator_decision: "fail",
+        tool_status: "failure",
+        retries: {
+          evidence_remediation_attempts: 0,
+          auto_rework_attempts: 0,
+          auto_rework_limit: this.config.evaluatorReworkMaxAttempts
+        },
+        phase_timings_ms: phaseTimings
+      };
+
+      await writeStateChangeFile(artifacts.stateChangePath, stateChange);
+      await log(`Round error: ${message}`);
+      await writeLogFile(artifacts.logPath, logLines);
+      await writeMetricsFile(artifacts.metricsPath, metrics);
+      await writeSummaryFile(artifacts.summaryPath, {
+        goal: "",
+        subTask,
+        actions: [],
+        toolResult: failureToolResult,
+        evaluation: {
+          decision: "fail",
+          justification: message,
+          evidence: [message],
+          recommended_next_action: "pause and inspect round error"
+        },
+        metrics,
+        risks: [message],
+        autoReworkAttempts: [],
+        nextRecommendation: error instanceof BudgetBreachError ? "pause" : "continue",
+        artifacts: {
+          logPath: artifacts.logPath,
+          summaryPath: artifacts.summaryPath,
+          metricsPath: artifacts.metricsPath,
+          stateChangePath: artifacts.stateChangePath,
+          evaluationPath: artifacts.evaluationPath
+        }
+      });
+
+      if (error instanceof BudgetBreachError) {
+        await setFlag(this.paths.pauseFlagPath);
+      }
+
+      const nextState = error instanceof BudgetBreachError ? "paused" : "running";
+
+      await updateLoopState(this.paths, (current) => ({
+        ...current,
+        round,
+        state: nextState,
+        pid: process.pid,
+        last_error: message,
+        consecutive_evaluator_failures: current.consecutive_evaluator_failures,
+        previous_tool_result: failureToolResult,
+        current_budget: {
+          limits: guardrails.limitsSnapshot(),
+          usage
+        }
+      }));
+
+      return { success: false, errorMessage: message };
     }
   }
 
-  private async finalizeRoundArtifacts(round: number, runId: string, artifacts: any, toolResult: ToolResult, evaluation: EvaluationResult, guardrails: Guardrails, stateChange: string, logLines: string[]) {
+  private async finalizeRoundArtifacts(
+    round: number,
+    artifacts: {
+      logPath: string;
+      summaryPath: string;
+      metricsPath: string;
+      stateChangePath: string;
+      evaluationPath: string;
+    },
+    goal: string,
+    subTask: SubTask,
+    actions: ActionRecord[],
+    toolResult: ToolResult,
+    evaluation: EvaluationResult,
+    metrics: RoundMetrics,
+    stateChange: string,
+    logLines: string[],
+    autoReworkAttempts: string[]
+  ) {
     await writeStateChangeFile(artifacts.stateChangePath, stateChange);
     await writeLogFile(artifacts.logPath, logLines);
     await writeEvaluationFile(artifacts.evaluationPath, evaluation);
+    await writeMetricsFile(artifacts.metricsPath, metrics);
     await saveEvaluation(this.paths, round, evaluation);
-    await writeSummaryFile(artifacts.summaryPath, { goal: "", subTask: {} as any, actions: [], toolResult, evaluation, metrics: {} as any, risks: [], autoReworkAttempts: [], nextRecommendation: "", artifacts });
+    await writeSummaryFile(artifacts.summaryPath, {
+      goal,
+      subTask,
+      actions,
+      toolResult,
+      evaluation,
+      metrics,
+      risks: [],
+      autoReworkAttempts,
+      nextRecommendation: evaluation.recommended_next_action ?? "",
+      artifacts
+    });
     
     await updateLoopState(this.paths, (current) => ({
       ...current,
@@ -489,7 +732,7 @@ export class LoopEngine {
       consecutive_evaluator_failures: evaluation.decision === "fail" ? current.consecutive_evaluator_failures + 1 : 0,
       previous_tool_result: toolResult,
       previous_evaluation_dimensions: evaluation.dimensions,
-      current_budget: { limits: guardrails.limitsSnapshot(), usage: guardrails.usage() }
+      current_budget: { limits: metrics.budget_limits, usage: metrics.budget_usage }
     }));
   }
 

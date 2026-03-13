@@ -75,12 +75,9 @@ describe("CodexClient.runJson", () => {
       expect(await fs.readFile(path.join(expectedCodexHome, "auth.json"), "utf8")).toBe(
         await fs.readFile(globalAuthPath, "utf8")
       );
-      expect(
-        await fs
-          .access(path.join(expectedCodexHome, "config.toml"))
-          .then(() => true)
-          .catch(() => false)
-      ).toBe(false);
+      expect(await fs.readFile(path.join(expectedCodexHome, "config.toml"), "utf8")).toBe(
+        await fs.readFile(globalConfigPath, "utf8")
+      );
     } finally {
       if (originalHome === undefined) {
         delete process.env.HOME;
@@ -454,7 +451,7 @@ describe("CodexClient.runJson", () => {
 
     expect(result.ok).toBe(true);
     expect(result.data?.status).toBe("ok");
-    expect(sleepCalls).toEqual([60_000, 60_000, 0]);
+    expect(sleepCalls).toEqual([60_000, 120_000, 0]);
     const retryNotices = stderrChunks.filter((line) => line.includes("AILoop interface retry"));
     expect(retryNotices.length).toBe(2);
     expect(retryNotices[0]).toContain("waiting 60000ms");
@@ -564,6 +561,6 @@ describe("CodexClient.runJson", () => {
 
     expect(result.ok).toBe(false);
     expect(callCount).toBe(6);
-    expect(sleepCalls).toEqual([60_000, 60_000, 60_000, 60_000, 60_000, 0]);
+    expect(sleepCalls).toEqual([60_000, 120_000, 240_000, 300_000, 300_000, 0]);
   });
 });

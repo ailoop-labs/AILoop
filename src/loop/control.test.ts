@@ -74,25 +74,24 @@ async function seedLoopEntrypoint(workspaceRoot: string) {
   await fs.writeFile(
     path.join(scriptsDir, "ailoop.ts"),
     [
-      'import fs from "node:fs/promises";',
+      'import { Database } from "bun:sqlite";',
       'import path from "node:path";',
       "",
       'const homeDir = path.join(process.cwd(), ".ailoop");',
-      'const statePath = path.join(homeDir, "state.json");',
+      'const dbPath = path.join(homeDir, "ailoop.db");',
       "await Bun.sleep(150);",
-      'const current = JSON.parse(await fs.readFile(statePath, "utf8"));',
+      'const db = new Database(dbPath, { create: true });',
+      'const current = db.query("SELECT * FROM system_state WHERE id = 1").get();',
       "const updatedAt = new Date().toISOString();",
-      "await fs.writeFile(",
-      "  statePath,",
-      "  `${JSON.stringify({",
-      "    ...current,",
-      '    state: "running",',
-      "    pid: process.pid,",
-      "    last_error: null,",
-      "    updated_at: updatedAt",
-      "  }, null, 2)}\\n`,",
-      '  "utf8"',
-      ");",
+      'db.run(`',
+      '  UPDATE system_state SET ',
+      '    state = "running",',
+      '    pid = ?,',
+      '    updated_at = ?,',
+      '    last_error = NULL',
+      '  WHERE id = 1',
+      '`, [process.pid, updatedAt]);',
+      'db.close();',
       "await Bun.sleep(5_000);",
       ""
     ].join("\n"),
@@ -438,7 +437,8 @@ describe("listRuns", () => {
             confidence: 0.91,
             justification: "The richer evaluation payload is preserved.",
             evidence: ["artifact evidence"],
-            blocking_issues: []
+            blocking_issues: [],
+            recommended_next_action: "continue"
           }
         ]
       },
@@ -487,7 +487,73 @@ describe("listRuns", () => {
                 confidence: 0.91,
                 justification: "The richer evaluation payload is preserved.",
                 evidence: ["artifact evidence"],
-                blocking_issues: []
+                blocking_issues: [],
+                recommended_next_action: "continue"
+              }
+            ]
+          }
+        }
+      ]);
+    } finally {
+      await fs.rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  test("redacts secret-like values from summaries and structured evaluations", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-list-runs-redaction-test-"));
+    const runsDir = path.join(homeDir, "runs");
+    const timestamp = "2026-03-01T04-00-00-000Z";
+
+    await writeRunArtifacts(runsDir, timestamp, {
+      summary: "summary sessionSecret=uniquesecret123\n",
+      metrics: { round: 5, status: "success" },
+      evaluation: {
+        decision: "pass",
+        justification: "Validated apiToken=uniquesecret123.",
+        evidence: ["sessionSecret=uniquesecret123"],
+        dimensions: [
+          {
+            dimension: "goal_alignment",
+            decision: "pass",
+            score: 98,
+            confidence: 0.92,
+            justification: "Nested apiToken=uniquesecret123 stayed visible.",
+            evidence: ["sessionSecret=uniquesecret123"],
+            blocking_issues: [],
+            recommended_next_action: "continue"
+          }
+        ]
+      },
+      log: "log\n",
+      stateChange: "diff\n"
+    });
+
+    try {
+      const runs = await listRuns(makeTestConfig(homeDir));
+
+      expect(runs).toEqual([
+        {
+          timestamp,
+          round: 5,
+          summary: "summary sessionSecret=[REDACTED]\n",
+          metrics: {
+            round: 5,
+            status: "success"
+          },
+          evaluation: {
+            decision: "pass",
+            justification: "Validated apiToken=[REDACTED].",
+            evidence: ["sessionSecret=[REDACTED]"],
+            dimensions: [
+              {
+                dimension: "goal_alignment",
+                decision: "pass",
+                score: 98,
+                confidence: 0.92,
+                justification: "Nested apiToken=[REDACTED] stayed visible.",
+                evidence: ["sessionSecret=[REDACTED]"],
+                blocking_issues: [],
+                recommended_next_action: "continue"
               }
             ]
           }
