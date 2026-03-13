@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { resolveCodexBin } from "../config/env";
 import type { SubTask } from "../types/contracts";
 import { buildExecutorPrompt, sanitizeCodexActionDetail } from "./executor";
 
@@ -77,29 +76,5 @@ describe("sanitizeCodexActionDetail", () => {
     ).toBe(
       "Wrote evidence to .ailoop/runs/<engine-managed-artifact> and .ailoop/runs/<engine-managed-artifact>"
     );
-  });
-});
-
-describe("resolveCodexBin", () => {
-  test("prefers explicit env override when codex is unavailable on PATH", () => {
-    expect(
-      resolveCodexBin(
-        {
-          bin: "codex",
-          model: "",
-          profile: "",
-          plannerSandbox: "read-only",
-          executorSandbox: "workspace-write",
-          evaluatorSandbox: "workspace-write",
-          timeoutMs: 3000,
-          llmEvaluatorDimensions: [],
-          llmEvaluatorMinPassScore: 75
-        },
-        {
-          AILOOP_CODEX_BIN: "/Users/test/.bun/bin/codex",
-          PATH: ""
-        }
-      )
-    ).toBe("/Users/test/.bun/bin/codex");
   });
 });

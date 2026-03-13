@@ -1,4 +1,4 @@
-import { type AppConfig, resolveCodexBin } from "../config/env";
+import type { AppConfig } from "../config/env";
 import { CodexClient, type JsonSchema } from "../agent/codex-client";
 import { loadProjectRoleDefinition } from "../agent/role-definitions";
 import type { ExpertOpinion, CCBResult, LeaderDecision } from "../types/contracts";
@@ -23,10 +23,7 @@ export class CCBSession {
   private codex: CodexClient;
 
   constructor(private config: AppConfig) {
-    this.codex = new CodexClient({
-      ...config.codex,
-      bin: resolveCodexBin(config.codex)
-    });
+    this.codex = new CodexClient(config.codex);
   }
 
   async run(round: number, leaderDecision: LeaderDecision, readme: string): Promise<CCBResult> {

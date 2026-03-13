@@ -10,6 +10,11 @@ AILoop solves this problem:
 - The user wants an autonomous loop that makes useful progress in small, measurable, and safe rounds.
 - Every round must be observable, controllable, and bounded by strict resource budgets.
 
+> **⚠️ DoD (Definition of Done) Paradigm Notice for Agents:**
+> This project follows a **Documentation-Driven Development** approach. The documentation (such as architecture docs, workflow definitions, and plans) always precedes the actual code implementation.
+> - **For all contributing Agents:** Do not over-rely on the current codebase state if it contradicts the documentation.
+> - When the code and documentation are misaligned, the **documentation is the absolute source of truth**. You must implement or fix the code to align with the documented intent, not the other way around.
+
 Design principles:
 - **Outcome First:** Prioritize measurable user value over cosmetic activity. Value can include business impact, time saved, error reduction, reduced context switching, and reduced cognitive load.
 - **Small, Safe Iterations:** Each round should be bounded by time, cost, and action limits, producing a reviewable result.

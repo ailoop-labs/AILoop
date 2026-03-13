@@ -1,5 +1,4 @@
 import type { AppConfig } from "../config/env";
-import { resolveCodexBin } from "../config/env";
 import type { PlannerContext, SubTask } from "../types/contracts";
 import { CodexClient, type JsonSchema } from "./codex-client";
 import { loadProjectRoleDefinition } from "./role-definitions";
@@ -186,10 +185,7 @@ export class PlannerAgent {
 
   constructor(tools: ToolRegistry, config: AppConfig) {
     this.tools = tools;
-    this.codex = new CodexClient({
-      ...config.codex,
-      bin: resolveCodexBin(config.codex)
-    });
+    this.codex = new CodexClient(config.codex);
     this.sandbox = config.codex.plannerSandbox;
     this.homeDir = config.homeDir;
   }

@@ -1,5 +1,4 @@
 import type { AppConfig } from "../../config/env";
-import { resolveCodexBin } from "../../config/env";
 import type {
   DimensionAssessment,
   EvaluationDimension,
@@ -555,10 +554,7 @@ export class LLMJudgeEvaluator implements Evaluator {
   private readonly homeDir: string;
 
   constructor(config: AppConfig, codexClient?: CodexClient) {
-    this.codex = codexClient ?? new CodexClient({
-      ...config.codex,
-      bin: resolveCodexBin(config.codex)
-    });
+    this.codex = codexClient ?? new CodexClient(config.codex);
     this.sandbox = config.codex.evaluatorSandbox;
     this.dimensions = [...config.codex.llmEvaluatorDimensions];
     this.minPassScore = config.codex.llmEvaluatorMinPassScore;

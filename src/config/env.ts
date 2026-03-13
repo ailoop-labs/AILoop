@@ -74,24 +74,6 @@ function parseLlmEvaluatorDimensions(value: string | undefined): EvaluationDimen
   return Array.from(new Set(parsed));
 }
 
-export function resolveCodexBin(
-  config: CodexConfig,
-  env: NodeJS.ProcessEnv = process.env
-): string {
-  const sharedOverride = env.AILOOP_CODEX_BIN?.trim();
-  if (sharedOverride) {
-    return sharedOverride;
-  }
-
-  const configuredBin = config.bin.trim();
-  const defaultBin = "codex";
-  if (configuredBin && configuredBin !== defaultBin) {
-    return configuredBin;
-  }
-
-  return configuredBin || defaultBin;
-}
-
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const get = (key: string): string | undefined => env[key];
 

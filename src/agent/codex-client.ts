@@ -403,13 +403,6 @@ async function buildProcessEnv(config: CodexConfig, cwd: string, baseEnv: NodeJS
     CODEX_HOME: isolatedCodexHome
   };
 
-  // sub2api model provider often expects OPENAI_API_KEY.
-  // If the user has CRS_OAI_KEY, we map it to OPENAI_API_KEY to ensure compatibility
-  // when running in isolated environments where auth.json might be incorrect or missing.
-  if (env.CRS_OAI_KEY && !env.OPENAI_API_KEY) {
-    env.OPENAI_API_KEY = env.CRS_OAI_KEY;
-  }
-
   return env;
 }
 

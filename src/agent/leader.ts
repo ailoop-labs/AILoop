@@ -1,4 +1,4 @@
-import { type AppConfig, resolveCodexBin } from "../config/env";
+import type { AppConfig } from "../config/env";
 import type { LeaderContext, LeaderDecision } from "../types/contracts";
 import { CodexClient, type JsonSchema } from "./codex-client";
 import { loadProjectRoleDefinition } from "./role-definitions";
@@ -54,10 +54,7 @@ export class LeaderAgent {
   private readonly sandbox: AppConfig["codex"]["executorSandbox"];
 
   constructor(private readonly config: AppConfig) {
-    this.codex = new CodexClient({
-      ...config.codex,
-      bin: resolveCodexBin(config.codex)
-    });
+    this.codex = new CodexClient(config.codex);
     this.sandbox = "workspace-write";
   }
 
