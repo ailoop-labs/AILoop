@@ -7,6 +7,7 @@ import type { AppConfig } from "./config/env";
 import { readRuntimeLoopConfig, saveRuntimeLoopConfig } from "./config/runtime";
 import { buildLoopPaths, defaultLoopState, readLoopState, writeLoopState } from "./loop/state";
 import { writeActiveRequirementArtifact } from "./product/requirements";
+import { DatabaseManager } from "./utils/db";
 
 const ENV_KEYS = [
   "AILOOP_CONSOLE_ADMIN_TOKEN",
@@ -552,6 +553,33 @@ describe("console server API contract", () => {
     expect(body.updated_at).toEqual(expect.any(String));
     expect((await readLoopState(paths)).state).toBe("paused");
     expect(config.homeDir).toBe(paths.homeDir);
+  });
+
+  test("returns JSON 500 instead of an HTML fallback page when friction-index telemetry throws", async () => {
+    const token = "test-token";
+    const originalGetFrictionIndex = DatabaseManager.prototype.getFrictionIndex;
+    DatabaseManager.prototype.getFrictionIndex = async function getFrictionIndexFailure() {
+      throw new Error("disk I/O error");
+    };
+
+    try {
+      const { fetchHandler } = await createFixture({
+        consoleAdminToken: token
+      });
+
+      const response = await fetchHandler(
+        createAuthorizedRequest("http://console.test/api/metrics/friction-index", token)
+      );
+
+      expect(response.status).toBe(500);
+      expect(response.headers.get("content-type")).toContain("application/json");
+      expect(await response.json()).toEqual({
+        ok: false,
+        error: "Internal Server Error"
+      });
+    } finally {
+      DatabaseManager.prototype.getFrictionIndex = originalGetFrictionIndex;
+    }
   });
 
   test("returns the active requirement snapshot inside authenticated loop status responses", async () => {

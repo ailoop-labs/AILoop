@@ -28,6 +28,10 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
+function jsonError(error: string, status = 500): Response {
+  return json({ ok: false, error }, status);
+}
+
 async function parseBody(request: Request): Promise<Record<string, unknown>> {
   try {
     return (await request.json()) as Record<string, unknown>;
@@ -123,177 +127,184 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
   return async function fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const { config, adminToken, tokenAuthEnabled, adminTokenIssuedDate, db } = runtime;
-
-    if (url.pathname === "/api/health" && request.method === "GET") {
-      return json({ ok: true, service: "ailoop-console", db: "connected" });
-    }
-
-    if (url.pathname === "/api/auth/status" && request.method === "GET") {
-      return json({
-        tokenRequired: tokenAuthEnabled,
-        tokenExpired: isDateBasedAdminTokenExpired({ tokenAuthEnabled, adminTokenIssuedDate })
-      });
-    }
-
-    if (url.pathname === "/api/auth/login" && request.method === "POST") {
-      if (!tokenAuthEnabled) {
-        return json({ ok: true, tokenRequired: false });
-      }
-      if (isDateBasedAdminTokenExpired({ tokenAuthEnabled, adminTokenIssuedDate })) {
-        return json({ ok: false, error: "Token expired. Restart production server to generate a new token." }, 401);
+    try {
+      if (url.pathname === "/api/health" && request.method === "GET") {
+        return json({ ok: true, service: "ailoop-console", db: "connected" });
       }
 
-      const body = await parseBody(request);
-      const token = typeof body.token === "string" ? body.token.trim() : "";
-      if (!token || token !== adminToken) {
-        return json({ ok: false, error: "Unauthorized" }, 401);
+      if (url.pathname === "/api/auth/status" && request.method === "GET") {
+        return json({
+          tokenRequired: tokenAuthEnabled,
+          tokenExpired: isDateBasedAdminTokenExpired({ tokenAuthEnabled, adminTokenIssuedDate })
+        });
       }
 
-      return json({ ok: true, tokenRequired: true });
-    }
+      if (url.pathname === "/api/auth/login" && request.method === "POST") {
+        if (!tokenAuthEnabled) {
+          return json({ ok: true, tokenRequired: false });
+        }
+        if (isDateBasedAdminTokenExpired({ tokenAuthEnabled, adminTokenIssuedDate })) {
+          return jsonError("Token expired. Restart production server to generate a new token.", 401);
+        }
 
-    if (url.pathname.startsWith("/api/") && tokenAuthEnabled && !isPublicApi(url.pathname, request.method)) {
-      if (isDateBasedAdminTokenExpired({ tokenAuthEnabled, adminTokenIssuedDate })) {
-        return json({ ok: false, error: "Token expired. Restart production server to generate a new token." }, 401);
+        const body = await parseBody(request);
+        const token = typeof body.token === "string" ? body.token.trim() : "";
+        if (!token || token !== adminToken) {
+          return jsonError("Unauthorized", 401);
+        }
+
+        return json({ ok: true, tokenRequired: true });
       }
 
-      const token = extractRequestToken(request);
-      if (!token || token !== adminToken) {
-        return json({ ok: false, error: "Unauthorized" }, 401);
-      }
-    }
+      if (url.pathname.startsWith("/api/") && tokenAuthEnabled && !isPublicApi(url.pathname, request.method)) {
+        if (isDateBasedAdminTokenExpired({ tokenAuthEnabled, adminTokenIssuedDate })) {
+          return jsonError("Token expired. Restart production server to generate a new token.", 401);
+        }
 
-    if (url.pathname === "/api/status" && request.method === "GET") {
-      return json(await getLoopStatus(config));
-    }
-
-    if (url.pathname === "/api/metrics/friction-index" && request.method === "GET") {
-      return json(await db.getFrictionIndex());
-    }
-
-    if (url.pathname === "/api/config" && request.method === "GET") {
-      return json(await readRuntimeLoopConfig(config));
-    }
-
-    if (url.pathname === "/api/goal" && request.method === "GET") {
-      return json({ goal: await readGoal(config) });
-    }
-
-    if (url.pathname === "/api/config" && request.method === "POST") {
-      const body = await parseBody(request);
-      return json({
-        ok: true,
-        config: await patchRuntimeLoopConfig(config, body)
-      });
-    }
-
-    if (url.pathname === "/api/config/reset" && request.method === "POST") {
-      return json({
-        ok: true,
-        config: await resetRuntimeLoopConfig(config)
-      });
-    }
-
-    if (url.pathname === "/api/loop/start" && request.method === "POST") {
-      return json(await startBackgroundLoop(config));
-    }
-
-    if (url.pathname === "/api/loop/stop" && request.method === "POST") {
-      await stopLoop(config);
-      return json({ ok: true });
-    }
-
-    if (url.pathname === "/api/loop/pause" && request.method === "POST") {
-      await pauseLoop(config);
-      return json({ ok: true });
-    }
-
-    if (url.pathname === "/api/loop/resume" && request.method === "POST") {
-      await resumeLoop(config);
-      return json({ ok: true });
-    }
-
-    if (url.pathname === "/api/loop/instruct" && request.method === "POST") {
-      const body = await parseBody(request);
-      const message = typeof body.message === "string" ? body.message.trim() : "";
-      if (!message) {
-        return json({ ok: false, error: "Missing message" }, 400);
-      }
-      await instructLoop(config, message);
-      return json({ ok: true });
-    }
-
-    if (url.pathname.startsWith("/api/runs/") && url.pathname.endsWith("/governance") && request.method === "GET") {
-      const parts = url.pathname.split("/");
-      const roundId = Number(parts[3]);
-      if (Number.isFinite(roundId)) {
-        return json(await db.getGovernanceDetails(roundId));
-      }
-      return json({ error: "Invalid round ID" }, 400);
-    }
-
-    if (url.pathname === "/api/runs" && request.method === "GET") {
-      const limitRaw = Number(url.searchParams.get("limit") ?? "20");
-      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, limitRaw)) : 20;
-      const runs = await listRuns(config, limit);
-      const payload = await Promise.all(
-        runs.map(async (run) => {
-          const governance =
-            run.round > 0
-              ? await db.getGovernanceDetails(run.round)
-              : { leader: null, ccb: null };
-
-          return {
-            ...run,
-            has_governance: Boolean(governance.leader || governance.ccb)
-          };
-        })
-      );
-
-      return json(payload);
-    }
-
-    const runArtifactsMatch =
-      request.method === "GET" ? url.pathname.match(/^\/api\/runs\/([^/]+)\/artifacts$/) : null;
-    if (runArtifactsMatch) {
-      const timestamp = decodeURIComponent(runArtifactsMatch[1] ?? "");
-      const artifacts = await getRunArtifacts(config, timestamp);
-      if (!artifacts) {
-        return json({ ok: false, error: "Run artifacts not found" }, 404);
+        const token = extractRequestToken(request);
+        if (!token || token !== adminToken) {
+          return jsonError("Unauthorized", 401);
+        }
       }
 
-      const run = (await listRuns(config, Number.MAX_SAFE_INTEGER)).find((record) => record.timestamp === timestamp);
-      const governance =
-        run && run.round > 0
-          ? await db.getGovernanceDetails(run.round)
-          : { leader: null, ccb: null };
+      if (url.pathname === "/api/status" && request.method === "GET") {
+        return json(await getLoopStatus(config));
+      }
 
-      return json({
-        ...artifacts,
-        governance
-      });
+      if (url.pathname === "/api/metrics/friction-index" && request.method === "GET") {
+        return json(await db.getFrictionIndex());
+      }
+
+      if (url.pathname === "/api/config" && request.method === "GET") {
+        return json(await readRuntimeLoopConfig(config));
+      }
+
+      if (url.pathname === "/api/goal" && request.method === "GET") {
+        return json({ goal: await readGoal(config) });
+      }
+
+      if (url.pathname === "/api/config" && request.method === "POST") {
+        const body = await parseBody(request);
+        return json({
+          ok: true,
+          config: await patchRuntimeLoopConfig(config, body)
+        });
+      }
+
+      if (url.pathname === "/api/config/reset" && request.method === "POST") {
+        return json({
+          ok: true,
+          config: await resetRuntimeLoopConfig(config)
+        });
+      }
+
+      if (url.pathname === "/api/loop/start" && request.method === "POST") {
+        return json(await startBackgroundLoop(config));
+      }
+
+      if (url.pathname === "/api/loop/stop" && request.method === "POST") {
+        await stopLoop(config);
+        return json({ ok: true });
+      }
+
+      if (url.pathname === "/api/loop/pause" && request.method === "POST") {
+        await pauseLoop(config);
+        return json({ ok: true });
+      }
+
+      if (url.pathname === "/api/loop/resume" && request.method === "POST") {
+        await resumeLoop(config);
+        return json({ ok: true });
+      }
+
+      if (url.pathname === "/api/loop/instruct" && request.method === "POST") {
+        const body = await parseBody(request);
+        const message = typeof body.message === "string" ? body.message.trim() : "";
+        if (!message) {
+          return jsonError("Missing message", 400);
+        }
+        await instructLoop(config, message);
+        return json({ ok: true });
+      }
+
+      if (url.pathname.startsWith("/api/runs/") && url.pathname.endsWith("/governance") && request.method === "GET") {
+        const parts = url.pathname.split("/");
+        const roundId = Number(parts[3]);
+        if (Number.isFinite(roundId)) {
+          return json(await db.getGovernanceDetails(roundId));
+        }
+        return jsonError("Invalid round ID", 400);
+      }
+
+      if (url.pathname === "/api/runs" && request.method === "GET") {
+        const limitRaw = Number(url.searchParams.get("limit") ?? "20");
+        const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, limitRaw)) : 20;
+        const runs = await listRuns(config, limit);
+        const payload = await Promise.all(
+          runs.map(async (run) => {
+            const governance =
+              run.round > 0
+                ? await db.getGovernanceDetails(run.round)
+                : { leader: null, ccb: null };
+
+            return {
+              ...run,
+              has_governance: Boolean(governance.leader || governance.ccb)
+            };
+          })
+        );
+
+        return json(payload);
+      }
+
+      const runArtifactsMatch =
+        request.method === "GET" ? url.pathname.match(/^\/api\/runs\/([^/]+)\/artifacts$/) : null;
+      if (runArtifactsMatch) {
+        const timestamp = decodeURIComponent(runArtifactsMatch[1] ?? "");
+        const artifacts = await getRunArtifacts(config, timestamp);
+        if (!artifacts) {
+          return jsonError("Run artifacts not found", 404);
+        }
+
+        const run = (await listRuns(config, Number.MAX_SAFE_INTEGER)).find((record) => record.timestamp === timestamp);
+        const governance =
+          run && run.round > 0
+            ? await db.getGovernanceDetails(run.round)
+            : { leader: null, ccb: null };
+
+        return json({
+          ...artifacts,
+          governance
+        });
+      }
+
+      if (url.pathname === "/api/roles" && request.method === "GET") {
+        const roles = await listProjectRoles(config);
+        return json({
+          count: roles.length,
+          roles
+        });
+      }
+
+      if (url.pathname === "/api/logs/tail" && request.method === "GET") {
+        const linesRaw = Number(url.searchParams.get("lines") ?? "200");
+        const lines = Number.isFinite(linesRaw) ? Math.max(1, Math.min(2000, linesRaw)) : 200;
+        return json({ lines: await tailLatestLog(config, lines) });
+      }
+
+      const staticFile = await serveStaticFromDist(url.pathname);
+      if (staticFile) {
+        return staticFile;
+      }
+
+      return json({ error: "Not Found" }, 404);
+    } catch {
+      if (url.pathname.startsWith("/api/")) {
+        console.error(`[AILoop console] API handler failed for ${request.method} ${url.pathname}`);
+        return jsonError("Internal Server Error", 500);
+      }
+      throw new Error("Console server failed while serving a non-API request.");
     }
-
-    if (url.pathname === "/api/roles" && request.method === "GET") {
-      const roles = await listProjectRoles(config);
-      return json({
-        count: roles.length,
-        roles
-      });
-    }
-
-    if (url.pathname === "/api/logs/tail" && request.method === "GET") {
-      const linesRaw = Number(url.searchParams.get("lines") ?? "200");
-      const lines = Number.isFinite(linesRaw) ? Math.max(1, Math.min(2000, linesRaw)) : 200;
-      return json({ lines: await tailLatestLog(config, lines) });
-    }
-
-    const staticFile = await serveStaticFromDist(url.pathname);
-    if (staticFile) {
-      return staticFile;
-    }
-
-    return json({ error: "Not Found" }, 404);
   };
 }
 

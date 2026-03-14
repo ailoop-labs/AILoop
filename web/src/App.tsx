@@ -140,6 +140,39 @@ function clearStoredToken(): void {
   window.localStorage.removeItem(TOKEN_STORAGE_KEY);
 }
 
+export function summarizeApiError(status: number, body: string, contentType?: string | null): string {
+  const trimmedBody = body.trim();
+  const normalizedContentType = (contentType ?? "").toLowerCase();
+
+  if (normalizedContentType.includes("application/json") && trimmedBody.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmedBody) as { error?: unknown };
+      if (typeof parsed.error === "string" && parsed.error.trim()) {
+        return parsed.error.trim();
+      }
+    } catch {
+      // Fall through to plain-text summarization.
+    }
+  }
+
+  const looksLikeHtml =
+    normalizedContentType.includes("text/html") ||
+    trimmedBody.startsWith("<!doctype html") ||
+    trimmedBody.startsWith("<html") ||
+    trimmedBody.includes("<body");
+
+  if (looksLikeHtml) {
+    return `Server error (${status}). The console returned an HTML error page instead of JSON.`;
+  }
+
+  const collapsed = trimmedBody.replace(/\s+/g, " ").replace(/<[^>]+>/g, "").trim();
+  if (!collapsed) {
+    return `Request failed: ${status}`;
+  }
+
+  return collapsed.length > 240 ? `${collapsed.slice(0, 237)}...` : collapsed;
+}
+
 async function api<T>(url: string, init?: RequestInit, token?: string): Promise<T> {
   const headers = new Headers(init?.headers ?? {});
   if (token && token.trim()) {
@@ -155,7 +188,7 @@ async function api<T>(url: string, init?: RequestInit, token?: string): Promise<
       throw new Error("Unauthorized");
     }
     const text = await response.text();
-    throw new Error(text || `Request failed: ${response.status}`);
+    throw new Error(summarizeApiError(response.status, text, response.headers.get("content-type")));
   }
   return (await response.json()) as T;
 }

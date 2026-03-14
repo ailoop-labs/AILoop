@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { RunArtifactEvidenceGrid } from "./App";
+import { RunArtifactEvidenceGrid, summarizeApiError } from "./App";
 import type { RoundReport } from "./run-history";
 
 function makeReport(overrides: Partial<RoundReport> = {}): RoundReport {
@@ -69,5 +69,20 @@ describe("RunArtifactEvidenceGrid", () => {
     expect(html).toContain("No material state change summary captured.");
     expect(html).toContain("No verification evidence captured.");
     expect(html).toContain("No operational evidence captured.");
+  });
+});
+
+describe("summarizeApiError", () => {
+  test("reduces HTML server error bodies to a compact operator-readable message", () => {
+    const htmlError = [
+      "<html>",
+      "<head><title>500 Internal Server Error</title></head>",
+      "<body><h1>Internal Server Error</h1><pre>SQLiteError: disk I/O error</pre></body>",
+      "</html>"
+    ].join("");
+
+    expect(summarizeApiError(500, htmlError, "text/html")).toBe(
+      "Server error (500). The console returned an HTML error page instead of JSON."
+    );
   });
 });
