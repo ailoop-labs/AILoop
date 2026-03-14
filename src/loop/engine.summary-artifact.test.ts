@@ -43,92 +43,106 @@ function makeAction(tool: string, output?: string): ActionRecord {
 
 test("writes a round summary artifact with round metadata and artifact references", async () => {
   const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-summary-artifact-focused-test-"));
-  const config = loadConfig({
-    AILOOP_HOME: homeDir
-  });
-  const engine = new LoopEngine(config);
-  const paths = (engine as unknown as { paths: LoopPaths }).paths;
-  await ensureLoopHome(paths);
+  const workspaceProbePath = path.join(process.cwd(), ".tmp-engine-summary-artifact.txt");
+  try {
+    const config = loadConfig({
+      AILOOP_HOME: homeDir
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
 
-  const plan: SubTask = {
-    assignee: "executor",
-    rationale: "test rationale",
-    objective: "Persist markdown round summary",
-    expected_outcome: "round summary artifact exists with artifact references",
-    impacted_files: [],
-    recommended_tools: ["read_file", "run_shell"]
-  };
+    const plan: SubTask = {
+      assignee: "executor",
+      rationale: "test rationale",
+      objective: "Persist markdown round summary",
+      expected_outcome: "round summary artifact exists with artifact references",
+      impacted_files: [workspaceProbePath],
+      recommended_tools: ["read_file", "run_shell"]
+    };
 
-  const execute = async () => ({
-    actions: [
-      makeAction("read_file", "Inspected src/reporting/summary.ts before editing."),
-      makeAction("run_shell", "bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed")
-    ],
-    toolResult: makeToolResult("Created markdown summary artifact")
-  });
-  const evaluate = async (): Promise<EvaluationResult> => makeEvaluation("pass", "All checks satisfied.");
+    await fs.rm(workspaceProbePath, { force: true });
 
-  const mutable = engine as unknown as {
-    planner: { plan: () => Promise<SubTask> };
-    executor: { execute: typeof execute };
-    evaluator: { evaluate: typeof evaluate };
-    collectOperationalEvidence: () => Promise<{
-      summaryNote: string;
-      lines: string[];
-      stateChangeNotes: string[];
-    }>;
-    runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
-  };
-  mutable.planner = { plan: async () => plan };
-  mutable.executor = { execute };
-  mutable.evaluator = { evaluate };
-  mutable.collectOperationalEvidence = async () => ({
-    summaryNote: "",
-    lines: [],
-    stateChangeNotes: []
-  });
+    const execute = async () => {
+      await fs.writeFile(workspaceProbePath, "material state change summary\n", "utf8");
+      return {
+        actions: [
+          makeAction("read_file", "Inspected src/reporting/summary.ts before editing."),
+          makeAction(
+            "run_shell",
+            "bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed"
+          )
+        ],
+        toolResult: makeToolResult("Created markdown summary artifact")
+      };
+    };
+    const evaluate = async (): Promise<EvaluationResult> => makeEvaluation("pass", "All checks satisfied.");
 
-  const outcome = await mutable.runRound(1);
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      executor: { execute: typeof execute };
+      evaluator: { evaluate: typeof evaluate };
+      collectOperationalEvidence: () => Promise<{
+        summaryNote: string;
+        lines: string[];
+        stateChangeNotes: string[];
+      }>;
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+    mutable.planner = { plan: async () => plan };
+    mutable.executor = { execute };
+    mutable.evaluator = { evaluate };
+    mutable.collectOperationalEvidence = async () => ({
+      summaryNote: "",
+      lines: [],
+      stateChangeNotes: []
+    });
 
-  expect(outcome.success).toBe(true);
-  const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
-  const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
-  expect(summaryFile).toBeDefined();
+    const outcome = await mutable.runRound(1);
 
-  const summaryPath = path.join(homeDir, "runs", summaryFile as string);
-  const summaryText = await fs.readFile(summaryPath, "utf8");
+    expect(outcome.success).toBe(true);
+    const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+    const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
+    expect(summaryFile).toBeDefined();
 
-  expect(summaryText).toContain("# AILoop Round Summary");
-  expect(summaryText).toContain("## Round Metadata");
-  expect(summaryText).toContain("- Round: 1");
-  expect(summaryText).toMatch(/- Timestamp: \d{4}-\d{2}-\d{2}T/);
-  expect(summaryText).toContain("- Objective: Persist markdown round summary");
-  expect(summaryText).toContain("## Executor Action Trace");
-  expect(summaryText).toContain("1. read_file: Inspected src/reporting/summary.ts before editing.");
-  expect(summaryText).toContain(
-    "2. run_shell: bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed"
-  );
-  expect(summaryText).toContain("- Tool Status: success");
-  expect(summaryText).toContain("## Artifact References");
-  expect(summaryText).toContain(`- Summary: ${summaryPath}`);
-  expect(summaryText).toContain(
-    `- Metrics: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.metrics.json"))}`
-  );
-  expect(summaryText).toContain(
-    `- Log: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.log"))}`
-  );
-  expect(summaryText).toContain(
-    `- State Change: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.state_change.txt"))}`
-  );
-  expect(summaryText).toContain(
-    `- Evaluation: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.evaluation.json"))}`
-  );
-  expect(summaryText).toContain("## Verification Evidence");
-  expect(summaryText).toContain(
-    "- bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed"
-  );
-  expect(summaryText).toContain("- Summary artifact includes executor action trace and verification evidence.");
-  expect(summaryText).toContain("- Decision: pass");
+    const summaryPath = path.join(homeDir, "runs", summaryFile as string);
+    const summaryText = await fs.readFile(summaryPath, "utf8");
 
-  await fs.rm(homeDir, { recursive: true, force: true });
+    expect(summaryText).toContain("# AILoop Round Summary");
+    expect(summaryText).toContain("## Round Metadata");
+    expect(summaryText).toContain("- Round: 1");
+    expect(summaryText).toMatch(/- Timestamp: \d{4}-\d{2}-\d{2}T/);
+    expect(summaryText).toContain("- Objective: Persist markdown round summary");
+    expect(summaryText).toContain("## Executor Action Trace");
+    expect(summaryText).toContain("1. read_file: Inspected src/reporting/summary.ts before editing.");
+    expect(summaryText).toContain(
+      "2. run_shell: bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed"
+    );
+    expect(summaryText).toContain("- Tool Status: success");
+    expect(summaryText).toContain("## Artifact References");
+    expect(summaryText).toContain(`- Summary: ${summaryPath}`);
+    expect(summaryText).toContain(
+      `- Metrics: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.metrics.json"))}`
+    );
+    expect(summaryText).toContain(
+      `- Log: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.log"))}`
+    );
+    expect(summaryText).toContain(
+      `- State Change: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.state_change.txt"))}`
+    );
+    expect(summaryText).toContain(
+      `- Evaluation: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.evaluation.json"))}`
+    );
+    expect(summaryText).toContain("## Verification Evidence");
+    expect(summaryText).toContain(
+      "- bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed"
+    );
+    expect(summaryText).toContain("- Summary artifact includes executor action trace and verification evidence.");
+    expect(summaryText).toContain("## Material State Change");
+    expect(summaryText).toContain("- Files changed: .tmp-engine-summary-artifact.txt");
+    expect(summaryText).toContain("- Decision: pass");
+  } finally {
+    await fs.rm(workspaceProbePath, { force: true });
+    await fs.rm(homeDir, { recursive: true, force: true });
+  }
 });

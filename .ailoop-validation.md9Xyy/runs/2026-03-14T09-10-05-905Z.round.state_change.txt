@@ -1,0 +1,385 @@
+### Snapshot File Diffs
+```diff
+--- web/src/run-history.ts
++++ web/src/run-history.ts
+@@ -1,198 +1,227 @@
++  executorActionTrace: string[];
++  operationalEvidence: string[];
++  verificationEvidence: string[];
++function parseMarkdownList(section: string): string[] {
++  const items = section
++    .split("\n")
++    .map((line) => line.trim())
++    .map((line) => {
++      const numberedMatch = line.match(/^\d+\.\s+(.*)$/);
++      if (numberedMatch) {
++        return numberedMatch[1].trim();
++      }
++      const bulletMatch = line.match(/^[-*]\s+(.*)$/);
++      if (bulletMatch) {
++        return bulletMatch[1].trim();
++      }
++      return "";
++    })
++    .filter(Boolean);
++  return items;
++    executorActionTrace: parseMarkdownList(extractMarkdownSection(summary, "Executor Action Trace")),
++    operationalEvidence: parseMarkdownList(extractMarkdownSection(summary, "Operational Evidence")),
++    verificationEvidence: parseMarkdownList(extractMarkdownSection(summary, "Verification Evidence")),
++    .filter(Boolean)
++
++
++
++}
++
+
+--- web/src/run-history.test.ts
++++ web/src/run-history.test.ts
+@@ -1,121 +1,158 @@
+-## Task
+-## Execution
++## Planned Sub-task
++- Rationale: Keep round reviews scannable.
++## Executor Action Trace
++1. read_file: Inspected persisted round summary formatting.
++2. write_file: Added evidence section parsing for the console.
++## Execution Result
++## Operational Evidence
++- Verification: bun test web/src/run-history.test.ts -> 2 passed
++- Follow-up: Surface executor and verification evidence in run detail
++## Verification Evidence
++- bun test web/src/run-history.test.ts
++- bun --cwd=web run build
++    expect(report.executorActionTrace).toEqual([
++      "read_file: Inspected persisted round summary formatting.",
++      "write_file: Added evidence section parsing for the console."
++    expect(report.operationalEvidence).toEqual([
++      "Verification: bun test web/src/run-history.test.ts -> 2 passed",
++      "Follow-up: Surface executor and verification evidence in run detail"
++    ]);
++    expect(report.verificationEvidence).toEqual([
++      "bun test web/src/run-history.test.ts",
++      "bun --cwd=web run build"
++    ]);
++    ]);
++
++
++    expect(report.executorActionTrace).toEqual([
++      "read_file: Inspected persisted round summary formatting.",
++      "write_file: Added evidence section parsing for the console."
++    ]);
++    expect(report.operationalEvidence).toEqual([
++      "Verification: bun test web/src/run-history.test.ts -> 2 passed",
++      "Follow-up: Surface executor and verification evidence in run detail"
++    ]);
++    expect(report.verificationEvidence).toEqual([
++      "bun test web/src/run-history.test.ts",
++      "bun --cwd=web run build"
++    ]);
++
+
+--- web/src/App.tsx
++++ web/src/App.tsx
+@@ -1,1679 +1,1728 @@
+-import { projectRunHistoryReport, type RunHistoryItem, type GovernanceDetails, type ExpertOpinion } from "./run-history";
+-                  <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">Summary</h4>
++import { projectRunHistoryReport, type RunHistoryItem, type GovernanceDetails, type ExpertOpinion, type RoundReport } from "./run-history";
++interface EvidenceBlockProps {
++  title: string;
++  items: string[];
++  emptyMessage: string;
++function EvidenceBlock({ title, items, emptyMessage }: EvidenceBlockProps) {
++    <div className="rounded-2xl border border-white/10 bg-ink/70 p-4">
++      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-mist/60">{title}</p>
++      {items.length > 0 ? (
++        <div className="mt-3 space-y-2">
++          {items.map((item, index) => (
++            <div key={`${title}-${index}-${item}`} className="rounded-xl border border-white/10 bg-panel/60 px-3 py-2">
++              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent/80">{index + 1}</p>
++              <p className="mt-1 text-sm leading-6 text-mist/85">{item}</p>
++          ))}
++      ) : (
++        <p className="mt-3 text-sm text-mist/60">{emptyMessage}</p>
++      )}
++    </div>
++}
++export function RunArtifactEvidenceGrid({ report }: { report: RoundReport }) {
++  return (
++    <div className="mt-4 grid gap-3 xl:grid-cols-3">
++      <EvidenceBlock
++        title="Executor Action Trace"
++        items={report.executorActionTrace}
++        emptyMessage="No executor action trace captured."
++      />
++      <EvidenceBlock
++        title="Verification Evidence"
++        items={report.verificationEvidence}
++        emptyMessage="No verification evidence captured."
++      />
++      <EvidenceBlock
++        title="Operational Follow-up"
++        items={report.operationalEvidence}
++        emptyMessage="No operational evidence captured."
++      />
++    </div>
++}
++  );
++  return (
++                  <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">Summary Markdown</h4>
++                      <RunArtifactEvidenceGrid report={selectedArtifactsReport} />
++
++
++            </div>
++        </div>
++  );
++}
++
+```
+
+### Git Status Delta
+```diff
+--- git-status-porcelain
++++ git-status-porcelain
+@@ -1,12 +1,16 @@
++ M web/src/App.tsx
++ M web/src/run-history.test.ts
++ M web/src/run-history.ts
++?? web/src/App.test.tsx
+```
+
+### Git Tracked Diff Delta
+```diff
+--- git-tracked-diff
++++ git-tracked-diff
+@@ -1,68 +1,280 @@
++diff --git a/web/src/App.tsx b/web/src/App.tsx
++index 3dd9d23..b703b83 100644
++--- a/web/src/App.tsx
+++++ b/web/src/App.tsx
++@@ -7,7 +7,7 @@ import { resolveLogTailFollowBehavior } from "./log-follow";
++ import { GoalMarkdown } from "./goal-markdown";
++ import { deriveRoundProgress } from "./round-progress";
++ import { RequirementSnapshotCard, type RequirementArtifactView } from "./requirement-snapshot";
++-import { projectRunHistoryReport, type RunHistoryItem, type GovernanceDetails, type ExpertOpinion } from "./run-history";
+++import { projectRunHistoryReport, type RunHistoryItem, type GovernanceDetails, type ExpertOpinion, type RoundReport } from "./run-history";
++ import { paginateRunHistory, RUN_HISTORY_PAGE_SIZE } from "./run-history-pagination";
++ 
++ type LoopStateName = "idle" | "starting" | "running" | "cooldown" | "paused" | "stopping" | "error";
++@@ -249,6 +249,54 @@ interface RunArtifactBundle {
++   } | null;
++ }
++ 
+++interface EvidenceBlockProps {
+++  title: string;
+++  items: string[];
+++  emptyMessage: string;
+++}
+++
+++function EvidenceBlock({ title, items, emptyMessage }: EvidenceBlockProps) {
+++  return (
+++    <div className="rounded-2xl border border-white/10 bg-ink/70 p-4">
+++      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-mist/60">{title}</p>
+++      {items.length > 0 ? (
+++        <div className="mt-3 space-y-2">
+++          {items.map((item, index) => (
+++            <div key={`${title}-${index}-${item}`} className="rounded-xl border border-white/10 bg-panel/60 px-3 py-2">
+++              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent/80">{index + 1}</p>
+++              <p className="mt-1 text-sm leading-6 text-mist/85">{item}</p>
+++            </div>
+++          ))}
+++        </div>
+++      ) : (
+++        <p className="mt-3 text-sm text-mist/60">{emptyMessage}</p>
+++      )}
+++    </div>
+++  );
+++}
+++
+++export function RunArtifactEvidenceGrid({ report }: { report: RoundReport }) {
+++  return (
+++    <div className="mt-4 grid gap-3 xl:grid-cols-3">
+++      <EvidenceBlock
+++        title="Executor Action Trace"
+++        items={report.executorActionTrace}
+++        emptyMessage="No executor action trace captured."
+++      />
+++      <EvidenceBlock
+++        title="Verification Evidence"
+++        items={report.verificationEvidence}
+++        emptyMessage="No verification evidence captured."
+++      />
+++      <EvidenceBlock
+++        title="Operational Follow-up"
+++        items={report.operationalEvidence}
+++        emptyMessage="No operational evidence captured."
+++      />
+++    </div>
+++  );
+++}
+++
++ export default function App() {
++   const [tokenRequired, setTokenRequired] = useState<boolean | null>(null);
++   const [authToken, setAuthToken] = useState<string>(() => readStoredToken());
++@@ -1446,7 +1494,7 @@ export default function App() {
++             <div className="flex-1 overflow-auto p-6">
++               <div className="grid gap-6">
++                 <section>
++-                  <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">Summary</h4>
+++                  <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">Summary Markdown</h4>
++                   <div className="rounded-2xl border border-white/10 bg-ink/60 p-5 shadow-inner">
++                     <div className="markdown-body">
++                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedArtifacts.summary}</ReactMarkdown>
++@@ -1473,6 +1521,7 @@ export default function App() {
++                         <p className="mt-2 text-sm font-semibold text-ember">Root Cause: {selectedArtifactsReport.rootCause}</p>
++                       ) : null}
++                       <p className="mt-2 text-sm text-mist/75">Evidence: {selectedArtifactsReport.evidence}</p>
+++                      <RunArtifactEvidenceGrid report={selectedArtifactsReport} />
++                       <p className="mt-2 text-sm text-mist/75">Next: {selectedArtifactsReport.nextRecommendation}</p>
++                       {selectedArtifactsReport.dimensionBreakdown.length > 0 ? (
++                         <div className="mt-4 grid gap-3 xl:grid-cols-2">
++diff --git a/web/src/run-history.test.ts b/web/src/run-history.test.ts
++index 700e59c..b0a3cf6 100644
++--- a/web/src/run-history.test.ts
+++++ b/web/src/run-history.test.ts
++@@ -4,15 +4,28 @@ import { projectRunHistoryReport, type RunHistoryItem } from "./run-history";
++ function makeSummary(): string {
++   return `# AILoop Round Summary
++ 
++-## Task
+++## Planned Sub-task
++ - Objective: Ship evaluator data into the web console
++ - Expected Outcome: Run history reads evaluator artifacts directly
+++- Rationale: Keep round reviews scannable.
++ 
++-## Execution
+++## Executor Action Trace
+++1. read_file: Inspected persisted round summary formatting.
+++2. write_file: Added evidence section parsing for the console.
+++
+++## Execution Result
++ - Tool Status: success
++ - Work Summary: Updated the run history view
++ - Error: none
++ 
+++## Operational Evidence
+++- Verification: bun test web/src/run-history.test.ts -> 2 passed
+++- Follow-up: Surface executor and verification evidence in run detail
+++
+++## Verification Evidence
+++- bun test web/src/run-history.test.ts
+++- bun --cwd=web run build
+++
++ ## Evaluation
++ - Decision: fail
++ - Justification: Parsed markdown should only be fallback data.
++@@ -71,6 +84,18 @@ describe("projectRunHistoryReport", () => {
++     expect(report.toolStatus).toBe("success");
++     expect(report.workSummary).toBe("Updated the run history view");
++     expect(report.error).toBe("none");
+++    expect(report.executorActionTrace).toEqual([
+++      "read_file: Inspected persisted round summary formatting.",
+++      "write_file: Added evidence section parsing for the console."
+++    ]);
+++    expect(report.operationalEvidence).toEqual([
+++      "Verification: bun test web/src/run-history.test.ts -> 2 passed",
+++      "Follow-up: Surface executor and verification evidence in run detail"
+++    ]);
+++    expect(report.verificationEvidence).toEqual([
+++      "bun test web/src/run-history.test.ts",
+++      "bun --cwd=web run build"
+++    ]);
++     expect(report.decision).toBe("pass");
++     expect(report.justification).toBe("Structured evaluation should override summary parsing.");
++     expect(report.evidence).toBe("bun test web/src/run-history.test.ts | bun run web:build");
++@@ -110,6 +135,18 @@ describe("projectRunHistoryReport", () => {
++ 
++     const report = projectRunHistoryReport(run);
++ 
+++    expect(report.executorActionTrace).toEqual([
+++      "read_file: Inspected persisted round summary formatting.",
+++      "write_file: Added evidence section parsing for the console."
+++    ]);
+++    expect(report.operationalEvidence).toEqual([
+++      "Verification: bun test web/src/run-history.test.ts -> 2 passed",
+++      "Follow-up: Surface executor and verification evidence in run detail"
+++    ]);
+++    expect(report.verificationEvidence).toEqual([
+++      "bun test web/src/run-history.test.ts",
+++      "bun --cwd=web run build"
+++    ]);
++     expect(report.decision).toBe("fail");
++     expect(report.justification).toBe("Parsed markdown should only be fallback data.");
++     expect(report.evidence).toBe("bun test web/src/App.test.tsx");
++diff --git a/web/src/run-history.ts b/web/src/run-history.ts
++index d39e9a7..d9663da 100644
++--- a/web/src/run-history.ts
+++++ b/web/src/run-history.ts
++@@ -66,6 +66,9 @@ export interface RoundReport {
++   toolStatus: string;
++   workSummary: string;
++   error: string;
+++  executorActionTrace: string[];
+++  operationalEvidence: string[];
+++  verificationEvidence: string[];
++   decision: string;
++   justification: string;
++   rootCause: string;
++@@ -102,6 +105,29 @@ function extractMarkdownSection(summary: string, heading: string): string {
++   return (nextHeadingIndex === -1 ? rest : rest.slice(0, nextHeadingIndex)).trim();
++ }
++ 
+++function parseMarkdownList(section: string): string[] {
+++  const items = section
+++    .split("\n")
+++    .map((line) => line.trim())
+++    .filter(Boolean)
+++    .map((line) => {
+++      const numberedMatch = line.match(/^\d+\.\s+(.*)$/);
+++      if (numberedMatch) {
+++        return numberedMatch[1].trim();
+++      }
+++
+++      const bulletMatch = line.match(/^[-*]\s+(.*)$/);
+++      if (bulletMatch) {
+++        return bulletMatch[1].trim();
+++      }
+++
+++      return "";
+++    })
+++    .filter(Boolean);
+++
+++  return items;
+++}
+++
++ function parseRoundReport(summary: string): RoundReport {
++   return {
++     objective: extractBulletValue(summary, "Objective") ?? "No objective captured",
++@@ -109,6 +135,9 @@ function parseRoundReport(summary: string): RoundReport {
++     toolStatus: extractBulletValue(summary, "Tool Status") ?? "unknown",
++     workSummary: extractBulletValue(summary, "Work Summary") ?? "No work summary captured",
++     error: extractBulletValue(summary, "Error") ?? "none",
+++    executorActionTrace: parseMarkdownList(extractMarkdownSection(summary, "Executor Action Trace")),
+++    operationalEvidence: parseMarkdownList(extractMarkdownSection(summary, "Operational Evidence")),
+++    verificationEvidence: parseMarkdownList(extractMarkdownSection(summary, "Verification Evidence")),
++     decision: extractBulletValue(summary, "Decision") ?? "unknown",
++     justification: extractBulletValue(summary, "Justification") ?? "No evaluator justification captured",
++     rootCause: extractBulletValue(summary, "Root Cause") ?? "none",
+```
+
+### Git Untracked Delta
+```diff
+--- git-untracked-files
++++ git-untracked-files
+@@ -1,9 +1,10 @@
++web/src/App.test.tsx
+```
+
+### Operational Follow-up
+Shell: git commit -m ... -> ok
+Shell: git push origin HEAD -> ok (To github.com:ailoop-labs/AILoop.git 75007f9..2394b36 HEAD -> main)
+Shell: bash scripts/prod.sh restart -> ok (Restart requested: stopping current server gracefully. Stopping AILoop Production server (PID: 59892)... Stopped. AILOOP_CONSOLE_ADMIN_TOKEN is empty in .env; reusing token issued on 2026-03-09 (age: 5 days). This token is valid for 7 UTC days (expires on 2026-03-16 UTC). 8722b853f427f968975f60927287320b9b6ecab192b419f8 (Tip: copy this token and paste it into the web login page.) vite v7.3.1 building client environment for production... transforming... ✓ 290 modules transformed. rendering chunks... computing gzip size... dist/index.html 0.41 kB │ gzip: 0.29 kB dist/assets/index-CGOCOSNG.css 20.19 kB │ gzip: 4.94 kB dist/assets/index-BRl7KM3X.js 521.77 kB │ gzip: 155.96 kB ✓ built in 1.14s AILoop Production server is running at http://127.0.0.1:3091 Use the web console for all loop operations and parameter settings. Started in background daemon mode. PID: 79670 Log: .ailoop/prod.server.log Tip: Use 'tail -f .ailoop/prod.server.log' to monitor the server. $ bun --cwd=web run build $ vite build (!) Some chunks are larger than 500 kB after minification. Consider: - Using dynamic import() to code-split the application - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.)
+Health: GET /api/health -> 200 ok ({
+  "ok": true,
+  "service": "ailoop-console",
+  "db": "connected"
+})

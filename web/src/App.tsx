@@ -277,11 +277,16 @@ function EvidenceBlock({ title, items, emptyMessage }: EvidenceBlockProps) {
 
 export function RunArtifactEvidenceGrid({ report }: { report: RoundReport }) {
   return (
-    <div className="mt-4 grid gap-3 xl:grid-cols-3">
+    <div className="mt-4 grid gap-3 xl:grid-cols-4">
       <EvidenceBlock
         title="Executor Action Trace"
         items={report.executorActionTrace}
         emptyMessage="No executor action trace captured."
+      />
+      <EvidenceBlock
+        title="Material State Change"
+        items={report.materialStateChange}
+        emptyMessage="No material state change summary captured."
       />
       <EvidenceBlock
         title="Verification Evidence"

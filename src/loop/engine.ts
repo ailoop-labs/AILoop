@@ -804,6 +804,7 @@ export class LoopEngine {
           recommended_next_action: "pause and inspect round error"
         },
         metrics,
+        stateChange,
         risks: [message],
         autoReworkAttempts: [],
         nextRecommendation: error instanceof BudgetBreachError ? "pause" : "continue",
@@ -871,6 +872,7 @@ export class LoopEngine {
       toolResult,
       evaluation,
       metrics,
+      stateChange,
       risks: [],
       autoReworkAttempts,
       nextRecommendation: evaluation.recommended_next_action ?? "",

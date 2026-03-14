@@ -67,6 +67,7 @@ export interface RoundReport {
   workSummary: string;
   error: string;
   executorActionTrace: string[];
+  materialStateChange: string[];
   operationalEvidence: string[];
   verificationEvidence: string[];
   decision: string;
@@ -136,6 +137,7 @@ function parseRoundReport(summary: string): RoundReport {
     workSummary: extractBulletValue(summary, "Work Summary") ?? "No work summary captured",
     error: extractBulletValue(summary, "Error") ?? "none",
     executorActionTrace: parseMarkdownList(extractMarkdownSection(summary, "Executor Action Trace")),
+    materialStateChange: parseMarkdownList(extractMarkdownSection(summary, "Material State Change")),
     operationalEvidence: parseMarkdownList(extractMarkdownSection(summary, "Operational Evidence")),
     verificationEvidence: parseMarkdownList(extractMarkdownSection(summary, "Verification Evidence")),
     decision: extractBulletValue(summary, "Decision") ?? "unknown",

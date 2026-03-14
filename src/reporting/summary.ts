@@ -12,6 +12,7 @@ export interface SummaryInput {
   toolResult: ToolResult;
   evaluation: EvaluationResult;
   metrics: RoundMetrics;
+  stateChange: string;
   risks: string[];
   autoReworkAttempts: string[];
   nextRecommendation: string;
@@ -48,6 +49,67 @@ function formatVerificationEvidence(evaluation: EvaluationResult): string {
   return evaluation.evidence.length > 0
     ? evaluation.evidence.map((item) => `- ${item}`).join("\n")
     : "- None recorded.";
+}
+
+function summarizeFileList(files: string[]): string {
+  if (files.length <= 3) {
+    return files.join(", ");
+  }
+
+  return `${files.slice(0, 3).join(", ")} (+${files.length - 3} more)`;
+}
+
+function formatMaterialStateChange(stateChange: string): string {
+  const normalized = stateChange.trim();
+  if (!normalized || normalized === "No state changes detected.") {
+    return "- No material state change summary captured.";
+  }
+
+  const files = Array.from(
+    new Set(
+      normalized
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.startsWith("+++ "))
+        .map((line) => line.slice(4).trim())
+        .filter((line) => line && line !== "/dev/null")
+        .map((line) => line.replace(/^b\//, ""))
+    )
+  );
+  const addedLines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+    .length;
+  const removedLines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("-") && !line.startsWith("---"))
+    .length;
+
+  const summaryLines: string[] = [];
+  if (files.length > 0) {
+    summaryLines.push(`- Files changed: ${summarizeFileList(files)}`);
+  }
+  if (addedLines > 0) {
+    summaryLines.push(`- Added lines: ${addedLines}`);
+  }
+  if (removedLines > 0) {
+    summaryLines.push(`- Removed lines: ${removedLines}`);
+  }
+
+  if (summaryLines.length > 0) {
+    return summaryLines.join("\n");
+  }
+
+  const derivedNotes = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("### ") && line !== "```diff" && line !== "```")
+    .slice(0, 2)
+    .map((line) => `- ${line}`);
+
+  return derivedNotes.length > 0 ? derivedNotes.join("\n") : "- No material state change summary captured.";
 }
 
 function redactArtifactText(content: string): string {
@@ -137,6 +199,9 @@ export async function writeSummaryFile(summaryPath: string, input: SummaryInput)
     `- Tool Status: ${input.toolResult.status}`,
     `- Work Summary: ${input.toolResult.summary}`,
     `- Error: ${input.toolResult.error?.message ?? "none"}`,
+    "",
+    "## Material State Change",
+    formatMaterialStateChange(input.stateChange),
     "",
     "## Artifact References",
     `- Summary: ${artifactPaths.summaryPath}`,

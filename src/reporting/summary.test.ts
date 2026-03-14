@@ -86,6 +86,7 @@ function makeSummaryInput(autoReworkAttempts: string[]): SummaryInput {
         operational_followup: 400
       }
     },
+    stateChange: "No state changes detected.\n",
     risks: [],
     autoReworkAttempts,
     nextRecommendation: "continue"
@@ -191,6 +192,38 @@ describe("writeSummaryFile auto rework section", () => {
       "- bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed"
     );
     expect(text).toContain("- Summary artifact includes executor action trace and verification evidence.");
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test("renders a compact material state change summary derived from the persisted diff", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-summary-test-"));
+    const summaryPath = path.join(dir, "round.summary.md");
+    const input = makeSummaryInput([]);
+    input.stateChange = [
+      "### Snapshot File Diffs",
+      "```diff",
+      "diff --git a/src/reporting/summary.ts b/src/reporting/summary.ts",
+      "--- a/src/reporting/summary.ts",
+      "+++ b/src/reporting/summary.ts",
+      "@@ -1,3 +1,8 @@",
+      "+function summarizeMaterialStateChange() {",
+      "+  return [];",
+      "+}",
+      "diff --git a/web/src/App.tsx b/web/src/App.tsx",
+      "--- a/web/src/App.tsx",
+      "+++ b/web/src/App.tsx",
+      "@@ -20,3 +20,7 @@",
+      "+<section>material state change</section>",
+      "```"
+    ].join("\n");
+
+    await writeSummaryFile(summaryPath, input);
+    const text = await fs.readFile(summaryPath, "utf8");
+
+    expect(text).toContain("## Material State Change");
+    expect(text).toContain("- Files changed: src/reporting/summary.ts, web/src/App.tsx");
+    expect(text).toContain("- Added lines: 4");
 
     await fs.rm(dir, { recursive: true, force: true });
   });

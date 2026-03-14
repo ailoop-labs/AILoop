@@ -14,6 +14,10 @@ function makeReport(overrides: Partial<RoundReport> = {}): RoundReport {
       "read_file: Inspected persisted round summary formatting.",
       "write_file: Added evidence cards to the run detail modal."
     ],
+    materialStateChange: [
+      "Files changed: src/reporting/summary.ts, web/src/App.tsx",
+      "Added lines: 4"
+    ],
     operationalEvidence: [
       "Follow-up: Verify the run detail modal remains scannable."
     ],
@@ -40,9 +44,11 @@ describe("RunArtifactEvidenceGrid", () => {
     const html = renderToStaticMarkup(<RunArtifactEvidenceGrid report={makeReport()} />);
 
     expect(html).toContain("Executor Action Trace");
+    expect(html).toContain("Material State Change");
     expect(html).toContain("Verification Evidence");
     expect(html).toContain("Operational Follow-up");
     expect(html).toContain("read_file: Inspected persisted round summary formatting.");
+    expect(html).toContain("Files changed: src/reporting/summary.ts, web/src/App.tsx");
     expect(html).toContain("bun test ./web/src/App.test.tsx");
     expect(html).toContain("Follow-up: Verify the run detail modal remains scannable.");
   });
@@ -52,6 +58,7 @@ describe("RunArtifactEvidenceGrid", () => {
       <RunArtifactEvidenceGrid
         report={makeReport({
           executorActionTrace: [],
+          materialStateChange: [],
           operationalEvidence: [],
           verificationEvidence: []
         })}
@@ -59,6 +66,7 @@ describe("RunArtifactEvidenceGrid", () => {
     );
 
     expect(html).toContain("No executor action trace captured.");
+    expect(html).toContain("No material state change summary captured.");
     expect(html).toContain("No verification evidence captured.");
     expect(html).toContain("No operational evidence captured.");
   });

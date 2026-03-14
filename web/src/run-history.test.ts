@@ -13,6 +13,10 @@ function makeSummary(): string {
 1. read_file: Inspected persisted round summary formatting.
 2. write_file: Added evidence section parsing for the console.
 
+## Material State Change
+- Files changed: src/reporting/summary.ts, web/src/App.tsx
+- Added lines: 4
+
 ## Execution Result
 - Tool Status: success
 - Work Summary: Updated the run history view
@@ -88,6 +92,10 @@ describe("projectRunHistoryReport", () => {
       "read_file: Inspected persisted round summary formatting.",
       "write_file: Added evidence section parsing for the console."
     ]);
+    expect(report.materialStateChange).toEqual([
+      "Files changed: src/reporting/summary.ts, web/src/App.tsx",
+      "Added lines: 4"
+    ]);
     expect(report.operationalEvidence).toEqual([
       "Verification: bun test web/src/run-history.test.ts -> 2 passed",
       "Follow-up: Surface executor and verification evidence in run detail"
@@ -138,6 +146,10 @@ describe("projectRunHistoryReport", () => {
     expect(report.executorActionTrace).toEqual([
       "read_file: Inspected persisted round summary formatting.",
       "write_file: Added evidence section parsing for the console."
+    ]);
+    expect(report.materialStateChange).toEqual([
+      "Files changed: src/reporting/summary.ts, web/src/App.tsx",
+      "Added lines: 4"
     ]);
     expect(report.operationalEvidence).toEqual([
       "Verification: bun test web/src/run-history.test.ts -> 2 passed",
