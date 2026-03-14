@@ -66,6 +66,9 @@ export interface RoundReport {
   toolStatus: string;
   workSummary: string;
   error: string;
+  executorActionTrace: string[];
+  operationalEvidence: string[];
+  verificationEvidence: string[];
   decision: string;
   justification: string;
   rootCause: string;
@@ -102,6 +105,29 @@ function extractMarkdownSection(summary: string, heading: string): string {
   return (nextHeadingIndex === -1 ? rest : rest.slice(0, nextHeadingIndex)).trim();
 }
 
+function parseMarkdownList(section: string): string[] {
+  const items = section
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const numberedMatch = line.match(/^\d+\.\s+(.*)$/);
+      if (numberedMatch) {
+        return numberedMatch[1].trim();
+      }
+
+      const bulletMatch = line.match(/^[-*]\s+(.*)$/);
+      if (bulletMatch) {
+        return bulletMatch[1].trim();
+      }
+
+      return "";
+    })
+    .filter(Boolean);
+
+  return items;
+}
+
 function parseRoundReport(summary: string): RoundReport {
   return {
     objective: extractBulletValue(summary, "Objective") ?? "No objective captured",
@@ -109,6 +135,9 @@ function parseRoundReport(summary: string): RoundReport {
     toolStatus: extractBulletValue(summary, "Tool Status") ?? "unknown",
     workSummary: extractBulletValue(summary, "Work Summary") ?? "No work summary captured",
     error: extractBulletValue(summary, "Error") ?? "none",
+    executorActionTrace: parseMarkdownList(extractMarkdownSection(summary, "Executor Action Trace")),
+    operationalEvidence: parseMarkdownList(extractMarkdownSection(summary, "Operational Evidence")),
+    verificationEvidence: parseMarkdownList(extractMarkdownSection(summary, "Verification Evidence")),
     decision: extractBulletValue(summary, "Decision") ?? "unknown",
     justification: extractBulletValue(summary, "Justification") ?? "No evaluator justification captured",
     rootCause: extractBulletValue(summary, "Root Cause") ?? "none",

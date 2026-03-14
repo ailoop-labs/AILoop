@@ -1,0 +1,28 @@
+{
+  "round": 1,
+  "run_timestamp": "2026-03-14T08-36-13-329Z",
+  "duration_ms": 830025,
+  "budget_limits": {
+    "usdPerRound": 0.5,
+    "timeMinutes": 60,
+    "actions": 30
+  },
+  "budget_usage": {
+    "usdUsed": 0,
+    "actionsUsed": 6,
+    "elapsedMs": 830023
+  },
+  "evaluator_decision": "pass",
+  "tool_status": "success",
+  "retries": {
+    "evidence_remediation_attempts": 0,
+    "auto_rework_attempts": 0,
+    "auto_rework_limit": 3
+  },
+  "phase_timings_ms": {
+    "planning": 443767,
+    "execution": 171873,
+    "evaluation": 206472,
+    "operational_followup": 7786
+  }
+}

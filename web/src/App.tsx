@@ -7,7 +7,7 @@ import { resolveLogTailFollowBehavior } from "./log-follow";
 import { GoalMarkdown } from "./goal-markdown";
 import { deriveRoundProgress } from "./round-progress";
 import { RequirementSnapshotCard, type RequirementArtifactView } from "./requirement-snapshot";
-import { projectRunHistoryReport, type RunHistoryItem, type GovernanceDetails, type ExpertOpinion } from "./run-history";
+import { projectRunHistoryReport, type RunHistoryItem, type GovernanceDetails, type ExpertOpinion, type RoundReport } from "./run-history";
 import { paginateRunHistory, RUN_HISTORY_PAGE_SIZE } from "./run-history-pagination";
 
 type LoopStateName = "idle" | "starting" | "running" | "cooldown" | "paused" | "stopping" | "error";
@@ -247,6 +247,54 @@ interface RunArtifactBundle {
     }>;
     recommended_next_action?: string;
   } | null;
+}
+
+interface EvidenceBlockProps {
+  title: string;
+  items: string[];
+  emptyMessage: string;
+}
+
+function EvidenceBlock({ title, items, emptyMessage }: EvidenceBlockProps) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-ink/70 p-4">
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-mist/60">{title}</p>
+      {items.length > 0 ? (
+        <div className="mt-3 space-y-2">
+          {items.map((item, index) => (
+            <div key={`${title}-${index}-${item}`} className="rounded-xl border border-white/10 bg-panel/60 px-3 py-2">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent/80">{index + 1}</p>
+              <p className="mt-1 text-sm leading-6 text-mist/85">{item}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 text-sm text-mist/60">{emptyMessage}</p>
+      )}
+    </div>
+  );
+}
+
+export function RunArtifactEvidenceGrid({ report }: { report: RoundReport }) {
+  return (
+    <div className="mt-4 grid gap-3 xl:grid-cols-3">
+      <EvidenceBlock
+        title="Executor Action Trace"
+        items={report.executorActionTrace}
+        emptyMessage="No executor action trace captured."
+      />
+      <EvidenceBlock
+        title="Verification Evidence"
+        items={report.verificationEvidence}
+        emptyMessage="No verification evidence captured."
+      />
+      <EvidenceBlock
+        title="Operational Follow-up"
+        items={report.operationalEvidence}
+        emptyMessage="No operational evidence captured."
+      />
+    </div>
+  );
 }
 
 export default function App() {
@@ -1446,7 +1494,7 @@ export default function App() {
             <div className="flex-1 overflow-auto p-6">
               <div className="grid gap-6">
                 <section>
-                  <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">Summary</h4>
+                  <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">Summary Markdown</h4>
                   <div className="rounded-2xl border border-white/10 bg-ink/60 p-5 shadow-inner">
                     <div className="markdown-body">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedArtifacts.summary}</ReactMarkdown>
@@ -1473,6 +1521,7 @@ export default function App() {
                         <p className="mt-2 text-sm font-semibold text-ember">Root Cause: {selectedArtifactsReport.rootCause}</p>
                       ) : null}
                       <p className="mt-2 text-sm text-mist/75">Evidence: {selectedArtifactsReport.evidence}</p>
+                      <RunArtifactEvidenceGrid report={selectedArtifactsReport} />
                       <p className="mt-2 text-sm text-mist/75">Next: {selectedArtifactsReport.nextRecommendation}</p>
                       {selectedArtifactsReport.dimensionBreakdown.length > 0 ? (
                         <div className="mt-4 grid gap-3 xl:grid-cols-2">

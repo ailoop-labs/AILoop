@@ -4,14 +4,27 @@ import { projectRunHistoryReport, type RunHistoryItem } from "./run-history";
 function makeSummary(): string {
   return `# AILoop Round Summary
 
-## Task
+## Planned Sub-task
 - Objective: Ship evaluator data into the web console
 - Expected Outcome: Run history reads evaluator artifacts directly
+- Rationale: Keep round reviews scannable.
 
-## Execution
+## Executor Action Trace
+1. read_file: Inspected persisted round summary formatting.
+2. write_file: Added evidence section parsing for the console.
+
+## Execution Result
 - Tool Status: success
 - Work Summary: Updated the run history view
 - Error: none
+
+## Operational Evidence
+- Verification: bun test web/src/run-history.test.ts -> 2 passed
+- Follow-up: Surface executor and verification evidence in run detail
+
+## Verification Evidence
+- bun test web/src/run-history.test.ts
+- bun --cwd=web run build
 
 ## Evaluation
 - Decision: fail
@@ -71,6 +84,18 @@ describe("projectRunHistoryReport", () => {
     expect(report.toolStatus).toBe("success");
     expect(report.workSummary).toBe("Updated the run history view");
     expect(report.error).toBe("none");
+    expect(report.executorActionTrace).toEqual([
+      "read_file: Inspected persisted round summary formatting.",
+      "write_file: Added evidence section parsing for the console."
+    ]);
+    expect(report.operationalEvidence).toEqual([
+      "Verification: bun test web/src/run-history.test.ts -> 2 passed",
+      "Follow-up: Surface executor and verification evidence in run detail"
+    ]);
+    expect(report.verificationEvidence).toEqual([
+      "bun test web/src/run-history.test.ts",
+      "bun --cwd=web run build"
+    ]);
     expect(report.decision).toBe("pass");
     expect(report.justification).toBe("Structured evaluation should override summary parsing.");
     expect(report.evidence).toBe("bun test web/src/run-history.test.ts | bun run web:build");
@@ -110,6 +135,18 @@ describe("projectRunHistoryReport", () => {
 
     const report = projectRunHistoryReport(run);
 
+    expect(report.executorActionTrace).toEqual([
+      "read_file: Inspected persisted round summary formatting.",
+      "write_file: Added evidence section parsing for the console."
+    ]);
+    expect(report.operationalEvidence).toEqual([
+      "Verification: bun test web/src/run-history.test.ts -> 2 passed",
+      "Follow-up: Surface executor and verification evidence in run detail"
+    ]);
+    expect(report.verificationEvidence).toEqual([
+      "bun test web/src/run-history.test.ts",
+      "bun --cwd=web run build"
+    ]);
     expect(report.decision).toBe("fail");
     expect(report.justification).toBe("Parsed markdown should only be fallback data.");
     expect(report.evidence).toBe("bun test web/src/App.test.tsx");

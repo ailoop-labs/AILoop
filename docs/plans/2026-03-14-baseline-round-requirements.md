@@ -44,6 +44,8 @@ Implement the MVP round flow so that each round is:
 
 - The engine advances one measurable round at a time.
 - Each round follows a deterministic lifecycle: preflight, planning, execution, evaluation, persist/transition.
+- The persisted run state uses the canonical architecture states: `idle`, `starting`, `running`, `cooldown`, `paused`, `stopping`, and `error`.
+- Successful rounds transition `running -> cooldown`; recoverable safety interruptions transition to `paused`; safe shutdown transitions toward `stopping` and then `idle`.
 - The planner emits exactly one atomic `SubTask` per round.
 - The executor reads target state before mutation, makes the smallest coherent change, verifies after meaningful mutations, and returns a machine-readable result.
 - The evaluator judges the observed state change against the `SubTask.objective` and `expected_outcome`, not against superficial activity.
@@ -82,6 +84,9 @@ Implement the MVP round flow so that each round is:
 - The Web Console must expose current state, budgets, recent rounds, artifacts, and live instructions.
 - Operator-facing UX must preserve high-bandwidth pattern recognition rather than devolving into raw-text-only inspection.
 - If core state logic, persistence shape, or governance flow changes, corresponding Web Console alignment is required.
+- The executor result must remain machine-readable and include artifact references for the state-change record and execution log.
+- Artifact references in summaries, evaluator evidence, and executor results must point to files that actually exist for that round.
+- The recorded state-change artifact must account for every intentional workspace mutation made during the round, whether as a diff or a concise mutation log.
 
 Required persistence layout under `AILOOP_HOME`:
 
@@ -111,6 +116,12 @@ Required artifact semantics:
 - `*.round.state_change.txt`: unified diff or concise mutation log
 - `*.round.evaluation.json`: evaluator decision and evidence
 
+Required artifact consistency checks:
+
+- if a round advertises `*.round.state_change.txt`, that file must exist at the recorded path
+- if a summary or executor result lists an artifact path, the path must resolve to a round artifact written in that execution
+- if the round creates an additional requirement or planning note intentionally, the state-change artifact must mention it explicitly rather than leaving the mutation implicit
+
 ### 5. Recoverability And Crash Safety
 
 - The engine creates a pre-round snapshot when the environment supports it.
@@ -137,7 +148,25 @@ The next implementation round should be able to show all of the following withou
 
 - persisted run state exists and reflects explicit loop states
 - round artifacts are written to the required locations
+- artifact references in round outputs resolve to real files, and the state-change log matches the actual mutations
 - budget checks happen before mutating tool actions
 - pause transitions preserve evidence and require explicit resume
 - crash recovery does not silently continue interrupted work
 - any state-model change that affects operators is also surfaced in the Web Console
+
+## Source Traceability
+
+This section maps each requirement area in this note back to the governing documentation so the next round can verify additions against source text instead of inference.
+
+| Note section | Source lines |
+| --- | --- |
+| Requirement Slice | `README.md:8-23`; `ARCHITECTURE.md:5-23` |
+| In Scope For This Baseline | `README.md:46-53`; `ARCHITECTURE.md:27-35` |
+| Non-Goals For This Slice | `README.md:55-58`; `ARCHITECTURE.md:37-42` |
+| Round Atomicity And Lifecycle | `ARCHITECTURE.md:19-23`; `ARCHITECTURE.md:149-158`; `ARCHITECTURE.md:162-210`; `ARCHITECTURE.md:218-345` |
+| Human Control And Pause Semantics | `README.md:21`; `README.md:37-42`; `ARCHITECTURE.md:52-56`; `ARCHITECTURE.md:169-210`; `ARCHITECTURE.md:463-468` |
+| Budget And Guardrail Enforcement | `README.md:20`; `README.md:37-38`; `README.md:51`; `ARCHITECTURE.md:256-262`; `ARCHITECTURE.md:383-407` |
+| Observability And Artifact Requirements | `README.md:22`; `README.md:41`; `README.md:52-53`; `ARCHITECTURE.md:22`; `ARCHITECTURE.md:53`; `ARCHITECTURE.md:116-127`; `ARCHITECTURE.md:409-443` |
+| Recoverability And Crash Safety | `README.md:38`; `README.md:42`; `ARCHITECTURE.md:103-114`; `ARCHITECTURE.md:447-457` |
+| Secret Safety | `README.md:39`; `ARCHITECTURE.md:344-345`; `ARCHITECTURE.md:441-443` |
+| Product-Definition Gate | `ARCHITECTURE.md:67`; `ARCHITECTURE.md:76-77`; `ARCHITECTURE.md:154-155`; `ARCHITECTURE.md:228-250`; `ARCHITECTURE.md:309-320` |
