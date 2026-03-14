@@ -1,0 +1,844 @@
+### Snapshot File Diffs
+```diff
+--- src/loop/engine.ts
++++ src/loop/engine.ts
+@@ -1,917 +1,919 @@
++        stateChange,
++      stateChange,
+
+--- src/reporting/summary.ts
++++ src/reporting/summary.ts
+@@ -1,245 +1,310 @@
++  stateChange: string;
++function summarizeFileList(files: string[]): string {
++  if (files.length <= 3) {
++    return files.join(", ");
++  return `${files.slice(0, 3).join(", ")} (+${files.length - 3} more)`;
++function formatMaterialStateChange(stateChange: string): string {
++  const normalized = stateChange.trim();
++  if (!normalized || normalized === "No state changes detected.") {
++    return "- No material state change summary captured.";
++  const files = Array.from(
++    new Set(
++      normalized
++        .split("\n")
++        .map((line) => line.trim())
++        .filter((line) => line.startsWith("+++ "))
++        .map((line) => line.slice(4).trim())
++        .filter((line) => line && line !== "/dev/null")
++        .map((line) => line.replace(/^b\//, ""))
++  );
++  const addedLines = normalized
++    .split("\n")
++    .map((line) => line.trim())
++    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
++    .length;
++  const removedLines = normalized
++    .split("\n")
++    .map((line) => line.trim())
++    .filter((line) => line.startsWith("-") && !line.startsWith("---"))
++    .length;
++  const summaryLines: string[] = [];
++  if (files.length > 0) {
++    summaryLines.push(`- Files changed: ${summarizeFileList(files)}`);
++  if (addedLines > 0) {
++    summaryLines.push(`- Added lines: ${addedLines}`);
++  if (removedLines > 0) {
++    summaryLines.push(`- Removed lines: ${removedLines}`);
++  if (summaryLines.length > 0) {
++    return summaryLines.join("\n");
++  }
++  const derivedNotes = normalized
++    .split("\n")
++    .map((line) => line.trim())
++    .filter((line) => line && !line.startsWith("### ") && line !== "```diff" && line !== "```")
++    .slice(0, 2)
++    .map((line) => `- ${line}`);
++  return derivedNotes.length > 0 ? derivedNotes.join("\n") : "- No material state change summary captured.";
++  }
++  }
++    "## Material State Change",
++    formatMaterialStateChange(input.stateChange),
++    "",
++
++
++  }
++
++    )
++
++
++}
++
++  }
++
++  }
++}
++
+
+--- src/reporting/summary.test.ts
++++ src/reporting/summary.test.ts
+@@ -1,281 +1,314 @@
++    stateChange: "No state changes detected.\n",
++  test("renders a compact material state change summary derived from the persisted diff", async () => {
++    const summaryPath = path.join(dir, "round.summary.md");
++    input.stateChange = [
++      "### Snapshot File Diffs",
++      "```diff",
++      "diff --git a/src/reporting/summary.ts b/src/reporting/summary.ts",
++      "--- a/src/reporting/summary.ts",
++      "+++ b/src/reporting/summary.ts",
++      "@@ -1,3 +1,8 @@",
++      "+function summarizeMaterialStateChange() {",
++      "+  return [];",
++      "+}",
++      "diff --git a/web/src/App.tsx b/web/src/App.tsx",
++      "--- a/web/src/App.tsx",
++      "+++ b/web/src/App.tsx",
++      "@@ -20,3 +20,7 @@",
++      "+<section>material state change</section>",
++      "```"
++    ].join("\n");
++    expect(text).toContain("## Material State Change");
++    expect(text).toContain("- Files changed: src/reporting/summary.ts, web/src/App.tsx");
++    expect(text).toContain("- Added lines: 4");
++    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-summary-test-"));
++    const input = makeSummaryInput([]);
++    await writeSummaryFile(summaryPath, input);
++    const text = await fs.readFile(summaryPath, "utf8");
++    await fs.rm(dir, { recursive: true, force: true });
++
++
++
++  });
++
+
+--- src/loop/engine.summary-artifact.test.ts
++++ src/loop/engine.summary-artifact.test.ts
+@@ -1,135 +1,149 @@
+-  const config = loadConfig({
+-    AILOOP_HOME: homeDir
+-  });
+-  const engine = new LoopEngine(config);
+-  const paths = (engine as unknown as { paths: LoopPaths }).paths;
+-  await ensureLoopHome(paths);
+-  const plan: SubTask = {
+-    assignee: "executor",
+-    rationale: "test rationale",
+-    objective: "Persist markdown round summary",
+-    expected_outcome: "round summary artifact exists with artifact references",
+-    impacted_files: [],
+-    recommended_tools: ["read_file", "run_shell"]
+-  };
+-  const execute = async () => ({
+-    actions: [
+-      makeAction("read_file", "Inspected src/reporting/summary.ts before editing."),
+-      makeAction("run_shell", "bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed")
+-    ],
+-    toolResult: makeToolResult("Created markdown summary artifact")
+-  });
+-  const evaluate = async (): Promise<EvaluationResult> => makeEvaluation("pass", "All checks satisfied.");
+-  const mutable = engine as unknown as {
+-    planner: { plan: () => Promise<SubTask> };
+-    executor: { execute: typeof execute };
+-    evaluator: { evaluate: typeof evaluate };
+-    collectOperationalEvidence: () => Promise<{
+-      summaryNote: string;
+-      lines: string[];
+-      stateChangeNotes: string[];
+-    }>;
+-    runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+-  };
+-  mutable.planner = { plan: async () => plan };
+-  mutable.executor = { execute };
+-  mutable.evaluator = { evaluate };
+-  mutable.collectOperationalEvidence = async () => ({
+-    summaryNote: "",
+-    lines: [],
+-    stateChangeNotes: []
+-  });
+-  const outcome = await mutable.runRound(1);
+-  expect(outcome.success).toBe(true);
+-  const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+-  const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
+-  expect(summaryFile).toBeDefined();
+-  const summaryPath = path.join(homeDir, "runs", summaryFile as string);
+-  const summaryText = await fs.readFile(summaryPath, "utf8");
+-  expect(summaryText).toContain("# AILoop Round Summary");
+-  expect(summaryText).toContain("## Round Metadata");
+-  expect(summaryText).toContain("- Round: 1");
+-  expect(summaryText).toMatch(/- Timestamp: \d{4}-\d{2}-\d{2}T/);
+-  expect(summaryText).toContain("- Objective: Persist markdown round summary");
+-  expect(summaryText).toContain("## Executor Action Trace");
+-  expect(summaryText).toContain("1. read_file: Inspected src/reporting/summary.ts before editing.");
+-  expect(summaryText).toContain(
+-    "2. run_shell: bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed"
+-  );
+-  expect(summaryText).toContain("- Tool Status: success");
+-  expect(summaryText).toContain("## Artifact References");
+-  expect(summaryText).toContain(`- Summary: ${summaryPath}`);
+-  expect(summaryText).toContain(
+-    `- Metrics: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.metrics.json"))}`
+-  );
+-  expect(summaryText).toContain(
+-    `- Log: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.log"))}`
+-  );
+-  expect(summaryText).toContain(
+-    `- State Change: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.state_change.txt"))}`
+-  );
+-  expect(summaryText).toContain(
+-    `- Evaluation: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.evaluation.json"))}`
+-  );
+-  expect(summaryText).toContain("## Verification Evidence");
+-  expect(summaryText).toContain(
+-    "- bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed"
+-  );
+-  expect(summaryText).toContain("- Summary artifact includes executor action trace and verification evidence.");
+-  expect(summaryText).toContain("- Decision: pass");
+-  await fs.rm(homeDir, { recursive: true, force: true });
++  const workspaceProbePath = path.join(process.cwd(), ".tmp-engine-summary-artifact.txt");
++  try {
++    const config = loadConfig({
++      AILOOP_HOME: homeDir
++    });
++    const engine = new LoopEngine(config);
++    const paths = (engine as unknown as { paths: LoopPaths }).paths;
++    await ensureLoopHome(paths);
++    const plan: SubTask = {
++      assignee: "executor",
++      rationale: "test rationale",
++      objective: "Persist markdown round summary",
++      expected_outcome: "round summary artifact exists with artifact references",
++      impacted_files: [workspaceProbePath],
++      recommended_tools: ["read_file", "run_shell"]
++    };
++    await fs.rm(workspaceProbePath, { force: true });
++    const execute = async () => {
++      await fs.writeFile(workspaceProbePath, "material state change summary\n", "utf8");
++      return {
++        actions: [
++          makeAction("read_file", "Inspected src/reporting/summary.ts before editing."),
++          makeAction(
++            "run_shell",
++            "bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed"
++          )
++        ],
++        toolResult: makeToolResult("Created markdown summary artifact")
++      };
++    };
++    const evaluate = async (): Promise<EvaluationResult> => makeEvaluation("pass", "All checks satisfied.");
++    const mutable = engine as unknown as {
++      planner: { plan: () => Promise<SubTask> };
++      executor: { execute: typeof execute };
++      evaluator: { evaluate: typeof evaluate };
++      collectOperationalEvidence: () => Promise<{
++        summaryNote: string;
++        lines: string[];
++        stateChangeNotes: string[];
++      }>;
++      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
++    };
++    mutable.planner = { plan: async () => plan };
++    mutable.executor = { execute };
++    mutable.evaluator = { evaluate };
++    mutable.collectOperationalEvidence = async () => ({
++      summaryNote: "",
++      lines: [],
++      stateChangeNotes: []
++    });
++    const outcome = await mutable.runRound(1);
++    expect(outcome.success).toBe(true);
++    const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
++    const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
++    expect(summaryFile).toBeDefined();
++    const summaryPath = path.join(homeDir, "runs", summaryFile as string);
++    const summaryText = await fs.readFile(summaryPath, "utf8");
++    expect(summaryText).toContain("# AILoop Round Summary");
++    expect(summaryText).toContain("## Round Metadata");
++    expect(summaryText).toContain("- Round: 1");
++    expect(summaryText).toMatch(/- Timestamp: \d{4}-\d{2}-\d{2}T/);
++    expect(summaryText).toContain("- Objective: Persist markdown round summary");
++    expect(summaryText).toContain("## Executor Action Trace");
++    expect(summaryText).toContain("1. read_file: Inspected src/reporting/summary.ts before editing.");
++    expect(summaryText).toContain(
++      "2. run_shell: bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed"
++    );
++    expect(summaryText).toContain("- Tool Status: success");
++    expect(summaryText).toContain("## Artifact References");
++    expect(summaryText).toContain(`- Summary: ${summaryPath}`);
++    expect(summaryText).toContain(
++      `- Metrics: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.metrics.json"))}`
++    );
++    expect(summaryText).toContain(
++      `- Log: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.log"))}`
++    );
++    expect(summaryText).toContain(
++      `- State Change: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.state_change.txt"))}`
++    );
++    expect(summaryText).toContain(
++      `- Evaluation: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.evaluation.json"))}`
++    );
++    expect(summaryText).toContain("## Verification Evidence");
++    expect(summaryText).toContain(
++      "- bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed"
++    );
++    expect(summaryText).toContain("- Summary artifact includes executor action trace and verification evidence.");
++    expect(summaryText).toContain("## Material State Change");
++    expect(summaryText).toContain("- Files changed: .tmp-engine-summary-artifact.txt");
++    expect(summaryText).toContain("- Decision: pass");
++  } finally {
++    await fs.rm(workspaceProbePath, { force: true });
++    await fs.rm(homeDir, { recursive: true, force: true });
++  }
+
+--- web/src/run-history.ts
++++ web/src/run-history.ts
+@@ -1,227 +1,229 @@
++  materialStateChange: string[];
++    materialStateChange: parseMarkdownList(extractMarkdownSection(summary, "Material State Change")),
+
+--- web/src/run-history.test.ts
++++ web/src/run-history.test.ts
+@@ -1,158 +1,170 @@
++## Material State Change
++- Files changed: src/reporting/summary.ts, web/src/App.tsx
++- Added lines: 4
++    expect(report.materialStateChange).toEqual([
++      "Files changed: src/reporting/summary.ts, web/src/App.tsx",
++      "Added lines: 4"
++    expect(report.materialStateChange).toEqual([
++      "Files changed: src/reporting/summary.ts, web/src/App.tsx",
++      "Added lines: 4"
++    ]);
++    ]);
++
+
+--- web/src/App.tsx
++++ web/src/App.tsx
+@@ -1,1728 +1,1733 @@
+-    <div className="mt-4 grid gap-3 xl:grid-cols-3">
++    <div className="mt-4 grid gap-3 xl:grid-cols-4">
++        title="Material State Change"
++        items={report.materialStateChange}
++        emptyMessage="No material state change summary captured."
++      <EvidenceBlock
++      />
+
+--- web/src/App.test.tsx
++++ web/src/App.test.tsx
+@@ -1,66 +1,74 @@
++    materialStateChange: [
++      "Files changed: src/reporting/summary.ts, web/src/App.tsx",
++      "Added lines: 4"
++    ],
++    expect(html).toContain("Material State Change");
++    expect(html).toContain("Files changed: src/reporting/summary.ts, web/src/App.tsx");
++          materialStateChange: [],
++    expect(html).toContain("No material state change summary captured.");
+```
+
+### Git Status Delta
+```diff
+--- git-status-porcelain
++++ git-status-porcelain
+@@ -1,6 +1,14 @@
++ M src/loop/engine.summary-artifact.test.ts
++ M src/loop/engine.ts
++ M src/reporting/summary.test.ts
++ M src/reporting/summary.ts
++ M web/src/App.test.tsx
++ M web/src/App.tsx
++ M web/src/run-history.test.ts
++ M web/src/run-history.ts
+```
+
+### Git Tracked Diff Delta
+```diff
+--- git-tracked-diff
++++ git-tracked-diff
+@@ -1,6 +1,481 @@
++diff --git a/src/loop/engine.summary-artifact.test.ts b/src/loop/engine.summary-artifact.test.ts
++index 03c5491..ce94482 100644
++--- a/src/loop/engine.summary-artifact.test.ts
+++++ b/src/loop/engine.summary-artifact.test.ts
++@@ -43,92 +43,106 @@ function makeAction(tool: string, output?: string): ActionRecord {
++ 
++ test("writes a round summary artifact with round metadata and artifact references", async () => {
++   const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-summary-artifact-focused-test-"));
++-  const config = loadConfig({
++-    AILOOP_HOME: homeDir
++-  });
++-  const engine = new LoopEngine(config);
++-  const paths = (engine as unknown as { paths: LoopPaths }).paths;
++-  await ensureLoopHome(paths);
+++  const workspaceProbePath = path.join(process.cwd(), ".tmp-engine-summary-artifact.txt");
+++  try {
+++    const config = loadConfig({
+++      AILOOP_HOME: homeDir
+++    });
+++    const engine = new LoopEngine(config);
+++    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+++    await ensureLoopHome(paths);
++ 
++-  const plan: SubTask = {
++-    assignee: "executor",
++-    rationale: "test rationale",
++-    objective: "Persist markdown round summary",
++-    expected_outcome: "round summary artifact exists with artifact references",
++-    impacted_files: [],
++-    recommended_tools: ["read_file", "run_shell"]
++-  };
+++    const plan: SubTask = {
+++      assignee: "executor",
+++      rationale: "test rationale",
+++      objective: "Persist markdown round summary",
+++      expected_outcome: "round summary artifact exists with artifact references",
+++      impacted_files: [workspaceProbePath],
+++      recommended_tools: ["read_file", "run_shell"]
+++    };
++ 
++-  const execute = async () => ({
++-    actions: [
++-      makeAction("read_file", "Inspected src/reporting/summary.ts before editing."),
++-      makeAction("run_shell", "bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed")
++-    ],
++-    toolResult: makeToolResult("Created markdown summary artifact")
++-  });
++-  const evaluate = async (): Promise<EvaluationResult> => makeEvaluation("pass", "All checks satisfied.");
+++    await fs.rm(workspaceProbePath, { force: true });
++ 
++-  const mutable = engine as unknown as {
++-    planner: { plan: () => Promise<SubTask> };
++-    executor: { execute: typeof execute };
++-    evaluator: { evaluate: typeof evaluate };
++-    collectOperationalEvidence: () => Promise<{
++-      summaryNote: string;
++-      lines: string[];
++-      stateChangeNotes: string[];
++-    }>;
++-    runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
++-  };
++-  mutable.planner = { plan: async () => plan };
++-  mutable.executor = { execute };
++-  mutable.evaluator = { evaluate };
++-  mutable.collectOperationalEvidence = async () => ({
++-    summaryNote: "",
++-    lines: [],
++-    stateChangeNotes: []
++-  });
+++    const execute = async () => {
+++      await fs.writeFile(workspaceProbePath, "material state change summary\n", "utf8");
+++      return {
+++        actions: [
+++          makeAction("read_file", "Inspected src/reporting/summary.ts before editing."),
+++          makeAction(
+++            "run_shell",
+++            "bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed"
+++          )
+++        ],
+++        toolResult: makeToolResult("Created markdown summary artifact")
+++      };
+++    };
+++    const evaluate = async (): Promise<EvaluationResult> => makeEvaluation("pass", "All checks satisfied.");
++ 
++-  const outcome = await mutable.runRound(1);
+++    const mutable = engine as unknown as {
+++      planner: { plan: () => Promise<SubTask> };
+++      executor: { execute: typeof execute };
+++      evaluator: { evaluate: typeof evaluate };
+++      collectOperationalEvidence: () => Promise<{
+++        summaryNote: string;
+++        lines: string[];
+++        stateChangeNotes: string[];
+++      }>;
+++      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+++    };
+++    mutable.planner = { plan: async () => plan };
+++    mutable.executor = { execute };
+++    mutable.evaluator = { evaluate };
+++    mutable.collectOperationalEvidence = async () => ({
+++      summaryNote: "",
+++      lines: [],
+++      stateChangeNotes: []
+++    });
++ 
++-  expect(outcome.success).toBe(true);
++-  const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
++-  const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
++-  expect(summaryFile).toBeDefined();
+++    const outcome = await mutable.runRound(1);
++ 
++-  const summaryPath = path.join(homeDir, "runs", summaryFile as string);
++-  const summaryText = await fs.readFile(summaryPath, "utf8");
+++    expect(outcome.success).toBe(true);
+++    const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+++    const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
+++    expect(summaryFile).toBeDefined();
++ 
++-  expect(summaryText).toContain("# AILoop Round Summary");
++-  expect(summaryText).toContain("## Round Metadata");
++-  expect(summaryText).toContain("- Round: 1");
++-  expect(summaryText).toMatch(/- Timestamp: \d{4}-\d{2}-\d{2}T/);
++-  expect(summaryText).toContain("- Objective: Persist markdown round summary");
++-  expect(summaryText).toContain("## Executor Action Trace");
++-  expect(summaryText).toContain("1. read_file: Inspected src/reporting/summary.ts before editing.");
++-  expect(summaryText).toContain(
++-    "2. run_shell: bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed"
++-  );
++-  expect(summaryText).toContain("- Tool Status: success");
++-  expect(summaryText).toContain("## Artifact References");
++-  expect(summaryText).toContain(`- Summary: ${summaryPath}`);
++-  expect(summaryText).toContain(
++-    `- Metrics: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.metrics.json"))}`
++-  );
++-  expect(summaryText).toContain(
++-    `- Log: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.log"))}`
++-  );
++-  expect(summaryText).toContain(
++-    `- State Change: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.state_change.txt"))}`
++-  );
++-  expect(summaryText).toContain(
++-    `- Evaluation: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.evaluation.json"))}`
++-  );
++-  expect(summaryText).toContain("## Verification Evidence");
++-  expect(summaryText).toContain(
++-    "- bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed"
++-  );
++-  expect(summaryText).toContain("- Summary artifact includes executor action trace and verification evidence.");
++-  expect(summaryText).toContain("- Decision: pass");
+++    const summaryPath = path.join(homeDir, "runs", summaryFile as string);
+++    const summaryText = await fs.readFile(summaryPath, "utf8");
++ 
++-  await fs.rm(homeDir, { recursive: true, force: true });
+++    expect(summaryText).toContain("# AILoop Round Summary");
+++    expect(summaryText).toContain("## Round Metadata");
+++    expect(summaryText).toContain("- Round: 1");
+++    expect(summaryText).toMatch(/- Timestamp: \d{4}-\d{2}-\d{2}T/);
+++    expect(summaryText).toContain("- Objective: Persist markdown round summary");
+++    expect(summaryText).toContain("## Executor Action Trace");
+++    expect(summaryText).toContain("1. read_file: Inspected src/reporting/summary.ts before editing.");
+++    expect(summaryText).toContain(
+++      "2. run_shell: bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed"
+++    );
+++    expect(summaryText).toContain("- Tool Status: success");
+++    expect(summaryText).toContain("## Artifact References");
+++    expect(summaryText).toContain(`- Summary: ${summaryPath}`);
+++    expect(summaryText).toContain(
+++      `- Metrics: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.metrics.json"))}`
+++    );
+++    expect(summaryText).toContain(
+++      `- Log: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.log"))}`
+++    );
+++    expect(summaryText).toContain(
+++      `- State Change: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.state_change.txt"))}`
+++    );
+++    expect(summaryText).toContain(
+++      `- Evaluation: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.evaluation.json"))}`
+++    );
+++    expect(summaryText).toContain("## Verification Evidence");
+++    expect(summaryText).toContain(
+++      "- bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed"
+++    );
+++    expect(summaryText).toContain("- Summary artifact includes executor action trace and verification evidence.");
+++    expect(summaryText).toContain("## Material State Change");
+++    expect(summaryText).toContain("- Files changed: .tmp-engine-summary-artifact.txt");
+++    expect(summaryText).toContain("- Decision: pass");
+++  } finally {
+++    await fs.rm(workspaceProbePath, { force: true });
+++    await fs.rm(homeDir, { recursive: true, force: true });
+++  }
++ });
++diff --git a/src/loop/engine.ts b/src/loop/engine.ts
++index 54f7067..9084052 100644
++--- a/src/loop/engine.ts
+++++ b/src/loop/engine.ts
++@@ -804,6 +804,7 @@ export class LoopEngine {
++           recommended_next_action: "pause and inspect round error"
++         },
++         metrics,
+++        stateChange,
++         risks: [message],
++         autoReworkAttempts: [],
++         nextRecommendation: error instanceof BudgetBreachError ? "pause" : "continue",
++@@ -871,6 +872,7 @@ export class LoopEngine {
++       toolResult,
++       evaluation,
++       metrics,
+++      stateChange,
++       risks: [],
++       autoReworkAttempts,
++       nextRecommendation: evaluation.recommended_next_action ?? "",
++diff --git a/src/reporting/summary.test.ts b/src/reporting/summary.test.ts
++index b89f4b1..9dfc183 100644
++--- a/src/reporting/summary.test.ts
+++++ b/src/reporting/summary.test.ts
++@@ -86,6 +86,7 @@ function makeSummaryInput(autoReworkAttempts: string[]): SummaryInput {
++         operational_followup: 400
++       }
++     },
+++    stateChange: "No state changes detected.\n",
++     risks: [],
++     autoReworkAttempts,
++     nextRecommendation: "continue"
++@@ -195,6 +196,38 @@ describe("writeSummaryFile auto rework section", () => {
++     await fs.rm(dir, { recursive: true, force: true });
++   });
++ 
+++  test("renders a compact material state change summary derived from the persisted diff", async () => {
+++    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-summary-test-"));
+++    const summaryPath = path.join(dir, "round.summary.md");
+++    const input = makeSummaryInput([]);
+++    input.stateChange = [
+++      "### Snapshot File Diffs",
+++      "```diff",
+++      "diff --git a/src/reporting/summary.ts b/src/reporting/summary.ts",
+++      "--- a/src/reporting/summary.ts",
+++      "+++ b/src/reporting/summary.ts",
+++      "@@ -1,3 +1,8 @@",
+++      "+function summarizeMaterialStateChange() {",
+++      "+  return [];",
+++      "+}",
+++      "diff --git a/web/src/App.tsx b/web/src/App.tsx",
+++      "--- a/web/src/App.tsx",
+++      "+++ b/web/src/App.tsx",
+++      "@@ -20,3 +20,7 @@",
+++      "+<section>material state change</section>",
+++      "```"
+++    ].join("\n");
+++
+++    await writeSummaryFile(summaryPath, input);
+++    const text = await fs.readFile(summaryPath, "utf8");
+++
+++    expect(text).toContain("## Material State Change");
+++    expect(text).toContain("- Files changed: src/reporting/summary.ts, web/src/App.tsx");
+++    expect(text).toContain("- Added lines: 4");
+++
+++    await fs.rm(dir, { recursive: true, force: true });
+++  });
+++
++   test("renders artifact references for the round summary bundle", async () => {
++     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-summary-test-"));
++     const summaryPath = path.join(dir, "2026-03-11T00-00-00-000Z.round.summary.md");
++diff --git a/src/reporting/summary.ts b/src/reporting/summary.ts
++index 86386bd..18154d7 100644
++--- a/src/reporting/summary.ts
+++++ b/src/reporting/summary.ts
++@@ -12,6 +12,7 @@ export interface SummaryInput {
++   toolResult: ToolResult;
++   evaluation: EvaluationResult;
++   metrics: RoundMetrics;
+++  stateChange: string;
++   risks: string[];
++   autoReworkAttempts: string[];
++   nextRecommendation: string;
++@@ -50,6 +51,67 @@ function formatVerificationEvidence(evaluation: EvaluationResult): string {
++     : "- None recorded.";
++ }
++ 
+++function summarizeFileList(files: string[]): string {
+++  if (files.length <= 3) {
+++    return files.join(", ");
+++  }
+++
+++  return `${files.slice(0, 3).join(", ")} (+${files.length - 3} more)`;
+++}
+++
+++function formatMaterialStateChange(stateChange: string): string {
+++  const normalized = stateChange.trim();
+++  if (!normalized || normalized === "No state changes detected.") {
+++    return "- No material state change summary captured.";
+++  }
+++
+++  const files = Array.from(
+++    new Set(
+++      normalized
+++        .split("\n")
+++        .map((line) => line.trim())
+++        .filter((line) => line.startsWith("+++ "))
+++        .map((line) => line.slice(4).trim())
+++        .filter((line) => line && line !== "/dev/null")
+++        .map((line) => line.replace(/^b\//, ""))
+++    )
+++  );
+++  const addedLines = normalized
+++    .split("\n")
+++    .map((line) => line.trim())
+++    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+++    .length;
+++  const removedLines = normalized
+++    .split("\n")
+++    .map((line) => line.trim())
+++    .filter((line) => line.startsWith("-") && !line.startsWith("---"))
+++    .length;
+++
+++  const summaryLines: string[] = [];
+++  if (files.length > 0) {
+++    summaryLines.push(`- Files changed: ${summarizeFileList(files)}`);
+++  }
+++  if (addedLines > 0) {
+++    summaryLines.push(`- Added lines: ${addedLines}`);
+++  }
+++  if (removedLines > 0) {
+++    summaryLines.push(`- Removed lines: ${removedLines}`);
+++  }
+++
+++  if (summaryLines.length > 0) {
+++    return summaryLines.join("\n");
+++  }
+++
+++  const derivedNotes = normalized
+++    .split("\n")
+++    .map((line) => line.trim())
+++    .filter((line) => line && !line.startsWith("### ") && line !== "```diff" && line !== "```")
+++    .slice(0, 2)
+++    .map((line) => `- ${line}`);
+++
+++  return derivedNotes.length > 0 ? derivedNotes.join("\n") : "- No material state change summary captured.";
+++}
+++
++ function redactArtifactText(content: string): string {
++   return new SecretRedactor(process.env).redact(content);
++ }
++@@ -138,6 +200,9 @@ export async function writeSummaryFile(summaryPath: string, input: SummaryInput)
++     `- Work Summary: ${input.toolResult.summary}`,
++     `- Error: ${input.toolResult.error?.message ?? "none"}`,
++     "",
+++    "## Material State Change",
+++    formatMaterialStateChange(input.stateChange),
+++    "",
++     "## Artifact References",
++     `- Summary: ${artifactPaths.summaryPath}`,
++     `- Metrics: ${artifactPaths.metricsPath}`,
++diff --git a/web/src/App.test.tsx b/web/src/App.test.tsx
++index 9815a82..ce183fb 100644
++--- a/web/src/App.test.tsx
+++++ b/web/src/App.test.tsx
++@@ -14,6 +14,10 @@ function makeReport(overrides: Partial<RoundReport> = {}): RoundReport {
++       "read_file: Inspected persisted round summary formatting.",
++       "write_file: Added evidence cards to the run detail modal."
++     ],
+++    materialStateChange: [
+++      "Files changed: src/reporting/summary.ts, web/src/App.tsx",
+++      "Added lines: 4"
+++    ],
++     operationalEvidence: [
++       "Follow-up: Verify the run detail modal remains scannable."
++     ],
++@@ -40,9 +44,11 @@ describe("RunArtifactEvidenceGrid", () => {
++     const html = renderToStaticMarkup(<RunArtifactEvidenceGrid report={makeReport()} />);
++ 
++     expect(html).toContain("Executor Action Trace");
+++    expect(html).toContain("Material State Change");
++     expect(html).toContain("Verification Evidence");
++     expect(html).toContain("Operational Follow-up");
++     expect(html).toContain("read_file: Inspected persisted round summary formatting.");
+++    expect(html).toContain("Files changed: src/reporting/summary.ts, web/src/App.tsx");
++     expect(html).toContain("bun test ./web/src/App.test.tsx");
++     expect(html).toContain("Follow-up: Verify the run detail modal remains scannable.");
++   });
++@@ -52,6 +58,7 @@ describe("RunArtifactEvidenceGrid", () => {
++       <RunArtifactEvidenceGrid
++         report={makeReport({
++           executorActionTrace: [],
+++          materialStateChange: [],
++           operationalEvidence: [],
++           verificationEvidence: []
++         })}
++@@ -59,6 +66,7 @@ describe("RunArtifactEvidenceGrid", () => {
++     );
++ 
++     expect(html).toContain("No executor action trace captured.");
+++    expect(html).toContain("No material state change summary captured.");
++     expect(html).toContain("No verification evidence captured.");
++     expect(html).toContain("No operational evidence captured.");
++   });
++diff --git a/web/src/App.tsx b/web/src/App.tsx
++index b703b83..5439e7f 100644
++--- a/web/src/App.tsx
+++++ b/web/src/App.tsx
++@@ -277,12 +277,17 @@ function EvidenceBlock({ title, items, emptyMessage }: EvidenceBlockProps) {
++ 
++ export function RunArtifactEvidenceGrid({ report }: { report: RoundReport }) {
++   return (
++-    <div className="mt-4 grid gap-3 xl:grid-cols-3">
+++    <div className="mt-4 grid gap-3 xl:grid-cols-4">
++       <EvidenceBlock
++         title="Executor Action Trace"
++         items={report.executorActionTrace}
++         emptyMessage="No executor action trace captured."
++       />
+++      <EvidenceBlock
+++        title="Material State Change"
+++        items={report.materialStateChange}
+++        emptyMessage="No material state change summary captured."
+++      />
++       <EvidenceBlock
++         title="Verification Evidence"
++         items={report.verificationEvidence}
++diff --git a/web/src/run-history.test.ts b/web/src/run-history.test.ts
++index b0a3cf6..8fa1b36 100644
++--- a/web/src/run-history.test.ts
+++++ b/web/src/run-history.test.ts
++@@ -13,6 +13,10 @@ function makeSummary(): string {
++ 1. read_file: Inspected persisted round summary formatting.
++ 2. write_file: Added evidence section parsing for the console.
++ 
+++## Material State Change
+++- Files changed: src/reporting/summary.ts, web/src/App.tsx
+++- Added lines: 4
+++
++ ## Execution Result
++ - Tool Status: success
++ - Work Summary: Updated the run history view
++@@ -88,6 +92,10 @@ describe("projectRunHistoryReport", () => {
++       "read_file: Inspected persisted round summary formatting.",
++       "write_file: Added evidence section parsing for the console."
++     ]);
+++    expect(report.materialStateChange).toEqual([
+++      "Files changed: src/reporting/summary.ts, web/src/App.tsx",
+++      "Added lines: 4"
+++    ]);
++     expect(report.operationalEvidence).toEqual([
++       "Verification: bun test web/src/run-history.test.ts -> 2 passed",
++       "Follow-up: Surface executor and verification evidence in run detail"
++@@ -139,6 +147,10 @@ describe("projectRunHistoryReport", () => {
++       "read_file: Inspected persisted round summary formatting.",
++       "write_file: Added evidence section parsing for the console."
++     ]);
+++    expect(report.materialStateChange).toEqual([
+++      "Files changed: src/reporting/summary.ts, web/src/App.tsx",
+++      "Added lines: 4"
+++    ]);
++     expect(report.operationalEvidence).toEqual([
++       "Verification: bun test web/src/run-history.test.ts -> 2 passed",
++       "Follow-up: Surface executor and verification evidence in run detail"
++diff --git a/web/src/run-history.ts b/web/src/run-history.ts
++index d9663da..b16a082 100644
++--- a/web/src/run-history.ts
+++++ b/web/src/run-history.ts
++@@ -67,6 +67,7 @@ export interface RoundReport {
++   workSummary: string;
++   error: string;
++   executorActionTrace: string[];
+++  materialStateChange: string[];
++   operationalEvidence: string[];
++   verificationEvidence: string[];
++   decision: string;
++@@ -136,6 +137,7 @@ function parseRoundReport(summary: string): RoundReport {
++     workSummary: extractBulletValue(summary, "Work Summary") ?? "No work summary captured",
++     error: extractBulletValue(summary, "Error") ?? "none",
++     executorActionTrace: parseMarkdownList(extractMarkdownSection(summary, "Executor Action Trace")),
+++    materialStateChange: parseMarkdownList(extractMarkdownSection(summary, "Material State Change")),
++     operationalEvidence: parseMarkdownList(extractMarkdownSection(summary, "Operational Evidence")),
++     verificationEvidence: parseMarkdownList(extractMarkdownSection(summary, "Verification Evidence")),
++     decision: extractBulletValue(summary, "Decision") ?? "unknown",
+```
+
+### Operational Follow-up
+Shell: git commit -m ... -> ok
+Shell: git push origin HEAD -> ok (To github.com:ailoop-labs/AILoop.git 2394b36..c943059 HEAD -> main)
+Shell: bash scripts/prod.sh restart -> ok (Restart requested: stopping current server gracefully. Stopping AILoop Production server (PID: 79670)... Stopped. AILOOP_CONSOLE_ADMIN_TOKEN is empty in .env; reusing token issued on 2026-03-09 (age: 5 days). This token is valid for 7 UTC days (expires on 2026-03-16 UTC). 8722b853f427f968975f60927287320b9b6ecab192b419f8 (Tip: copy this token and paste it into the web login page.) vite v7.3.1 building client environment for production... transforming... ✓ 290 modules transformed. rendering chunks... computing gzip size... dist/index.html 0.41 kB │ gzip: 0.29 kB dist/assets/index-D_NTUcVK.css 20.19 kB │ gzip: 4.94 kB dist/assets/index-CAZX0A75.js 521.96 kB │ gzip: 156.00 kB ✓ built in 1.33s AILoop Production server is running at http://127.0.0.1:3091 Use the web console for all loop operations and parameter settings. Started in background daemon mode. PID: 97353 Log: .ailoop/prod.server.log Tip: Use 'tail -f .ailoop/prod.server.log' to monitor the server. $ bun --cwd=web run build $ vite build (!) Some chunks are larger than 500 kB after minification. Consider: - Using dynamic import() to code-split the application - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.)
+Health: GET /api/health -> 200 ok ({
+  "ok": true,
+  "service": "ailoop-console",
+  "db": "connected"
+})
