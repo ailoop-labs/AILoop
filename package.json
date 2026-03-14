@@ -4,8 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "up:dev": "bash scripts/dev.sh",
-    "up:prod": "bash scripts/prod.sh",
+    "up": "bash scripts/prod.sh",
     "ailoop": "bun run scripts/ailoop.ts",
     "run": "bun run scripts/ailoop.ts run",
     "start": "bun run scripts/ailoop.ts start",
