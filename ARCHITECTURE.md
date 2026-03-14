@@ -71,11 +71,14 @@ Primary responsibilities:
 
 ### 4.3 Agent Layer
 
-The agent layer contains three role-separated contracts:
+The agent layer contains multiple role-separated contracts, allowing planning, acting, judging, and governance to be independently managed:
 
 - **Planner** converts goal + history + operator instructions into exactly one atomic `SubTask`.
 - **Executor** performs an observe → reason → act loop using registered tools until the `SubTask` succeeds, fails, or budget expires.
 - **Evaluator** verifies whether the observable state change satisfies the `SubTask` objective.
+- **Leader** intervenes when the loop is paused due to repeated failures, analyzing metrics (Friction Index) and providing strategic instructions or escalation.
+- **Designer** focuses on UI/UX, responsive layouts, and visual harmony, ensuring high-bandwidth UX.
+- **CCB Experts (Senior Dev, QA Lead, Product Owner)** provide specialized governance and consensus before any change to the core mission, architecture, or "Constitution" is permitted.
 
 ### 4.4 Tool Registry
 

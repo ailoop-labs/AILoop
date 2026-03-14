@@ -2,17 +2,5 @@ node_modules/
 *.log
 .env
 .ailoop/
-.ailoop/loop.lock
-.ailoop/loop.pid
-.ailoop/loop.stop
-.ailoop/loop.pause
-.ailoop/loop.state
-.ailoop/runs/*.log
-.ailoop/runs/*.summary.md
-.ailoop/runs/*.metrics.json
-.ailoop/runs/*.state_change.txt
 web/dist/
 
-# State files
-running
-starting
