@@ -77,6 +77,13 @@ describe("loop state persistence", () => {
 
     const persisted = await readLoopState(paths);
     expect(persisted.previous_tool_result?.summary).toBe("round succeeded");
+    expect(JSON.parse(await fs.readFile(paths.statePath, "utf8"))).toMatchObject({
+      state: persisted.state,
+      round: persisted.round,
+      previous_tool_result: {
+        summary: "round succeeded"
+      }
+    });
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
@@ -144,11 +151,18 @@ describe("loop state persistence", () => {
     expect(migrated.round).toBe(7);
     expect(migrated.last_error).toBe("legacy state");
     expect(migrated.pid).toBe(4321);
+    expect(JSON.parse(await fs.readFile(paths.statePath, "utf8"))).toMatchObject({
+      state: "paused",
+      round: 7,
+      pid: 4321,
+      last_error: "legacy state"
+    });
+    await expect(fs.access(paths.legacyStatePath)).rejects.toThrow();
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
 
-  test("ensureLoopHome removes legacy loop.state when canonical state.json already exists", async () => {
+  test("ensureLoopHome keeps canonical state.json when it already exists", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-state-clean-legacy-state-"));
     const paths = buildLoopPaths(homeDir);
 
@@ -192,8 +206,12 @@ describe("loop state persistence", () => {
       pid: 8765,
       last_error: "canonical state"
     });
-    // Both legacy and transition files should be removed once migrated to DB
-    await expect(fs.stat(paths.statePath)).rejects.toThrow();
+    expect(JSON.parse(await fs.readFile(paths.statePath, "utf8"))).toMatchObject({
+      state: "running",
+      round: 11,
+      pid: 8765,
+      last_error: "canonical state"
+    });
     await expect(fs.access(paths.legacyStatePath)).rejects.toThrow();
 
     await fs.rm(homeDir, { recursive: true, force: true });
@@ -229,9 +247,33 @@ describe("loop state persistence", () => {
       pid: 5555,
       last_error: "legacy state"
     });
-    // Migration should have happened and files unlinked
+    expect(JSON.parse(await fs.readFile(paths.statePath, "utf8"))).toMatchObject({
+      state: "paused",
+      round: 5,
+      pid: 5555,
+      last_error: "legacy state"
+    });
     await expect(fs.access(paths.legacyStatePath)).rejects.toThrow();
-    await expect(fs.access(paths.statePath)).rejects.toThrow();
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("ensureLoopHome writes default canonical state.json when no persisted state exists", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-state-default-canonical-state-"));
+    const paths = buildLoopPaths(homeDir);
+
+    await ensureLoopHome(paths);
+
+    const persisted = await readLoopState(paths);
+    expect(JSON.parse(await fs.readFile(paths.statePath, "utf8"))).toMatchObject({
+      state: persisted.state,
+      round: persisted.round,
+      pid: persisted.pid,
+      last_error: persisted.last_error,
+      consecutive_evaluator_failures: persisted.consecutive_evaluator_failures,
+      previous_tool_result: persisted.previous_tool_result,
+      current_budget: persisted.current_budget
+    });
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });

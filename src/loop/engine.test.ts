@@ -678,6 +678,7 @@ describe("LoopEngine auto rework", () => {
     };
 
     let evaluatedToolResult: ToolResult | null = null;
+    let stateChangeArtifactExistedDuringEvaluation = false;
     const execute = async () => ({
       actions: [makeAction("read_file")],
       toolResult: makeToolResult("Created artifact references")
@@ -688,6 +689,8 @@ describe("LoopEngine auto rework", () => {
       toolResult: ToolResult;
     }): Promise<EvaluationResult> => {
       evaluatedToolResult = toolResult;
+      await fs.access(toolResult.artifacts.state_change_path);
+      stateChangeArtifactExistedDuringEvaluation = true;
       return makeEvaluation("pass", "Artifact contract satisfied.");
     };
 
@@ -716,6 +719,7 @@ describe("LoopEngine auto rework", () => {
     expect(outcome.success).toBe(true);
     expect((evaluatedToolResult as ToolResult | null)?.artifacts.log_path).toMatch(/\.round\.log$/);
     expect((evaluatedToolResult as ToolResult | null)?.artifacts.state_change_path).toMatch(/\.round\.state_change\.txt$/);
+    expect(stateChangeArtifactExistedDuringEvaluation).toBe(true);
 
     const persistedState = await readLoopState(paths);
     expect(persistedState.previous_tool_result?.artifacts.log_path).toMatch(/\.round\.log$/);

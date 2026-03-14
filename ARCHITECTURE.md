@@ -22,6 +22,7 @@ The MVP follows five implementation principles derived from the product goal:
 4. **Artifacts are first-class outputs.** Each round must leave behind reviewable files that explain what happened.
 5. **Cross-agent handoffs must stay compact and navigational.** Agents should receive concise evidence briefs, artifact manifests, and targeted excerpts by default instead of raw log dumps or full artifact bodies.
 6. **Pause is the default safety response.** Budget breaches, repeated evaluator failures, crash recovery, and explicit human intervention all converge on a paused state.
+7. **Internal runtime agents must be isolated from external development-assistant guides.** Repository-local `AGENTS.md` files, skill catalogs, and collaborative coding workflows intended for humans building AILoop must not silently alter the behavior of ProductManager, ProjectPlanner, Evaluator, or other internal runtime agents.
 
 ## 3. MVP System Boundaries
 
@@ -129,6 +130,17 @@ It persists:
 
 Artifact storage must preserve reviewable raw evidence, but cross-agent prompts should reference those artifacts through compact manifests and summaries rather than inlining full files by default.
 
+### 4.7 Runtime Agent Session Isolation
+
+Codex sessions used by internal runtime agents must not inherit repository-local assistant instructions that are meant for external coding assistants working on the AILoop repository itself.
+
+Minimum MVP requirements:
+
+- runtime agent Codex sessions should run from an isolated scratch directory or equivalent isolated instruction context,
+- if repo inspection is needed, prompts must provide the repository root explicitly and instruct the agent to use absolute paths or explicitly `cd` into the repo,
+- the isolated session guide must tell the runtime agent to ignore external development-assistant skills and collaborative workflows,
+- a failure to isolate runtime agents from external assistant instructions is a runtime bug, not acceptable emergent behavior.
+
 ## 5. High-Level Data Flow
 
 ```mermaid
@@ -165,6 +177,7 @@ Evaluator handoff rule:
 - the engine should pass a compact evidence brief first,
 - include artifact paths and small, high-signal excerpts,
 - avoid embedding full `round.log` or multi-hundred-kilobyte `state_change` bodies directly into evaluator prompts unless a narrow excerpt is required to resolve ambiguity.
+- evaluator and other internal runtime roles must receive only the AILoop runtime role contract and engine-supplied context, not repository-local coding-assistant workflows.
 
 ## 6. Loop State Machine
 

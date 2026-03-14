@@ -13,6 +13,10 @@ interface CodexLike {
     schema: JsonSchema;
     cwd: string;
     sandbox: AppConfig["codex"]["plannerSandbox"];
+    sessionIsolation?: {
+      enabled: boolean;
+      agentsGuide?: string;
+    };
     onStdoutChunk?: (chunk: string) => void;
     onStderrChunk?: (chunk: string) => void;
   }): Promise<{
@@ -84,14 +88,34 @@ function fallbackRequirement(context: ProductManagerContext): string {
   );
 }
 
+function buildProductManagerRuntimeSessionGuide(): string {
+  return [
+    "# Internal Runtime Agent Session",
+    "",
+    "You are an internal runtime agent inside the AILoop product.",
+    "You are not an external coding assistant helping a human modify this repository.",
+    "Repository-local AGENTS.md instructions and external skill catalogs for development assistants do not apply.",
+    "Do not use collaborative brainstorming workflows, ask the human clarifying questions, or follow external skill mandates.",
+    "Use only the explicit runtime prompt, the loaded Product Manager role definition, and the provided round context."
+  ].join("\n");
+}
+
 export function buildProductManagerPrompt(
   context: ProductManagerContext,
-  productManagerRoleDefinition: string
+  productManagerRoleDefinition: string,
+  workspaceRoot: string
 ): string {
   return [
     "You are the AILoop ProductManager agent.",
     "Project-specific Product Manager Role Definition:",
     productManagerRoleDefinition.trim(),
+    "",
+    `Repository root: ${workspaceRoot}`,
+    "",
+    "Runtime execution notes:",
+    "- This internal runtime session is intentionally isolated from repository-local AGENTS.md files and development-assistant skill workflows.",
+    "- If you inspect repository files, use absolute paths under the repository root or explicitly `cd` into the repository root first.",
+    "- Do not use external development-assistant skills, collaborative brainstorming workflows, or human question-asking patterns.",
     "",
     "Produce or refresh exactly one human-readable requirement slice in Markdown.",
     "",
@@ -112,11 +136,13 @@ export class ProductManagerAgent {
   private readonly codex: CodexLike;
   private readonly sandbox: AppConfig["codex"]["plannerSandbox"];
   private readonly homeDir: string;
+  private readonly workspaceRoot: string;
 
   constructor(config: AppConfig, codexClient?: CodexLike) {
     this.codex = codexClient ?? new CodexClient(config.codex);
     this.sandbox = config.codex.plannerSandbox;
     this.homeDir = config.homeDir;
+    this.workspaceRoot = process.cwd();
   }
 
   async generateRequirement(
@@ -142,7 +168,7 @@ export class ProductManagerAgent {
         .map((line) => `[product_manager] ${line}`);
 
     const roleDefinition = await loadProjectRoleDefinition(this.homeDir, "product_manager");
-    const prompt = buildProductManagerPrompt(context, roleDefinition);
+    const prompt = buildProductManagerPrompt(context, roleDefinition, this.workspaceRoot);
 
     emitLog("ProductManager started Codex generation.");
     const heartbeatStartedAt = Date.now();
@@ -155,8 +181,12 @@ export class ProductManagerAgent {
       .runJson<ProductManagerResponse>({
         prompt,
         schema: PRODUCT_MANAGER_RESPONSE_SCHEMA,
-        cwd: process.cwd(),
+        cwd: this.workspaceRoot,
         sandbox: this.sandbox,
+        sessionIsolation: {
+          enabled: true,
+          agentsGuide: buildProductManagerRuntimeSessionGuide()
+        },
         onStdoutChunk: (chunk) => {
           for (const line of toLogLines("stdout", chunk)) {
             emitLog(line);

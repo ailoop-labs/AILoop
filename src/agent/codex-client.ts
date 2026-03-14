@@ -11,6 +11,10 @@ export interface CodexJsonCallOptions {
   schema: JsonSchema;
   cwd: string;
   sandbox: CodexSandboxMode;
+  sessionIsolation?: {
+    enabled: boolean;
+    agentsGuide?: string;
+  };
   timeoutMs?: number;
   maxRetries?: number;
   onStdoutChunk?: (chunk: string) => void;
@@ -349,6 +353,22 @@ async function buildProcessEnv(config: CodexConfig, _cwd: string, baseEnv: NodeJ
   return { ...baseEnv };
 }
 
+async function prepareInvocationCwd(tempDir: string, options: CodexJsonCallOptions): Promise<string> {
+  if (!options.sessionIsolation?.enabled) {
+    return options.cwd;
+  }
+
+  const sessionDir = path.join(tempDir, "session");
+  await fs.mkdir(sessionDir, { recursive: true });
+
+  const agentsGuide = options.sessionIsolation.agentsGuide?.trim();
+  if (agentsGuide) {
+    await fs.writeFile(path.join(sessionDir, "AGENTS.md"), `${agentsGuide}\n`, "utf8");
+  }
+
+  return sessionDir;
+}
+
 
 async function runProcess(
   cmd: string,
@@ -466,6 +486,7 @@ export class CodexClient {
       let combinedStderr = "";
       let interfaceRetryCount = 0;
       const processEnv = await buildProcessEnv(this.config, options.cwd);
+      const invocationCwd = await prepareInvocationCwd(tempDir, options);
 
       for (let attempt = 0; ; attempt += 1) {
         const prompt =
@@ -488,7 +509,7 @@ export class CodexClient {
         const runResult = await this.processRunner(
           this.config.bin,
           args,
-          attemptOptions.cwd,
+          invocationCwd,
           timeoutMs,
           {
             onStdoutChunk: attemptOptions.onStdoutChunk,

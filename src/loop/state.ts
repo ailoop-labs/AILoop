@@ -22,7 +22,7 @@ export function buildLoopPaths(homeDir: string): LoopPaths {
     leaderRolePath: path.join(homeDir, "LEADER_ROLE.md"),
     instructionsPath: path.join(homeDir, "instructions.queue.json"),
     legacyInstructionsPath: path.join(homeDir, "instructions.json"),
-    statePath: path.join(homeDir, "state.json"), // Maintained for transition/compat but not authoritative
+    statePath: path.join(homeDir, "state.json"),
     legacyStatePath: path.join(homeDir, "loop.state"),
     pidPath: path.join(homeDir, "loop.pid"),
     stopFlagPath: path.join(homeDir, "loop.stop"),
@@ -64,33 +64,38 @@ async function writeInstructionQueue(paths: LoopPaths, queue: string[]): Promise
   }
 }
 
-async function migrateLegacyLoopState(paths: LoopPaths): Promise<void> {
-  // Try to bootstrap Database from state.json if DB is empty
+async function syncCanonicalLoopStateFile(paths: LoopPaths, state: LoopStateData): Promise<void> {
+  await writeJsonFile(paths.statePath, state);
+}
+
+async function migrateLegacyLoopState(paths: LoopPaths): Promise<LoopStateData | null> {
   const db = new DatabaseManager({ dbPath: paths.dbPath });
-  const existingDbState = await db.getLoopState();
-  
-  if (!existingDbState) {
+  let finalState = await db.getLoopState();
+
+  if (!finalState) {
     const jsonState = await readJsonFile<Partial<LoopStateData>>(paths.statePath, {});
     if (Object.keys(jsonState).length > 0) {
       console.log("[DB BOOTSTRAP] Initializing database from state.json");
-      await db.setLoopState(normalizeLoopState(jsonState));
+      const normalizedState = normalizeLoopState(jsonState);
+      finalState = normalizedState;
+      await db.setLoopState(normalizedState);
     } else if (await fileExists(paths.legacyStatePath)) {
       const legacyState = await readJsonFile<Partial<LoopStateData>>(paths.legacyStatePath, defaultLoopState());
       console.log("[DB BOOTSTRAP] Initializing database from legacy loop.state");
-      await db.setLoopState(normalizeLoopState(legacyState));
+      const normalizedState = normalizeLoopState(legacyState);
+      finalState = normalizedState;
+      await db.setLoopState(normalizedState);
     }
   }
-
   db.close();
 
-  // Cleanup legacy files once DB is confirmed to have state
-  const confirmedDb = new DatabaseManager({ dbPath: paths.dbPath });
-  const finalState = await confirmedDb.getLoopState();
   if (finalState) {
-    if (await fileExists(paths.statePath)) await fs.unlink(paths.statePath).catch(() => {});
+    await syncCanonicalLoopStateFile(paths, normalizeLoopState(finalState));
     if (await fileExists(paths.legacyStatePath)) await fs.unlink(paths.legacyStatePath).catch(() => {});
+    return normalizeLoopState(finalState);
   }
-  confirmedDb.close();
+
+  return null;
 }
 
 export async function ensureLoopHome(paths: LoopPaths): Promise<void> {
@@ -100,7 +105,10 @@ export async function ensureLoopHome(paths: LoopPaths): Promise<void> {
   await ensureRegularFile(paths.taskPath, "# AILoop Task Log\n");
   await ensureRegularFile(paths.instructionsPath, "[]\n");
   await writeInstructionQueue(paths, await readMergedInstructionQueue(paths));
-  await migrateLegacyLoopState(paths);
+  const state = await migrateLegacyLoopState(paths);
+  if (!state) {
+    await writeLoopState(paths, defaultLoopState());
+  }
 }
 
 export function defaultLoopState(pid: number | null = null): LoopStateData {
@@ -138,10 +146,20 @@ function normalizeLoopState(raw: Partial<LoopStateData> | null | undefined): Loo
 
 export async function readLoopState(paths: LoopPaths): Promise<LoopStateData> {
   const db = new DatabaseManager({ dbPath: paths.dbPath });
-  const raw = await db.getLoopState();
+  let raw = await db.getLoopState();
+  if (!raw) {
+    const fileState = await readJsonFile<Partial<LoopStateData>>(paths.statePath, {});
+    if (Object.keys(fileState).length > 0) {
+      const normalizedState = normalizeLoopState(fileState);
+      raw = normalizedState;
+      await db.setLoopState(normalizedState);
+    }
+  }
   db.close();
-  
-  return normalizeLoopState(raw as any);
+
+  const normalized = normalizeLoopState(raw);
+  await syncCanonicalLoopStateFile(paths, normalized);
+  return normalized;
 }
 
 export async function writeLoopState(paths: LoopPaths, state: LoopStateData): Promise<void> {
@@ -153,6 +171,7 @@ export async function writeLoopState(paths: LoopPaths, state: LoopStateData): Pr
   const db = new DatabaseManager({ dbPath: paths.dbPath });
   await db.setLoopState(nextState);
   db.close();
+  await syncCanonicalLoopStateFile(paths, nextState);
 }
 
 export async function saveEvaluation(paths: LoopPaths, roundId: number, evaluation: any): Promise<void> {

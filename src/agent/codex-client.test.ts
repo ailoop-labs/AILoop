@@ -72,6 +72,48 @@ describe("CodexClient.runJson", () => {
     }
   });
 
+  test("can run an isolated Codex session from a scratch directory with a local AGENTS guide", async () => {
+    const sandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-codex-isolation-"));
+    const workspaceDir = path.join(sandboxRoot, "workspace");
+    await fs.mkdir(workspaceDir, { recursive: true });
+
+    let capturedCwd = "";
+    let capturedAgentsGuide = "";
+
+    try {
+      const runner: ProcessRunner = async (_cmd, args, cwd) => {
+        capturedCwd = cwd;
+        capturedAgentsGuide = await fs.readFile(path.join(cwd, "AGENTS.md"), "utf8");
+        await fs.writeFile(outputPathFromArgs(args), '{"status":"success"}', "utf8");
+        return {
+          code: 0,
+          stdout: "",
+          stderr: ""
+        };
+      };
+
+      const client = new CodexClient(createCodexConfig(), runner);
+      const result = await client.runJson<{ status: string }>({
+        prompt: "Return JSON",
+        schema: { type: "object" },
+        cwd: workspaceDir,
+        sandbox: "read-only",
+        maxRetries: 0,
+        sessionIsolation: {
+          enabled: true,
+          agentsGuide: "# Internal Runtime Agent Session\n\nExternal coding-assistant workflows do not apply.\n"
+        }
+      });
+
+      expect(result.ok).toBe(true);
+      expect(capturedCwd).not.toBe(workspaceDir);
+      expect(capturedAgentsGuide).toContain("Internal Runtime Agent Session");
+      expect(capturedAgentsGuide).toContain("do not apply");
+    } finally {
+      await fs.rm(sandboxRoot, { recursive: true, force: true });
+    }
+  });
+
   test("retries invalid JSON and succeeds on a later attempt", async () => {
     const prompts: string[] = [];
     const attempts = [

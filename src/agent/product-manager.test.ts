@@ -60,7 +60,8 @@ describe("buildProductManagerPrompt", () => {
   test("injects the project-specific product manager role definition", () => {
     const prompt = buildProductManagerPrompt(
       createContext(),
-      "# Product Manager Role\n\nProject-specific PM guidance."
+      "# Product Manager Role\n\nProject-specific PM guidance.",
+      "/tmp/example-repo"
     );
 
     expect(prompt).toContain("Project-specific Product Manager Role Definition");
@@ -72,7 +73,8 @@ describe("buildProductManagerPrompt", () => {
       createContext({
         current_requirement_markdown: "# Requirement Slice: Existing\n"
       }),
-      "# Product Manager Role\n\nProject-specific PM guidance."
+      "# Product Manager Role\n\nProject-specific PM guidance.",
+      "/tmp/example-repo"
     );
 
     expect(prompt).toContain("Do not emit round-level execution tasks");
@@ -93,9 +95,22 @@ describe("ProductManagerAgent", () => {
     );
 
     let capturedPrompt = "";
+    let capturedIsolationEnabled = false;
+    let capturedIsolationGuide = "";
+    let capturedCwd = "";
     const mockCodex = {
-      async runJson<T>(options?: { prompt?: string }) {
+      async runJson<T>(options?: {
+        prompt?: string;
+        cwd?: string;
+        sessionIsolation?: {
+          enabled?: boolean;
+          agentsGuide?: string;
+        };
+      }) {
         capturedPrompt = options?.prompt ?? "";
+        capturedCwd = options?.cwd ?? "";
+        capturedIsolationEnabled = options?.sessionIsolation?.enabled === true;
+        capturedIsolationGuide = options?.sessionIsolation?.agentsGuide ?? "";
         return {
           ok: true,
           data: {
@@ -112,6 +127,11 @@ describe("ProductManagerAgent", () => {
     const markdown = await agent.generateRequirement(createContext());
 
     expect(capturedPrompt).toContain("Custom product manager guidance.");
+    expect(capturedPrompt).toContain("Repository root:");
+    expect(capturedPrompt).toContain("Do not use external development-assistant skills");
+    expect(capturedIsolationEnabled).toBe(true);
+    expect(capturedIsolationGuide).toContain("Internal Runtime Agent Session");
+    expect(capturedCwd).toBe(process.cwd());
     expect(markdown).toBe("# Requirement Slice: Console Health\n\n## Problem\nOperators need a clear health view.\n");
 
     await fs.rm(workspaceRoot, { recursive: true, force: true });

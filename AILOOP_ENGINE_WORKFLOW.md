@@ -70,6 +70,7 @@ Note on terminology:
 * **Anti-Hallucination Measures**: Before modifying files or databases, the Executor *must* use a "read" tool to confirm the current state of the target. Blind writing is strictly prohibited.
 * **Workflow-First Failure Analysis**: When a task fails, first diagnose why the *governance and loop mechanisms* failed to resolve the issue, prioritizing the reliability of the autonomous system.
 * **Compact Handoffs**: When one role hands off to another, prefer a concise summary, artifact manifest, and targeted evidence excerpts. Do not force downstream roles to ingest entire logs or massive raw diffs unless a narrow excerpt is strictly necessary.
+* **Runtime Instruction Isolation**: Internal AILoop agents must not inherit repository-local `AGENTS.md` files, external skill catalogs, or collaborative workflows intended for AI coding assistants helping humans modify the AILoop repository.
 
 ## 3. Core Workflow and Sequence (The Loop Sequence)
 
@@ -85,6 +86,11 @@ The transition of each "Round" strictly follows this lifecycle, orchestrated by 
 3. The ProjectPlanner analyzes the goal, history, intervention instructions, and current requirement artifacts.
 4. If product requirements are missing, stale, or exhausted, the ProjectPlanner wakes the **ProductManagerAgent** to produce or refresh the requirement Markdown for the next requirement slice.
 5. The ProjectPlanner then outputs a clear, JSON-formatted `SubTask` for the current round.
+
+Planning/runtime isolation rule:
+- internal agent Codex sessions should run from an isolated scratch context rather than the repository root when possible
+- if they need to inspect repository files, the prompt should provide the repo root explicitly and require absolute paths or an explicit `cd`
+- repository-local coding-assistant skills must not be treated as runtime product-planning or evaluation instructions
 
 ### Phase 3: Execute
 1. The engine passes the `SubTask` to the **ExecutorAgent**.
@@ -104,6 +110,7 @@ Evaluation handoff rules:
 - engine-managed observability artifacts such as `.ailoop/runs/*.round.log` must remain reviewable on disk, but should not be recursively embedded wholesale into the evaluator prompt
 - `State Change Artifact` should emphasize intentional workspace mutations and concise evidence notes
 - if the Evaluator itself cannot complete because its Codex call fails, the engine must record that as evaluator infrastructure failure instead of pretending the round merely lacked ordinary evidence
+- evaluator runtime sessions must not inherit development-assistant instructions from the repository root
 
 ### Phase 5: Rework & Break
 1. If judged as a failure, the engine feeds the Failure Justification back to the Executor.

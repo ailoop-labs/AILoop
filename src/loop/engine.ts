@@ -703,6 +703,7 @@ export class LoopEngine {
       const activeEvaluator = subTask.assignee === "designer" ? this.uiEvaluator : this.evaluator;
       const evaluationStartedAt = Date.now();
       await enforceBudgetBeforeAction(`evaluator.evaluate`);
+      await writeStateChangeFile(artifacts.stateChangePath, stateChange);
       let evaluation = await activeEvaluator.evaluate({ subTask, toolResult: finalToolResult, stateChange, logLines, runTimestamp: runId, budgetLimits: guardrails.limitsSnapshot(), budgetUsage: guardrails.usage(), onLog: log });
       phaseTimings.evaluation += Date.now() - evaluationStartedAt;
       let autoReworkAttempts = 0;
@@ -742,6 +743,7 @@ export class LoopEngine {
           stateChange = await workspace.buildStateChange(snapshot);
           const reworkEvaluationStartedAt = Date.now();
           await enforceBudgetBeforeAction(`evaluator.evaluate auto-rework ${attempt}`);
+          await writeStateChangeFile(artifacts.stateChangePath, stateChange);
           evaluation = await activeEvaluator.evaluate({ subTask, toolResult: finalToolResult, stateChange, logLines, runTimestamp: runId, budgetLimits: guardrails.limitsSnapshot(), budgetUsage: guardrails.usage(), onLog: log });
           phaseTimings.evaluation += Date.now() - reworkEvaluationStartedAt;
           autoReworkNotes.push(
