@@ -149,7 +149,7 @@ describe("LoopEngine budget guard", () => {
     const mutable = engine as unknown as {
       planner: { plan: () => Promise<SubTask> };
       executor: {
-        execute: () => Promise<{
+        execute: (options: any) => Promise<{
           actions: Array<{ tool: string; args: Record<string, unknown>; ok: boolean; output: string }>;
           toolResult: {
             status: "success";
@@ -167,7 +167,10 @@ describe("LoopEngine budget guard", () => {
       plan: async () => plan
     };
     mutable.executor = {
-      execute: async () => ({
+      execute: async (options: any) => {
+        options.guardrails.recordAction();
+        options.guardrails.recordAction();
+        return {
         actions: [
           {
             tool: "codex_step",
@@ -192,7 +195,8 @@ describe("LoopEngine budget guard", () => {
           error: null,
           next_state_hint: "continue"
         }
-      })
+        }
+      }
     };
     mutable.evaluator = {
       evaluate: async () => {
@@ -211,7 +215,7 @@ describe("LoopEngine budget guard", () => {
     expect(state.state).toBe("paused");
     expect(state.previous_tool_result?.status).toBe("failure");
     expect(state.previous_tool_result?.summary).toBe(
-      "Round paused because the action budget was exceeded before evaluation completed."
+      "Round failed before evaluation completed."
     );
     expect(state.previous_tool_result?.error).toEqual({
       type: "BudgetBreach",

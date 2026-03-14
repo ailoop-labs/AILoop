@@ -1011,6 +1011,86 @@ describe("console server API contract", () => {
     ]);
   });
 
+  test("redacts secret-like values from authenticated run history responses", async () => {
+    const token = "test-token";
+    const { config, fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    await writeRunArtifacts(paths.runsDir, "2026-03-10T10-45-00-000Z", {
+      summary: "Older summary\n",
+      metrics: { round: 2, status: "success" },
+      evaluation: {
+        decision: "pass",
+        justification: "Older evaluation.",
+        evidence: ["older evidence"]
+      },
+      log: "older log\n",
+      stateChange: "older diff\n"
+    });
+    await writeRunArtifacts(paths.runsDir, "2026-03-10T11-00-00-000Z", {
+      summary: "Latest summary sessionSecret=uniquesecret123\n",
+      metrics: { round: 3, status: "success" },
+      evaluation: {
+        decision: "pass",
+        justification: "Validated apiToken=uniquesecret123.",
+        evidence: ["sessionSecret=uniquesecret123"],
+        dimensions: [
+          {
+            dimension: "goal_alignment",
+            decision: "pass",
+            score: 98,
+            confidence: 0.9,
+            justification: "Nested apiToken=uniquesecret123 stayed visible.",
+            evidence: ["sessionSecret=uniquesecret123"],
+            blocking_issues: []
+          }
+        ]
+      },
+      log: "latest log\n",
+      stateChange: "latest diff\n"
+    });
+    await seedRoundHistory(config.homeDir, {
+      round: 3,
+      timestamp: "2026-03-10T11-00-00-000Z",
+      decision: "pass",
+      justification: "DB history should not reintroduce apiToken=uniquesecret123 values.",
+      rootCause: "sessionSecret=uniquesecret123"
+    });
+
+    const response = await fetchHandler(createAuthorizedRequest("http://console.test/api/runs?limit=1", token));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual([
+      {
+        timestamp: "2026-03-10T11-00-00-000Z",
+        round: 3,
+        summary: "Latest summary sessionSecret=[REDACTED]\n",
+        metrics: {
+          round: 3,
+          status: "success"
+        },
+        evaluation: {
+          decision: "pass",
+          justification: "Validated apiToken=[REDACTED].",
+          evidence: ["sessionSecret=[REDACTED]"],
+          dimensions: [
+            {
+              dimension: "goal_alignment",
+              decision: "pass",
+              score: 98,
+              confidence: 0.9,
+              justification: "Nested apiToken=[REDACTED] stayed visible.",
+              evidence: ["sessionSecret=[REDACTED]"],
+              blocking_issues: []
+            }
+          ]
+        },
+        has_governance: false
+      }
+    ]);
+  });
+
   test("returns a specific completed run artifact bundle for authenticated requests", async () => {
     const token = "test-token";
     const { fetchHandler, paths } = await createFixture({

@@ -175,6 +175,29 @@ function withConcreteArtifactPaths(
   };
 }
 
+function withOperationalEvidence(toolResult: ToolResult, evidence: OperationalEvidence): ToolResult {
+  const summaryNote = evidence.summaryNote.trim();
+  const nextSummary = summaryNote
+    ? `${toolResult.summary} | Operational follow-up: ${summaryNote}`
+    : toolResult.summary;
+  const nextEvidence = evidence.lines.length > 0
+    ? [...(toolResult.operational_evidence ?? []), ...evidence.lines]
+    : toolResult.operational_evidence;
+
+  return {
+    ...toolResult,
+    summary: nextSummary,
+    operational_evidence: nextEvidence
+  };
+}
+
+function appendOperationalEvidenceToStateChange(stateChange: string, notes: string[]): string {
+  if (notes.length === 0) return stateChange;
+  const trimmed = stateChange.trimEnd();
+  const prefix = trimmed ? `${trimmed}\n\n` : "";
+  return `${prefix}### Operational Follow-up\n${notes.join("\n")}\n`;
+}
+
 async function checkConsoleHealth(consolePort: number): Promise<HealthCheckResult> {
   const url = `http://127.0.0.1:${consolePort}/api/health`;
   try {
@@ -288,6 +311,13 @@ export class LoopEngine {
     this.ccb = new CCBSession(config);
     this.evaluator = createEvaluator(config);
     this.uiEvaluator = new UIEvaluator(config.homeDir);
+  }
+
+  async collectOperationalEvidence(context: Omit<OperationalEvidenceContext, "consolePort"> & { consolePort?: number }): Promise<OperationalEvidence> {
+    return collectOperationalEvidence({
+      ...context,
+      consolePort: context.consolePort ?? this.config.consolePort
+    });
   }
 
   async run(): Promise<void> {
@@ -561,7 +591,20 @@ export class LoopEngine {
       // --- Finalize Round ---
       if (evaluation.decision === "pass") {
         await log("Evaluation passed. Round committed.");
-        // (Collect Operational Evidence, Commit, etc. omitted for brevity in this draft but should be present)
+        const operationalFollowupStartedAt = Date.now();
+        await enforceBudgetBeforeAction("engine.collectOperationalEvidence");
+        const operationalEvidence = await this.collectOperationalEvidence({
+          round,
+          objective: subTask.objective,
+          expectedOutcome: subTask.expected_outcome,
+          log
+        });
+        phaseTimings.operational_followup += Date.now() - operationalFollowupStartedAt;
+        finalToolResult = withOperationalEvidence(finalToolResult, operationalEvidence);
+        stateChange = appendOperationalEvidenceToStateChange(stateChange, operationalEvidence.stateChangeNotes);
+        if (operationalEvidence.summaryNote.trim()) {
+          await log(`Operational follow-up: ${operationalEvidence.summaryNote}`);
+        }
       }
 
       const metrics: RoundMetrics = {

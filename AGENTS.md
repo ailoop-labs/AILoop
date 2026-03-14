@@ -49,6 +49,7 @@ If the operator (human) manually modifies the codebase or infrastructure to fix 
 - **Silent Tooling over Narration:** Agents must focus on executing tools and returning structured results. They should not generate conversational filler or narrative explanations unless explicitly requested by the user or required for the `Summary` artifact.
 - **Single-Task Rounds:** Each round should pursue one atomic objective and avoid hidden multi-step scope expansion.
 - **User-Value Orientation:** Progress should optimize the user's intended value as defined by the active goal, using measurable outcomes rather than cosmetic activity.
+- **Workflow-First Failure Analysis:** When a task or round fails, the Agent's primary diagnostic priority is to identify why the *governance and loop mechanisms* (e.g., Rework, Intervene, Pause-on-Failure) failed to resolve the issue, rather than just the technical root cause of the task itself. This ensures the autonomous system's reliability is prioritized over any single feature implementation.
 
 ---
 

@@ -232,6 +232,97 @@ describe("LoopEngine auto rework", () => {
     await fs.rm(homeDir, { recursive: true, force: true });
   });
 
+  test("persists post-pass operational evidence into the round summary and state-change artifacts", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-operational-evidence-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const plan: SubTask = {
+      assignee: "executor",
+      rationale: "test rationale",
+      objective: "Persist operational follow-up evidence",
+      expected_outcome: "summary and state-change artifacts include deploy evidence",
+      impacted_files: [],
+      recommended_tools: ["read_file", "run_shell"]
+    };
+
+    const execute = async () => ({
+      actions: [makeAction("read_file"), makeAction("run_shell")],
+      toolResult: makeToolResult("Created operational evidence regression")
+    });
+    const evaluate = async (): Promise<EvaluationResult> => makeEvaluation("pass", "All checks satisfied.");
+
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      executor: { execute: typeof execute };
+      evaluator: { evaluate: typeof evaluate };
+      collectOperationalEvidence: () => Promise<{
+        summaryNote: string;
+        lines: string[];
+        stateChangeNotes: string[];
+      }>;
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+    mutable.planner = { plan: async () => plan };
+    mutable.executor = { execute };
+    mutable.evaluator = { evaluate };
+    mutable.collectOperationalEvidence = async () => ({
+      summaryNote: "commit abc1234, push ok, restart ok, health check ok",
+      lines: [
+        "Commit: abc1234 AILoop Round 1: Persist operational follow-up evidence",
+        "Push: Everything up-to-date",
+        "Restart: PID 4242, log .ailoop/prod.server.log",
+        "Health Check: GET /api/health -> 200 OK",
+        "Rollback: git revert --no-edit abc1234 && bash scripts/prod.sh restart"
+      ],
+      stateChangeNotes: [
+        "Shell: git commit -m ... -> ok",
+        "Shell: git push origin HEAD -> ok (Everything up-to-date)",
+        "Shell: bash scripts/prod.sh restart -> ok (PID 4242, log .ailoop/prod.server.log)",
+        "Health: GET /api/health -> 200 ok ({\"ok\":true})"
+      ]
+    });
+
+    const outcome = await mutable.runRound(1);
+
+    expect(outcome.success).toBe(true);
+    const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+    const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
+    const stateChangeFile = runArtifacts.find((entry) => entry.endsWith(".round.state_change.txt"));
+    expect(summaryFile).toBeDefined();
+    expect(stateChangeFile).toBeDefined();
+
+    const summaryText = await fs.readFile(path.join(homeDir, "runs", summaryFile as string), "utf8");
+    expect(summaryText).toContain("## Operational Evidence");
+    expect(summaryText).toContain("- Commit: abc1234 AILoop Round 1: Persist operational follow-up evidence");
+    expect(summaryText).toContain("- Push: Everything up-to-date");
+    expect(summaryText).toContain("- Restart: PID 4242, log .ailoop/prod.server.log");
+    expect(summaryText).toContain("- Health Check: GET /api/health -> 200 OK");
+    expect(summaryText).toContain("- Rollback: git revert --no-edit abc1234 && bash scripts/prod.sh restart");
+
+    const stateChangeText = await fs.readFile(path.join(homeDir, "runs", stateChangeFile as string), "utf8");
+    expect(stateChangeText).toContain("### Operational Follow-up");
+    expect(stateChangeText).toContain("Shell: git commit -m ... -> ok");
+    expect(stateChangeText).toContain("Shell: git push origin HEAD -> ok (Everything up-to-date)");
+    expect(stateChangeText).toContain("Shell: bash scripts/prod.sh restart -> ok (PID 4242, log .ailoop/prod.server.log)");
+    expect(stateChangeText).toContain("Health: GET /api/health -> 200 ok ({\"ok\":true})");
+
+    const persistedState = await readLoopState(paths);
+    expect(persistedState.previous_tool_result?.operational_evidence).toEqual([
+      "Commit: abc1234 AILoop Round 1: Persist operational follow-up evidence",
+      "Push: Everything up-to-date",
+      "Restart: PID 4242, log .ailoop/prod.server.log",
+      "Health Check: GET /api/health -> 200 OK",
+      "Rollback: git revert --no-edit abc1234 && bash scripts/prod.sh restart"
+    ]);
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
   test("passes concrete round artifact file paths to the evaluator and persisted loop state", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-artifact-contract-test-"));
     const config = loadConfig({
@@ -599,6 +690,68 @@ describe("LoopEngine auto rework", () => {
     expect(evidence.lines).toContain("Health Check: GET /api/health -> 200 OK");
     expect(evidence.lines).toContain("Rollback: git revert --no-edit abc1234 && bash scripts/prod.sh restart");
     expect(evidence.stateChangeNotes).toContain("Shell: git push origin HEAD -> ok (Everything up-to-date)");
+  });
+
+  test("collectOperationalEvidence records degraded push, restart, and health results for follow-up failure handling", async () => {
+    const evidence = await collectOperationalEvidence(
+      {
+        round: 6,
+        objective: "capture degraded deploy evidence",
+        expectedOutcome: "artifacts record operational follow-up failures",
+        consolePort: 3090,
+        log: async () => {
+          // no-op
+        }
+      },
+      async (command) => {
+        if (command === "git add .") {
+          return { code: 0, stdout: "", stderr: "" };
+        }
+        if (command === "git diff --cached --quiet") {
+          return { code: 1, stdout: "", stderr: "" };
+        }
+        if (command.startsWith("git commit -m ")) {
+          return { code: 0, stdout: "[main def5678] AILoop Round 6: capture degraded deploy evidence", stderr: "" };
+        }
+        if (command === "git rev-parse --short HEAD") {
+          return { code: 0, stdout: "def5678\n", stderr: "" };
+        }
+        if (command === "git log -1 --pretty=%s") {
+          return { code: 0, stdout: "AILoop Round 6: capture degraded deploy evidence\n", stderr: "" };
+        }
+        if (command === "git push origin HEAD") {
+          return { code: 1, stdout: "", stderr: "remote rejected: protected branch hook declined" };
+        }
+        if (command === "bash scripts/prod.sh restart") {
+          return { code: 1, stdout: "", stderr: "restart failed: service did not come back up" };
+        }
+        throw new Error(`Unexpected command: ${command}`);
+      },
+      async () => ({
+        ok: false,
+        status: 503,
+        body: '{"ok":false,"error":"service unavailable"}'
+      })
+    );
+
+    expect(evidence.summaryNote).toContain("commit def5678");
+    expect(evidence.summaryNote).toContain("push failed");
+    expect(evidence.summaryNote).toContain("restart failed");
+    expect(evidence.summaryNote).toContain("health check failed");
+    expect(evidence.lines).toContain("Commit: def5678 AILoop Round 6: capture degraded deploy evidence");
+    expect(evidence.lines).toContain("Push: remote rejected: protected branch hook declined");
+    expect(evidence.lines).toContain("Restart: restart failed: service did not come back up");
+    expect(evidence.lines).toContain("Health Check: GET /api/health -> 503 FAIL");
+    expect(evidence.lines).toContain("Rollback: git revert --no-edit def5678 && bash scripts/prod.sh restart");
+    expect(evidence.stateChangeNotes).toContain(
+      "Shell: git push origin HEAD -> failed (remote rejected: protected branch hook declined)"
+    );
+    expect(evidence.stateChangeNotes).toContain(
+      "Shell: bash scripts/prod.sh restart -> failed (restart failed: service did not come back up)"
+    );
+    expect(evidence.stateChangeNotes).toContain(
+      'Health: GET /api/health -> 503 failed ({"ok":false,"error":"service unavailable"})'
+    );
   });
 });
 

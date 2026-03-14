@@ -335,6 +335,7 @@ export async function listRuns(config: AppConfig, limit = 20): Promise<
   const roundsByTimestamp = new Map(
     (dbRounds as Array<{ run_timestamp: string; round_id: number }>).map((record) => [record.run_timestamp, record.round_id])
   );
+  const redactor = new SecretRedactor(process.env);
 
   return await Promise.all(
     records.map(async (record) => {
@@ -349,9 +350,9 @@ export async function listRuns(config: AppConfig, limit = 20): Promise<
       return {
         timestamp: record.timestamp,
         round,
-        summary,
+        summary: redactor.redact(summary),
         metrics,
-        evaluation
+        evaluation: evaluation ? redactJsonStrings(evaluation, redactor) : null
       };
     })
   );
