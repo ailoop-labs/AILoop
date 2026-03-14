@@ -27,6 +27,29 @@ export interface RunRecord {
   evaluationPath?: string;
 }
 
+function formatActionTrace(actions: ActionRecord[]): string {
+  if (actions.length === 0) {
+    return "- No executor actions were recorded.";
+  }
+
+  return actions
+    .map((action, index) => {
+      const detail = action.output.trim() || "No action detail recorded.";
+      const status = action.status ?? (action.ok === false ? "failure" : "success");
+      const prefix = action.tool === "codex_step" ? "" : `${action.tool}: `;
+      const statusSuffix = status === "success" ? "" : ` (${status})`;
+
+      return `${index + 1}. ${prefix}${detail}${statusSuffix}`;
+    })
+    .join("\n");
+}
+
+function formatVerificationEvidence(evaluation: EvaluationResult): string {
+  return evaluation.evidence.length > 0
+    ? evaluation.evidence.map((item) => `- ${item}`).join("\n")
+    : "- None recorded.";
+}
+
 function redactArtifactText(content: string): string {
   return new SecretRedactor(process.env).redact(content);
 }
@@ -87,8 +110,6 @@ export async function writeEvaluationFile(evaluationPath: string, evaluation: Ev
 export async function writeSummaryFile(summaryPath: string, input: SummaryInput): Promise<void> {
   await ensureDir(path.dirname(summaryPath));
 
-  const toolsUsed = input.actions.map((action) => action.tool);
-  const uniqueTools = Array.from(new Set(toolsUsed));
   const artifactPaths = input.artifacts ?? inferArtifactPathsFromSummaryPath(summaryPath);
   const logArtifactPath = input.toolResult.artifacts.log_path || artifactPaths.logPath;
   const stateChangeArtifactPath =
@@ -109,8 +130,8 @@ export async function writeSummaryFile(summaryPath: string, input: SummaryInput)
     `- Expected Outcome: ${input.subTask.expected_outcome}`,
     `- Rationale: ${input.subTask.rationale}`,
     "",
-    "## Actions Taken (Tools Used)",
-    uniqueTools.length > 0 ? uniqueTools.map((tool) => `- ${tool}`).join("\n") : "- No tools were used.",
+    "## Executor Action Trace",
+    formatActionTrace(input.actions),
     "",
     "## Execution Result",
     `- Tool Status: ${input.toolResult.status}`,
@@ -128,6 +149,9 @@ export async function writeSummaryFile(summaryPath: string, input: SummaryInput)
     input.toolResult.operational_evidence && input.toolResult.operational_evidence.length > 0
       ? input.toolResult.operational_evidence.map((item) => `- ${item}`).join("\n")
       : "- None recorded.",
+    "",
+    "## Verification Evidence",
+    formatVerificationEvidence(input.evaluation),
     "",
     "## Evaluation Result",
     `- Decision: ${input.evaluation.decision}`,

@@ -24,17 +24,20 @@ function makeEvaluation(decision: EvaluationResult["decision"], justification: s
   return {
     decision,
     justification,
-    evidence: ["test-evidence"],
+    evidence: [
+      "bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed",
+      "Summary artifact includes executor action trace and verification evidence."
+    ],
     recommended_next_action: "add targeted verification"
   };
 }
 
-function makeAction(tool: string): ActionRecord {
+function makeAction(tool: string, output?: string): ActionRecord {
   return {
     tool,
     args: {},
     ok: true,
-    output: `${tool} ok`
+    output: output ?? `${tool} ok`
   };
 }
 
@@ -57,7 +60,10 @@ test("writes a round summary artifact with round metadata and artifact reference
   };
 
   const execute = async () => ({
-    actions: [makeAction("read_file"), makeAction("run_shell")],
+    actions: [
+      makeAction("read_file", "Inspected src/reporting/summary.ts before editing."),
+      makeAction("run_shell", "bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed")
+    ],
     toolResult: makeToolResult("Created markdown summary artifact")
   });
   const evaluate = async (): Promise<EvaluationResult> => makeEvaluation("pass", "All checks satisfied.");
@@ -97,6 +103,11 @@ test("writes a round summary artifact with round metadata and artifact reference
   expect(summaryText).toContain("- Round: 1");
   expect(summaryText).toMatch(/- Timestamp: \d{4}-\d{2}-\d{2}T/);
   expect(summaryText).toContain("- Objective: Persist markdown round summary");
+  expect(summaryText).toContain("## Executor Action Trace");
+  expect(summaryText).toContain("1. read_file: Inspected src/reporting/summary.ts before editing.");
+  expect(summaryText).toContain(
+    "2. run_shell: bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed"
+  );
   expect(summaryText).toContain("- Tool Status: success");
   expect(summaryText).toContain("## Artifact References");
   expect(summaryText).toContain(`- Summary: ${summaryPath}`);
@@ -112,6 +123,11 @@ test("writes a round summary artifact with round metadata and artifact reference
   expect(summaryText).toContain(
     `- Evaluation: ${path.join(homeDir, "runs", (summaryFile as string).replace(".round.summary.md", ".round.evaluation.json"))}`
   );
+  expect(summaryText).toContain("## Verification Evidence");
+  expect(summaryText).toContain(
+    "- bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed"
+  );
+  expect(summaryText).toContain("- Summary artifact includes executor action trace and verification evidence.");
   expect(summaryText).toContain("- Decision: pass");
 
   await fs.rm(homeDir, { recursive: true, force: true });

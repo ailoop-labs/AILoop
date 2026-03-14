@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
+import type { ActionRecord } from "../types/contracts";
 import type { SummaryInput } from "./summary";
 import { appendLogLine, writeLogFile, writeStateChangeFile, writeSummaryFile } from "./summary";
 
@@ -91,6 +92,15 @@ function makeSummaryInput(autoReworkAttempts: string[]): SummaryInput {
   };
 }
 
+function makeAction(tool: string, output: string): ActionRecord {
+  return {
+    tool,
+    args: {},
+    ok: true,
+    output
+  };
+}
+
 describe("writeSummaryFile auto rework section", () => {
   test("renders attempt details when auto rework was executed", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-summary-test-"));
@@ -138,6 +148,49 @@ describe("writeSummaryFile auto rework section", () => {
     expect(text).toContain("- Restart: PID 4242, log .ailoop/prod.server.log");
     expect(text).toContain("- Health Check: GET /api/health -> 200 OK");
     expect(text).toContain("- Rollback: git revert --no-edit abc1234 && bash scripts/prod.sh restart");
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test("renders ordered executor action details instead of collapsing to tool names", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-summary-test-"));
+    const summaryPath = path.join(dir, "round.summary.md");
+    const input = makeSummaryInput([]);
+    input.actions = [
+      makeAction("read_file", "Inspected src/reporting/summary.ts before editing."),
+      makeAction("run_shell", "bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed")
+    ];
+
+    await writeSummaryFile(summaryPath, input);
+    const text = await fs.readFile(summaryPath, "utf8");
+
+    expect(text).toContain("## Executor Action Trace");
+    expect(text).toContain("1. read_file: Inspected src/reporting/summary.ts before editing.");
+    expect(text).toContain(
+      "2. run_shell: bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed"
+    );
+    expect(text).not.toContain("## Actions Taken (Tools Used)");
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test("renders verification evidence as a dedicated block", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-summary-test-"));
+    const summaryPath = path.join(dir, "round.summary.md");
+    const input = makeSummaryInput([]);
+    input.evaluation.evidence = [
+      "bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed",
+      "Summary artifact includes executor action trace and verification evidence."
+    ];
+
+    await writeSummaryFile(summaryPath, input);
+    const text = await fs.readFile(summaryPath, "utf8");
+
+    expect(text).toContain("## Verification Evidence");
+    expect(text).toContain(
+      "- bun test src/reporting/summary.test.ts src/loop/engine.summary-artifact.test.ts -> 2 passed"
+    );
+    expect(text).toContain("- Summary artifact includes executor action trace and verification evidence.");
 
     await fs.rm(dir, { recursive: true, force: true });
   });
