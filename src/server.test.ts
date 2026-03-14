@@ -527,6 +527,7 @@ describe("console server API contract", () => {
       round: 7,
       pid: null,
       pid_alive: false,
+      crash_recovery: null,
       last_error: "Waiting for review",
       consecutive_evaluator_failures: 2,
       previous_tool_result: {
@@ -615,6 +616,7 @@ describe("console server API contract", () => {
       round: 4,
       pid: null,
       pid_alive: false,
+      crash_recovery: null,
       last_error: null,
       consecutive_evaluator_failures: 0,
       previous_tool_result: null,
@@ -632,6 +634,102 @@ describe("console server API contract", () => {
         markdown: expect.stringContaining("# Requirement Slice: Operator Clarity"),
         updated_at: expect.any(String)
       }
+    });
+  });
+
+  test("returns startup crash recovery signals when status finalizes a dead starting process", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      round: 5,
+      state: "starting",
+      pid: 999999
+    });
+
+    const response = await fetchHandler(createAuthorizedRequest("http://console.test/api/status", token));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      state: "paused",
+      round: 5,
+      pid: null,
+      pid_alive: false,
+      crash_recovery: {
+        interruption_type: "startup_interrupted",
+        interrupted_state: "starting",
+        recovered_by: "status_check",
+        status_check_finalized: true,
+        normal_round_execution_started: false,
+        incomplete_work: false,
+        reason: "process 999999 was not alive",
+        summary: "Initialization was interrupted before normal round execution began.",
+        next_action: "Inspect the run state and resume explicitly when safe."
+      },
+      last_error: expect.stringContaining("Crash recovery")
+    });
+  });
+
+  test("returns round crash recovery signals when status finalizes a dead active round", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      round: 6,
+      state: "running",
+      pid: 999999,
+      current_budget: {
+        limits: {
+          usdPerRound: 0.5,
+          timeMinutes: 15,
+          actions: 30
+        },
+        usage: {
+          usdUsed: 0.3,
+          actionsUsed: 7,
+          elapsedMs: 8_000
+        }
+      }
+    });
+
+    const response = await fetchHandler(createAuthorizedRequest("http://console.test/api/status", token));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      state: "paused",
+      round: 6,
+      pid: null,
+      pid_alive: false,
+      crash_recovery: {
+        interruption_type: "round_interrupted",
+        interrupted_state: "running",
+        recovered_by: "status_check",
+        status_check_finalized: true,
+        normal_round_execution_started: true,
+        incomplete_work: true,
+        reason: "process 999999 was not alive",
+        summary: "Round execution was interrupted during running; work may be incomplete.",
+        next_action: "Inspect the run state and resume explicitly when safe."
+      },
+      current_budget: {
+        limits: {
+          usdPerRound: 0.5,
+          timeMinutes: 15,
+          actions: 30
+        },
+        usage: {
+          usdUsed: 0.3,
+          actionsUsed: 7,
+          elapsedMs: 8_000
+        }
+      },
+      last_error: expect.stringContaining("Crash recovery")
     });
   });
 

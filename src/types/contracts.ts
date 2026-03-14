@@ -7,6 +7,22 @@ export type LoopStateName =
   | "stopping"
   | "error";
 
+export type CrashRecoveryInterruptionType = "startup_interrupted" | "round_interrupted";
+
+export type CrashRecoveryRecoveredBy = "startup" | "status_check";
+
+export interface CrashRecoveryStatus {
+  interruption_type: CrashRecoveryInterruptionType;
+  interrupted_state: LoopStateName;
+  recovered_by: CrashRecoveryRecoveredBy;
+  status_check_finalized: boolean;
+  normal_round_execution_started: boolean;
+  incomplete_work: boolean;
+  reason: string;
+  summary: string;
+  next_action: string;
+}
+
 export interface ActionRecord {
   tool: string;
   input?: any;

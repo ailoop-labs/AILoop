@@ -1,11 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { DatabaseManager } from "../utils/db";
-import type { LoopPaths, LoopStateData, LoopStateName } from "../types/contracts";
+import type { CrashRecoveryRecoveredBy, CrashRecoveryStatus, LoopPaths, LoopStateData, LoopStateName } from "../types/contracts";
 export type { LoopPaths, LoopStateData };
 import { ensureDir, ensureRegularFile, fileExists, readJsonFile, readTextFile, writeJsonFile } from "../utils/fs";
 
 const INTERRUPTED_LOOP_STATES = new Set<LoopStateName>(["starting", "running", "cooldown", "stopping"]);
+const CRASH_RECOVERY_NEXT_ACTION = "Inspect the run state and resume explicitly when safe.";
 
 export function buildLoopPaths(homeDir: string): LoopPaths {
   return {
@@ -257,11 +258,86 @@ function buildInterruptedRecoveryMessage(
   pid: number | null,
   source: "startup" | "status check"
 ): string {
-  if (pid) {
-    return `Interrupted: recovered unfinished ${state} state during ${source} because process ${pid} was not alive`;
+  const reason = pid ? `process ${pid} was not alive` : "no live process was found";
+
+  if (state === "starting") {
+    return [
+      `Crash recovery: Interrupted state recovered during ${source}.`,
+      `Startup interrupted during initialization because ${reason}.`,
+      "Normal round execution did not begin.",
+      "Run paused for review.",
+      `Next action: ${CRASH_RECOVERY_NEXT_ACTION}`
+    ].join(" ");
   }
 
-  return `Interrupted: recovered unfinished ${state} state during ${source} because no live process was found`;
+  return [
+    `Crash recovery: Interrupted state recovered during ${source}.`,
+    `Round interrupted during ${state} because ${reason}.`,
+    "Work may be incomplete.",
+    "Run paused for review.",
+    `Next action: ${CRASH_RECOVERY_NEXT_ACTION}`
+  ].join(" ");
+}
+
+function normalizeCrashRecoverySource(raw: string): CrashRecoveryRecoveredBy | null {
+  if (raw === "startup") {
+    return "startup";
+  }
+  if (raw === "status check") {
+    return "status_check";
+  }
+  return null;
+}
+
+export function parseCrashRecoveryMessage(message: string | null): Omit<CrashRecoveryStatus, "status_check_finalized"> | null {
+  if (!message) {
+    return null;
+  }
+
+  const startupMatch = message.match(
+    /^Crash recovery: Interrupted state recovered during (startup|status check)\. Startup interrupted during initialization because (.+?)\. Normal round execution did not begin\. Run paused for review\. Next action: (.+)$/
+  );
+  if (startupMatch) {
+    const recoveredBy = normalizeCrashRecoverySource(startupMatch[1]);
+    if (!recoveredBy) {
+      return null;
+    }
+
+    return {
+      interruption_type: "startup_interrupted",
+      interrupted_state: "starting",
+      recovered_by: recoveredBy,
+      normal_round_execution_started: false,
+      incomplete_work: false,
+      reason: startupMatch[2],
+      summary: "Initialization was interrupted before normal round execution began.",
+      next_action: startupMatch[3]
+    };
+  }
+
+  const roundMatch = message.match(
+    /^Crash recovery: Interrupted state recovered during (startup|status check)\. Round interrupted during (starting|running|paused|cooldown|stopping|idle|error) because (.+?)\. Work may be incomplete\. Run paused for review\. Next action: (.+)$/
+  );
+  if (!roundMatch) {
+    return null;
+  }
+
+  const recoveredBy = normalizeCrashRecoverySource(roundMatch[1]);
+  if (!recoveredBy) {
+    return null;
+  }
+
+  const interruptedState = roundMatch[2] as LoopStateName;
+  return {
+    interruption_type: "round_interrupted",
+    interrupted_state: interruptedState,
+    recovered_by: recoveredBy,
+    normal_round_execution_started: true,
+    incomplete_work: true,
+    reason: roundMatch[3],
+    summary: `Round execution was interrupted during ${interruptedState}; work may be incomplete.`,
+    next_action: roundMatch[4]
+  };
 }
 
 export async function recoverInterruptedLoopState(

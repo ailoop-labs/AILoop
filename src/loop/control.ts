@@ -12,7 +12,13 @@ import type { AppConfig } from "../config/env";
 import { readRuntimeLoopConfig, runtimeLoopConfigToEnv } from "../config/runtime";
 import { readActiveRequirementSnapshot } from "../product/requirements";
 import { buildRoundArtifactPaths, listRunRecords, readLastLogTail } from "../reporting/summary";
-import type { BudgetLimits, EvaluationResult, LoopStateData, RequirementArtifactSnapshot } from "../types/contracts";
+import type {
+  BudgetLimits,
+  CrashRecoveryStatus,
+  EvaluationResult,
+  LoopStateData,
+  RequirementArtifactSnapshot
+} from "../types/contracts";
 import { fileExists, readJsonFile, readTextFile } from "../utils/fs";
 import { redactJsonStrings, SecretRedactor } from "../utils/redaction";
 
@@ -36,6 +42,7 @@ import {
   defaultLoopState,
   ensureLoopHome,
   isPidAlive,
+  parseCrashRecoveryMessage,
   readLoopState,
   readPid,
   recoverInterruptedLoopState,
@@ -273,7 +280,24 @@ export async function instructLoop(config: AppConfig, message: string): Promise<
 
 export interface LoopStatusView extends LoopStateData {
   pid_alive: boolean;
+  crash_recovery: CrashRecoveryStatus | null;
   active_requirement: RequirementArtifactSnapshot;
+}
+
+function deriveCrashRecoveryStatus(state: LoopStateData, statusCheckFinalized: boolean): CrashRecoveryStatus | null {
+  if (state.state !== "paused") {
+    return null;
+  }
+
+  const parsed = parseCrashRecoveryMessage(state.last_error);
+  if (!parsed) {
+    return null;
+  }
+
+  return {
+    ...parsed,
+    status_check_finalized: statusCheckFinalized
+  };
 }
 
 export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> {
@@ -283,28 +307,17 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
 
   const recovered = await recoverInterruptedLoopState(paths, "status check");
   if (recovered) {
-    return { ...recovered, pid_alive: false, active_requirement: activeRequirement };
+    return {
+      ...recovered,
+      pid_alive: false,
+      crash_recovery: deriveCrashRecoveryStatus(recovered, true),
+      active_requirement: activeRequirement
+    };
   }
 
   const state = await readLoopState(paths);
   const pid = state.pid ?? (await readPid(paths));
   const pidAlive = pid ? isPidAlive(pid) : false;
-
-  // Stale running/paused state with no live PID
-  if (!pidAlive && (state.state === "running" || state.state === "cooldown" || state.state === "starting")) {
-    const normalized = {
-      ...state,
-      state: "idle" as const,
-      pid: null,
-      current_budget: null
-    };
-    await writeLoopState(paths, normalized);
-    return {
-      ...normalized,
-      pid_alive: false,
-      active_requirement: activeRequirement
-    };
-  }
 
   // Ensure idle state doesn't have stale budget/PID
   if (state.state === "idle" && (state.current_budget || state.pid)) {
@@ -317,6 +330,7 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
     return {
       ...normalized,
       pid_alive: false,
+      crash_recovery: null,
       active_requirement: activeRequirement
     };
   }
@@ -325,6 +339,7 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
     ...state,
     pid: pid ?? null,
     pid_alive: pidAlive,
+    crash_recovery: deriveCrashRecoveryStatus(state, false),
     active_requirement: activeRequirement
   };
 }

@@ -926,8 +926,19 @@ describe("getLoopStatus", () => {
     expect(status.round).toBe(4);
     expect(status.pid).toBeNull();
     expect(status.pid_alive).toBe(false);
-    expect(status.last_error).toContain("unfinished starting state");
-    expect(status.last_error).toContain("during status check");
+    expect(status.last_error).toContain("Crash recovery");
+    expect(status.last_error).toContain("status check");
+    expect(status.crash_recovery).toEqual({
+      interruption_type: "startup_interrupted",
+      interrupted_state: "starting",
+      recovered_by: "status_check",
+      status_check_finalized: true,
+      normal_round_execution_started: false,
+      incomplete_work: false,
+      reason: "process 999999 was not alive",
+      summary: "Initialization was interrupted before normal round execution began.",
+      next_action: "Inspect the run state and resume explicitly when safe."
+    });
 
     const persisted = await readLoopState(paths);
     expect(persisted.state).toBe("paused");
@@ -968,8 +979,19 @@ describe("getLoopStatus", () => {
     expect(status.pid).toBeNull();
     expect(status.pid_alive).toBe(false);
     expect(status.current_budget).toEqual(staleState.current_budget);
-    expect(status.last_error).toContain("during status check");
-    expect(status.last_error).toContain("process 999999 was not alive");
+    expect(status.last_error).toContain("Crash recovery");
+    expect(status.last_error).toContain("status check");
+    expect(status.crash_recovery).toEqual({
+      interruption_type: "round_interrupted",
+      interrupted_state: "cooldown",
+      recovered_by: "status_check",
+      status_check_finalized: true,
+      normal_round_execution_started: true,
+      incomplete_work: true,
+      reason: "process 999999 was not alive",
+      summary: "Round execution was interrupted during cooldown; work may be incomplete.",
+      next_action: "Inspect the run state and resume explicitly when safe."
+    });
 
     const persisted = await readLoopState(paths);
     expect(persisted.state).toBe("paused");
