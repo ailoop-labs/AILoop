@@ -5,7 +5,7 @@ import { buildLoopPaths, ensureLoopHome } from "../loop/state";
 import { fileExists, readTextFile, writeTextFile } from "../utils/fs";
 import { CodexClient, type JsonSchema } from "./codex-client";
 
-export type ProjectRole = "planner" | "executor" | "evaluator" | "leader" | "designer" | "senior_dev" | "qa_lead" | "product_owner";
+export type ProjectRole = "planner" | "product_manager" | "executor" | "evaluator" | "leader" | "designer" | "senior_dev" | "qa_lead" | "product_owner";
 
 export interface EnsureProjectRoleDefinitionsOptions {
   workspaceRoot?: string;
@@ -22,6 +22,7 @@ export interface EnsureProjectRoleDefinitionsResult {
 
 interface GeneratedRolePayload {
   planner_role_md: string;
+  product_manager_role_md: string;
   executor_role_md: string;
   evaluator_role_md: string;
   leader_role_md: string;
@@ -35,6 +36,7 @@ const GENERATED_ROLE_SCHEMA: JsonSchema = {
   type: "object",
   properties: {
     planner_role_md: { type: "string" },
+    product_manager_role_md: { type: "string" },
     executor_role_md: { type: "string" },
     evaluator_role_md: { type: "string" },
     leader_role_md: { type: "string" },
@@ -45,6 +47,7 @@ const GENERATED_ROLE_SCHEMA: JsonSchema = {
   },
   required: [
     "planner_role_md", 
+    "product_manager_role_md",
     "executor_role_md", 
     "evaluator_role_md", 
     "leader_role_md", 
@@ -63,8 +66,10 @@ function normalizeMarkdown(content: string): string {
 
 const ROLES_SOURCE_HASH_FILENAME = ".roles_source_hash";
 
-export function computeSourceHash(readme: string, goal: string): string {
-  return createHash("sha256").update(`${readme}\n---\n${goal}`).digest("hex");
+export function computeSourceHash(readme: string, goal: string, architecture: string = "", workflow: string = ""): string {
+  return createHash("sha256")
+    .update(`${readme}\n---\n${goal}\n---\n${architecture}\n---\n${workflow}`)
+    .digest("hex");
 }
 
 async function shouldAutoRegenerate(homeDir: string, currentHash: string): Promise<boolean> {
@@ -79,16 +84,26 @@ async function writeSourceHash(homeDir: string, hash: string): Promise<void> {
 }
 
 function defaultPlannerRoleDefinition(): string {
-  return normalizeMarkdown(`# Product Manager (Planner) Role
-You are the Product Manager (Planning) role for this project.
+  return normalizeMarkdown(`# Project Planner Role
+You are the Project Planner role for this project.
 Responsibilities:
-- Translate project goals into one atomic, verifiable sub-task per round.
-- Prioritize the highest-value step that can be validated quickly.
-- Write clear, structured requirements using professional product frameworks (e.g., Why-What-Acceptance).
+- Translate project goals, current requirement artifacts, and recent execution history into one atomic, verifiable sub-task per round.
+- Detect when product definition is missing, stale, contradictory, or complete for the current requirement slice.
+- Wake the Product Manager role when requirement artifacts need to be created or refreshed.
 - Include explicit expected outcomes with re-runnable verification.
 - [SCOPE CONTROL]: You MUST explicitly list "Out of Scope" items in your plan to prevent the Executor from over-engineering or handling edge cases that distract from the main goal.
 - [SELF-HEALING]: If infrastructure bugs are found, fix them immediately.
 - Assign tasks: "designer" for UI, "executor" for logic/infra.`);
+}
+
+function defaultProductManagerRoleDefinition(): string {
+  return normalizeMarkdown(`# Product Manager Role
+You are the Product Manager role for this project.
+Responsibilities:
+- Produce and refresh human-readable Markdown requirement documents for the current requirement slice.
+- Define problem, user value, scope, non-goals, acceptance criteria, design expectations, and open questions.
+- Keep requirement artifacts easy for a human operator to inspect directly.
+- Do not emit round-level execution tasks or prescribe low-level implementation details.`);
 }
 
 function defaultDesignerRoleDefinition(): string {
@@ -122,14 +137,14 @@ function defaultLeaderRoleDefinition(): string {
 You are the Leader role for this project.
 The loop has failed its auto-rework attempts.
 Responsibilities:
-- Analyze root causes of why the Planner and Executor are stuck.
+- Analyze root causes of why the ProjectPlanner and Executor are stuck.
 - Identify if the issue is an implementation failure or a Constitutional (README.md) conflict.
 - [TELEMETRY DUTY]: Query the SQLite metrics to check the 'Friction Index' (Rework Churn Rate, Action Bloat, Hot-file Mutation Rate) for the failing component.
 - [RABBIT HOLE DETECTION]: Ask yourself "Is this specific feature strictly necessary for the MVP?". If the Executor is stuck on an edge case, complex regex, or obscure dependency that is not central to the user value, you must CUT THE SCOPE.
 - Decision Branch A: Issue "Strategic Instructions" to Executor for code/config fixes.
 - Decision Branch B: If the overall project goal (README.md) is reachable but blocked by current rules, escalate to CCB.
 - Decision Branch C: If the Friction Index exceeds concrete triggers (e.g., >3 failures in 5 rounds due to technical debt, or >200% cost explosion), escalate to CCB with an 'Architectural Migration' proposal.
-- Decision Branch D: Issue a "Scope Cut Directive" to the Planner, instructing it to drop the problematic requirement and find a simpler path to the goal.`);
+- Decision Branch D: Issue a "Scope Cut Directive" to the ProjectPlanner, instructing it to drop the problematic requirement and find a simpler path to the goal.`);
 }
 
 function defaultSeniorDevRoleDefinition(): string {
@@ -137,7 +152,7 @@ function defaultSeniorDevRoleDefinition(): string {
 You are a Senior Developer acting as a technical expert on the Change Control Board (CCB).
 Your goal is to ensure technical integrity, prevent technical debt, and maintain architectural consistency.
 When reviewing a proposal to change the README.md (Constitution) or an 'Architectural Migration' proposal, evaluate if the adjustment is due to "lazy implementation" or a genuine technical impossibility.
-[REFACTORING LAW]: You MUST reject any "Big Bang Rewrite" (e.g., rewriting the entire frontend in one go). You must enforce the "Strangler Fig Pattern" – demanding that the Planner breaks the migration into Infrastructure -> Coexistence -> Slice Migration -> Cleanup phases, ensuring existing tests pass at every step.`);
+[REFACTORING LAW]: You MUST reject any "Big Bang Rewrite" (e.g., rewriting the entire frontend in one go). You must enforce the "Strangler Fig Pattern" – demanding that the ProjectPlanner breaks the migration into Infrastructure -> Coexistence -> Slice Migration -> Cleanup phases, ensuring existing tests pass at every step.`);
 }
 
 function defaultQALeadRoleDefinition(): string {
@@ -157,6 +172,7 @@ You MUST reject any architectural or UI change that violates the 'High-Bandwidth
 
 function defaultRoleDefinition(role: ProjectRole): string {
   if (role === "planner") return defaultPlannerRoleDefinition();
+  if (role === "product_manager") return defaultProductManagerRoleDefinition();
   if (role === "designer") return defaultDesignerRoleDefinition();
   if (role === "executor") return defaultExecutorRoleDefinition();
   if (role === "leader") return defaultLeaderRoleDefinition();
@@ -166,7 +182,7 @@ function defaultRoleDefinition(role: ProjectRole): string {
   return defaultEvaluatorRoleDefinition();
 }
 
-function buildRoleGenerationPrompt(input: { projectGoal: string; readme: string }): string {
+function buildRoleGenerationPrompt(input: { projectGoal: string; readme: string; architecture: string; workflow: string }): string {
   const truncate = (value: string, max: number): string =>
     value.length > max ? `${value.slice(0, max - 3)}...` : value;
 
@@ -174,13 +190,15 @@ function buildRoleGenerationPrompt(input: { projectGoal: string; readme: string 
     "You generate project-scoped agent role definition markdown files.",
     "Return strict JSON only.",
     "",
-    "Output fields: planner_role_md, designer_role_md, executor_role_md, evaluator_role_md, leader_role_md, senior_dev_role_md, qa_lead_role_md, product_owner_role_md",
+    "Output fields: planner_role_md, product_manager_role_md, designer_role_md, executor_role_md, evaluator_role_md, leader_role_md, senior_dev_role_md, qa_lead_role_md, product_owner_role_md",
     "",
     "Context:",
     JSON.stringify(
       {
         project_goal_md: truncate(input.projectGoal, 6000),
-        project_readme_md: truncate(input.readme, 12000)
+        project_readme_md: truncate(input.readme, 12000),
+        project_architecture_md: truncate(input.architecture, 12000),
+        project_workflow_md: truncate(input.workflow, 12000)
       },
       null,
       2
@@ -190,6 +208,7 @@ function buildRoleGenerationPrompt(input: { projectGoal: string; readme: string 
 
 function rolePathFor(paths: ReturnType<typeof buildLoopPaths>, role: ProjectRole): string {
   if (role === "planner") return paths.plannerRolePath;
+  if (role === "product_manager") return paths.productManagerRolePath;
   if (role === "designer") return paths.designerRolePath;
   if (role === "executor") return paths.executorRolePath;
   if (role === "leader") return paths.leaderRolePath;
@@ -202,6 +221,7 @@ function rolePathFor(paths: ReturnType<typeof buildLoopPaths>, role: ProjectRole
 function rolePayloadFor(payload: GeneratedRolePayload | null, role: ProjectRole): string | null {
   if (!payload) return null;
   if (role === "planner") return payload.planner_role_md;
+  if (role === "product_manager") return payload.product_manager_role_md;
   if (role === "designer") return payload.designer_role_md;
   if (role === "executor") return payload.executor_role_md;
   if (role === "leader") return payload.leader_role_md;
@@ -233,17 +253,19 @@ export async function ensureProjectRoleDefinitions(
   // Read source documents early for both hash computation and role generation
   const projectGoal = await readTextFile(path.join(workspaceRoot, "GOAL.md"), "");
   const readme = await readTextFile(path.join(workspaceRoot, "README.md"), "");
+  const architecture = await readTextFile(path.join(workspaceRoot, "ARCHITECTURE.md"), "");
+  const workflow = await readTextFile(path.join(workspaceRoot, "AILOOP_ENGINE_WORKFLOW.md"), "");
 
   // Auto-refresh: compare source hash to decide if regeneration is needed
   let currentHash: string | null = null;
   if (autoRefresh && !regen) {
-    currentHash = computeSourceHash(readme, projectGoal);
+    currentHash = computeSourceHash(readme, projectGoal, architecture, workflow);
     if (await shouldAutoRegenerate(config.homeDir, currentHash)) {
       regen = true;
     }
   }
 
-  const allRoles: ProjectRole[] = ["planner", "designer", "executor", "evaluator", "leader", "senior_dev", "qa_lead", "product_owner"];
+  const allRoles: ProjectRole[] = ["planner", "product_manager", "designer", "executor", "evaluator", "leader", "senior_dev", "qa_lead", "product_owner"];
   const generated: ProjectRole[] = [];
   const skipped: ProjectRole[] = [];
   const targets: ProjectRole[] = [];
@@ -271,7 +293,7 @@ export async function ensureProjectRoleDefinitions(
   let payload: GeneratedRolePayload | null = null;
   let source: EnsureProjectRoleDefinitionsResult["source"] = "template";
   const generation = await codex.runJson<GeneratedRolePayload>({
-    prompt: buildRoleGenerationPrompt({ projectGoal, readme }),
+    prompt: buildRoleGenerationPrompt({ projectGoal, readme, architecture, workflow }),
     schema: GENERATED_ROLE_SCHEMA,
     cwd: workspaceRoot,
     sandbox: config.codex.plannerSandbox
@@ -291,7 +313,7 @@ export async function ensureProjectRoleDefinitions(
 
   // Persist source hash after successful generation
   if (autoRefresh) {
-    const hashToStore = currentHash ?? computeSourceHash(readme, projectGoal);
+    const hashToStore = currentHash ?? computeSourceHash(readme, projectGoal, architecture, workflow);
     await writeSourceHash(config.homeDir, hashToStore);
   }
 

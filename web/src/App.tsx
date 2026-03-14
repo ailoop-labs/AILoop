@@ -6,6 +6,7 @@ import { buildLogViewerText } from "./log-lines";
 import { resolveLogTailFollowBehavior } from "./log-follow";
 import { GoalMarkdown } from "./goal-markdown";
 import { deriveRoundProgress } from "./round-progress";
+import { RequirementSnapshotCard, type RequirementArtifactView } from "./requirement-snapshot";
 import { projectRunHistoryReport, type RunHistoryItem, type GovernanceDetails, type ExpertOpinion } from "./run-history";
 import { paginateRunHistory, RUN_HISTORY_PAGE_SIZE } from "./run-history-pagination";
 
@@ -31,6 +32,7 @@ interface LoopStatus {
       actionsUsed: number;
     };
   } | null;
+  active_requirement: RequirementArtifactView;
 }
 
 type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
@@ -77,7 +79,7 @@ interface ProjectRoleResponse {
   roles: ProjectRoleItem[];
 }
 
-type ProjectRoleName = "planner" | "executor" | "evaluator";
+type ProjectRoleName = "planner" | "product_manager" | "executor" | "evaluator";
 
 interface ProjectRoleItem {
   role: ProjectRoleName;
@@ -227,6 +229,7 @@ interface RunArtifactBundle {
   metrics: Record<string, unknown> | null;
   log: string;
   state_change: string;
+  active_requirement: RequirementArtifactView;
   evaluation: {
     decision: "pass" | "fail";
     justification: string;
@@ -262,6 +265,7 @@ export default function App() {
   const [selectedRole, setSelectedRole] = useState<ProjectRoleItem | null>(null);
   const [selectedRun, setSelectedRun] = useState<RunHistoryItem | null>(null);
   const [selectedArtifacts, setSelectedArtifacts] = useState<RunArtifactBundle | null>(null);
+  const [selectedRequirement, setSelectedRequirement] = useState<RequirementArtifactView | null>(null);
   const [selectedGovernance, setSelectedGovernance] = useState<GovernanceDetails | null>(null);
   const [artifactsBusy, setArtifactsBusy] = useState(false);
   const [runHistoryPage, setRunHistoryPage] = useState(1);
@@ -285,7 +289,7 @@ export default function App() {
   const roleRuntimeSteps = useMemo<RoleRuntimeStep[]>(() => {
     const currentIndex = resolveRoleRuntimeCurrentIndex(roundProgress.phase);
     const baseSteps: Array<Omit<RoleRuntimeStep, "status">> = [
-      { key: "planner", title: "Planner", description: "生成本轮子任务" },
+      { key: "planner", title: "Project Planner", description: "生成本轮子任务" },
       { key: "executor", title: "Executor", description: "执行任务并落地变更" },
       { key: "evaluator", title: "Evaluator", description: "核验结果并给出结论" },
       { key: "cooldown", title: "Cooldown", description: "收尾并等待下一轮" }
@@ -527,6 +531,7 @@ export default function App() {
     setRuns([]);
     setLogs([]);
     setSelectedRole(null);
+    setSelectedRequirement(null);
     setRuntimeConfig(null);
     setAuthError(null);
     setError(null);
@@ -639,7 +644,7 @@ export default function App() {
     }
   };
   useEffect(() => {
-    if (!selectedRun && !selectedArtifacts && !selectedRole && !isGoalDialogOpen) {
+    if (!selectedRun && !selectedArtifacts && !selectedRole && !selectedRequirement && !isGoalDialogOpen) {
       return;
     }
 
@@ -648,13 +653,14 @@ export default function App() {
         setSelectedRun(null);
         setSelectedArtifacts(null);
         setSelectedRole(null);
+        setSelectedRequirement(null);
         setIsGoalDialogOpen(false);
       }
     };
 
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [selectedRun, selectedArtifacts, selectedRole, isGoalDialogOpen]);
+  }, [selectedRun, selectedArtifacts, selectedRole, selectedRequirement, isGoalDialogOpen]);
 
   if (tokenRequired === null) {
     return (
@@ -775,6 +781,17 @@ export default function App() {
             </button>
           </div>
           <GoalMarkdown goal={goal} />
+        </div>
+
+        <div className="mt-4">
+          <RequirementSnapshotCard
+            artifact={status?.active_requirement ?? null}
+            onOpen={() => {
+              if (status?.active_requirement?.exists) {
+                setSelectedRequirement(status.active_requirement);
+              }
+            }}
+          />
         </div>
 
         <div className="mt-6 grid gap-2 md:grid-cols-4">
@@ -941,7 +958,7 @@ export default function App() {
               />
             </label>
             <label className="text-sm text-mist/80">
-              Planner Sandbox
+              Project Planner Sandbox
               <select
                 value={runtimeConfig.codex.plannerSandbox}
                 onChange={(event) =>
@@ -1367,6 +1384,41 @@ export default function App() {
         </div>
       ) : null}
 
+      {selectedRequirement ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/80 p-4"
+          onClick={() => setSelectedRequirement(null)}
+          role="presentation"
+        >
+          <article
+            className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-3xl border border-white/15 bg-panel/95 shadow-lift backdrop-blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-mist">
+                  {selectedRequirement.title || "Current Requirement"}
+                </h3>
+                <p className="mt-1 text-xs text-mist/60">{selectedRequirement.path}</p>
+              </div>
+              <button
+                onClick={() => setSelectedRequirement(null)}
+                className="rounded-lg border border-white/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-mist/70 transition hover:border-ember hover:text-ember"
+              >
+                Close
+              </button>
+            </div>
+            <div className="max-h-[75vh] overflow-auto px-5 py-4 text-sm text-mist/85">
+              <div className="markdown-body">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {selectedRequirement.markdown || "_No active requirement markdown available._"}
+                </ReactMarkdown>
+              </div>
+            </div>
+          </article>
+        </div>
+      ) : null}
+
       {selectedArtifacts ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-ink/80 p-4"
@@ -1455,6 +1507,18 @@ export default function App() {
                     </div>
                   </section>
                 ) : null}
+
+                <section>
+                  <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">Current Requirement Snapshot</h4>
+                  <RequirementSnapshotCard
+                    artifact={selectedArtifacts.active_requirement}
+                    onOpen={() => {
+                      if (selectedArtifacts.active_requirement?.exists) {
+                        setSelectedRequirement(selectedArtifacts.active_requirement);
+                      }
+                    }}
+                  />
+                </section>
 
                 {selectedGovernance && (
                   <section>

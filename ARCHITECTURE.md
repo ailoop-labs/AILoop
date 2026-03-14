@@ -18,7 +18,7 @@ The MVP follows five implementation principles derived from the product goal:
 
 1. **One measurable round at a time.** The system advances through small, atomic rounds instead of open-ended autonomous execution.
 2. **Control plane separated from execution plane.** UI and CLI issue commands, while the loop engine owns scheduling, budgets, and state transitions.
-3. **Planner, Executor, and Evaluator are distinct contracts.** Planning, acting, and judging must be swappable and independently testable.
+3. **Product definition, project planning, execution, and evaluation are distinct contracts.** Requirement shaping, round-level task selection, acting, and judging must be swappable and independently testable.
 4. **Artifacts are first-class outputs.** Each round must leave behind reviewable files that explain what happened.
 5. **Pause is the default safety response.** Budget breaches, repeated evaluator failures, crash recovery, and explicit human intervention all converge on a paused state.
 
@@ -28,7 +28,7 @@ The MVP follows five implementation principles derived from the product goal:
 
 - Single-run loop engine for one workspace.
 - File-based persistence under `AILOOP_HOME`.
-- Planner, Executor, and Evaluator agent contracts.
+- ProjectPlanner, optional ProductManager, Executor, and Evaluator agent contracts.
 - Tool registry abstraction for local shell, file, and HTTP tools.
 - Resource budget enforcement across cost, time, and action count.
 - Web console and CLI for start, pause, resume, stop, and instruct flows.
@@ -64,7 +64,7 @@ Primary responsibilities:
 - load persisted run state and pending operator instructions,
 - acquire run/workspace lock before mutating execution state,
 - schedule the next round when the run is eligible,
-- coordinate planner → executor → evaluator flow,
+- coordinate project-planner → executor → evaluator flow, with optional ProductManager activation when requirement artifacts need to be created or refreshed,
 - enforce cooldowns and pause rules,
 - request rollback when a round fails catastrophically,
 - write round artifacts and update run summaries.
@@ -73,12 +73,15 @@ Primary responsibilities:
 
 The agent layer contains multiple role-separated contracts, allowing planning, acting, judging, and governance to be independently managed:
 
-- **Planner** converts goal + history + operator instructions into exactly one atomic `SubTask`.
+- **ProjectPlanner** converts goal + history + operator instructions + current requirement artifacts into exactly one atomic `SubTask`. It owns round-level workflow progression.
+- **ProductManager** produces and refreshes human-readable Markdown requirement artifacts when product definition is missing, stale, or complete for the current slice.
 - **Executor** performs an observe → reason → act loop using registered tools until the `SubTask` succeeds, fails, or budget expires.
 - **Evaluator** verifies whether the observable state change satisfies the `SubTask` objective.
 - **Leader** intervenes when the loop is paused due to repeated failures, analyzing metrics (Friction Index) and providing strategic instructions or escalation.
 - **Designer** focuses on UI/UX, responsive layouts, and visual harmony, ensuring high-bandwidth UX.
 - **CCB Experts (Senior Dev, QA Lead, Product Owner)** provide specialized governance and consensus before any change to the core mission, architecture, or "Constitution" is permitted.
+
+The `ProductManager` is a runtime product-definition role. It is distinct from the governance-phase `Product Owner` CCB expert.
 
 ### 4.4 Tool Registry
 
@@ -129,8 +132,10 @@ It persists:
 flowchart TD
     User[Operator via CLI or Web Console] --> API[Control API]
     API --> Engine[Loop Engine]
-    Engine --> Planner[Planner Agent]
-    Planner --> Engine
+    Engine --> ProjectPlanner[ProjectPlanner Agent]
+    ProjectPlanner -->|Needs Product Definition| ProductManager[ProductManager Agent]
+    ProductManager --> ProjectPlanner
+    ProjectPlanner --> Engine
     Engine --> Executor[Executor Agent]
     Executor <--> Tools[Tool Registry]
     Executor --> Engine
@@ -146,10 +151,11 @@ Round flow:
 1. Operator starts or resumes a run.
 2. Engine loads state, checks lock, and confirms budgets remain available.
 3. Engine captures a pre-round snapshot when supported.
-4. Planner emits one atomic `SubTask`.
-5. Executor attempts the `SubTask` using registered tools.
-6. Evaluator checks objective versus observed state change.
-7. Engine writes artifacts, updates run state, and either enters cooldown, pause, or stop.
+4. ProjectPlanner decides whether the current requirement artifact is sufficient or whether ProductManager must refresh it.
+5. ProjectPlanner emits one atomic `SubTask`.
+6. Executor attempts the `SubTask` using registered tools.
+7. Evaluator checks objective versus observed state change.
+8. Engine writes artifacts, updates run state, and either enters cooldown, pause, or stop.
 
 ## 6. Loop State Machine
 
@@ -219,15 +225,18 @@ The engine:
 
 ### 7.2 Phase 1: Planning
 
-Planner input:
+ProjectPlanner input:
 
 - goal,
+- current requirement artifact summary,
 - current workspace state summary,
 - previous round outcome,
 - pending human instructions,
 - remaining round budget.
 
-Planner output is strict JSON matching the `SubTask` contract:
+If product definition is missing, stale, or complete for the current slice, the engine must invoke `ProductManager` before finalizing the round task. The primary `ProductManager` output is a human-readable Markdown requirement artifact.
+
+ProjectPlanner output is strict JSON matching the `SubTask` contract:
 
 ```json
 {
@@ -238,7 +247,7 @@ Planner output is strict JSON matching the `SubTask` contract:
 }
 ```
 
-The planner must never emit multiple tasks in one round.
+The ProjectPlanner must never emit multiple tasks in one round.
 
 ### 7.3 Phase 2: Execution
 
@@ -279,7 +288,7 @@ The engine writes all artifacts, updates metrics, records the current state, and
 
 ## 8. Core Contracts
 
-### 8.1 Planner Contract
+### 8.1 ProjectPlanner Contract
 
 ```ts
 type SubTask = {
@@ -297,7 +306,20 @@ Requirements:
 - JSON only,
 - no hidden multi-step plans.
 
-### 8.2 Executor Contract
+### 8.2 ProductManager Contract
+
+Primary output:
+
+- a Markdown requirement artifact for the active requirement slice
+
+Requirements:
+
+- human-readable first
+- defines scope, non-goals, and acceptance criteria
+- does not directly emit execution tasks
+- is invoked only when product definition needs to be created or refreshed
+
+### 8.3 Executor Contract
 
 ```ts
 type ToolResult = {
@@ -322,7 +344,7 @@ Requirements:
 - logs and artifacts redact secrets before persistence,
 - next-state hint is advisory to the engine.
 
-### 8.3 Evaluator Contract
+### 8.4 Evaluator Contract
 
 ```ts
 type EvaluationResult = {
@@ -339,7 +361,7 @@ Evaluator requirements:
 - tied to the round objective rather than superficial activity,
 - explicit justification on fail.
 
-### 8.4 Tool Contract
+### 8.5 Tool Contract
 
 ```ts
 type RegisteredTool = {

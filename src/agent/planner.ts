@@ -39,7 +39,29 @@ function hasNoDiffSignal(previousRoundError: string | null): boolean {
   return error.includes("no observable file creation or content diff") || error.includes("insufficient evidence");
 }
 
+export function resolvePlannerRequirementMode(
+  context: PlannerContext
+): "create_requirement" | "refresh_requirement" | "normal_execution" {
+  if (context.requirement_artifact_status === "missing") {
+    return "create_requirement";
+  }
+
+  if (context.requirement_artifact_status === "needs_refresh") {
+    return "refresh_requirement";
+  }
+
+  return "normal_execution";
+}
+
 export function buildAdaptivePlannerDirectives(context: PlannerContext): string[] {
+  const requirementMode = resolvePlannerRequirementMode(context);
+  if (requirementMode === "create_requirement" || requirementMode === "refresh_requirement") {
+    return [
+      "Do not continue normal code implementation until the active requirement artifact is available.",
+      `Direct this round toward ${requirementMode === "create_requirement" ? "creating" : "refreshing"} .ailoop/product-requirements/current.md first.`
+    ];
+  }
+
   const shouldForceImplementation =
     (context.consecutive_evaluator_failures > 0 || hasNoDiffSignal(context.previous_round_error)) &&
     !hasExplicitDocumentationRequest(context.instructions);
@@ -99,7 +121,9 @@ export function buildPlannerPrompt(
         budget: context.budget,
         previous_tool_result: context.previous_tool_result,
         previous_round_error: context.previous_round_error,
-        consecutive_evaluator_failures: context.consecutive_evaluator_failures
+        consecutive_evaluator_failures: context.consecutive_evaluator_failures,
+        requirement_artifact_status: context.requirement_artifact_status ?? "ready",
+        requirement_artifact_summary: context.requirement_artifact_summary ?? null
       },
       null,
       2
@@ -111,6 +135,7 @@ function fallbackPlan(context: PlannerContext): SubTask {
   const goal = context.goal.trim();
   const latestInstruction = context.instructions.at(-1)?.trim();
   const previousError = context.previous_tool_result?.error?.message?.trim();
+  const requirementMode = resolvePlannerRequirementMode(context);
 
   if (!goal) {
     return {
@@ -119,6 +144,20 @@ function fallbackPlan(context: PlannerContext): SubTask {
       objective: "Request clarification from the operator to populate .ailoop/README.md before continuing execution.",
       expected_outcome: "A human instruction is queued with concrete goal details.",
       impacted_files: [".ailoop/README.md"],
+      recommended_tools: ["read_file"]
+    };
+  }
+
+  if (requirementMode === "create_requirement" || requirementMode === "refresh_requirement") {
+    const needsRefresh = requirementMode === "refresh_requirement";
+    return {
+      rationale: needsRefresh
+        ? "The active requirement slice is no longer sufficient for safe execution, so product definition must be refreshed before implementation continues."
+        : "No active requirement slice exists, so product definition must be created before implementation continues.",
+      assignee: "executor",
+      objective: `${needsRefresh ? "Refresh" : "Create"} the active requirement artifact at .ailoop/product-requirements/current.md via the ProductManager before normal execution planning resumes.`,
+      expected_outcome: "The active requirement artifact exists as human-readable Markdown and is specific enough for the next atomic round.",
+      impacted_files: [".ailoop/product-requirements/current.md"],
       recommended_tools: ["read_file"]
     };
   }
@@ -217,11 +256,11 @@ export class PlannerAgent {
     const availableSkills = this.tools.getSkillManager().getAvailableSkills();
     const prompt = buildPlannerPrompt(context, adaptiveDirectives, plannerRoleDefinition, availableSkills);
 
-    emitLog("Planner started Codex planning.");
+    emitLog("ProjectPlanner started Codex planning.");
     const heartbeatStartedAt = Date.now();
     const heartbeat = setInterval(() => {
       const elapsedSeconds = Math.floor((Date.now() - heartbeatStartedAt) / 1000);
-      emitLog(`Planner running... ${elapsedSeconds}s elapsed.`);
+      emitLog(`ProjectPlanner running... ${elapsedSeconds}s elapsed.`);
     }, 15_000);
 
     const result = await this.codex
@@ -244,7 +283,7 @@ export class PlannerAgent {
       .finally(() => {
         clearInterval(heartbeat);
       });
-    emitLog(`Planner Codex planning finished (ok=${result.ok}).`);
+    emitLog(`ProjectPlanner Codex planning finished (ok=${result.ok}).`);
 
     if (!result.ok || !result.data) {
       return fallbackPlan(context);

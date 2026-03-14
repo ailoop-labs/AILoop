@@ -51,15 +51,22 @@ describe("ensureProjectRoleDefinitions", () => {
 
     let calls = 0;
     const mockCodex = {
-      async runJson<T>() {
+      async runJson<T>(options?: { prompt?: string }) {
         calls += 1;
+        expect(options?.prompt).toContain("project_architecture_md");
+        expect(options?.prompt).toContain("project_workflow_md");
         return {
           ok: true,
           data: {
             planner_role_md: "# Planner Role\n\nAI planner role",
+            product_manager_role_md: "# Product Manager Role\n\nAI product manager role",
             executor_role_md: "# Executor Role\n\nAI executor role",
             evaluator_role_md: "# Evaluator Role\n\nAI evaluator role",
-            leader_role_md: "# Leader Role\n\nAI leader role"
+            leader_role_md: "# Leader Role\n\nAI leader role",
+            designer_role_md: "# Designer Role\n\nAI designer role",
+            senior_dev_role_md: "# Senior Dev Role\n\nAI senior dev role",
+            qa_lead_role_md: "# QA Lead Role\n\nAI qa lead role",
+            product_owner_role_md: "# Product Owner Role\n\nAI product owner role"
           } as T,
           rawMessage: "{}",
           stdout: "",
@@ -76,6 +83,7 @@ describe("ensureProjectRoleDefinitions", () => {
 
     expect(calls).toBe(1);
     expect(await fs.readFile(path.join(homeDir, "PLANNER_ROLE.md"), "utf8")).toContain("AI planner role");
+    expect(await fs.readFile(path.join(homeDir, "PRODUCT_MANAGER_ROLE.md"), "utf8")).toContain("AI product manager role");
     expect(await fs.readFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "utf8")).toContain("AI executor role");
     expect(await fs.readFile(path.join(homeDir, "EVALUATOR_ROLE.md"), "utf8")).toContain("AI evaluator role");
 
@@ -87,6 +95,7 @@ describe("ensureProjectRoleDefinitions", () => {
     const homeDir = path.join(workspaceRoot, ".ailoop");
     await fs.mkdir(homeDir, { recursive: true });
     await fs.writeFile(path.join(homeDir, "PLANNER_ROLE.md"), "# Planner Role\n\nEXISTING", "utf8");
+    await fs.writeFile(path.join(homeDir, "PRODUCT_MANAGER_ROLE.md"), "# Product Manager Role\n\nEXISTING", "utf8");
     await fs.writeFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "# Executor Role\n\nEXISTING", "utf8");
     await fs.writeFile(path.join(homeDir, "EVALUATOR_ROLE.md"), "# Evaluator Role\n\nEXISTING", "utf8");
     await fs.writeFile(path.join(homeDir, "LEADER_ROLE.md"), "# Leader Role\n\nEXISTING", "utf8");
@@ -117,6 +126,7 @@ describe("ensureProjectRoleDefinitions", () => {
 
     expect(calls).toBe(0);
     expect(await fs.readFile(path.join(homeDir, "PLANNER_ROLE.md"), "utf8")).toContain("EXISTING");
+    expect(await fs.readFile(path.join(homeDir, "PRODUCT_MANAGER_ROLE.md"), "utf8")).toContain("EXISTING");
 
     await fs.rm(workspaceRoot, { recursive: true, force: true });
   });
@@ -126,6 +136,7 @@ describe("ensureProjectRoleDefinitions", () => {
     const homeDir = path.join(workspaceRoot, ".ailoop");
     await fs.mkdir(homeDir, { recursive: true });
     await fs.writeFile(path.join(homeDir, "PLANNER_ROLE.md"), "# Planner Role\n\nOLD", "utf8");
+    await fs.writeFile(path.join(homeDir, "PRODUCT_MANAGER_ROLE.md"), "# Product Manager Role\n\nOLD", "utf8");
     await fs.writeFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "# Executor Role\n\nOLD", "utf8");
     await fs.writeFile(path.join(homeDir, "EVALUATOR_ROLE.md"), "# Evaluator Role\n\nOLD", "utf8");
     await fs.writeFile(path.join(homeDir, "LEADER_ROLE.md"), "# Leader Role\n\nOLD", "utf8");
@@ -136,9 +147,14 @@ describe("ensureProjectRoleDefinitions", () => {
           ok: true,
           data: {
             planner_role_md: "# Planner Role\n\nNEW",
+            product_manager_role_md: "# Product Manager Role\n\nNEW",
             executor_role_md: "# Executor Role\n\nNEW",
             evaluator_role_md: "# Evaluator Role\n\nNEW",
-            leader_role_md: "# Leader Role\n\nNEW"
+            leader_role_md: "# Leader Role\n\nNEW",
+            designer_role_md: "# Designer Role\n\nNEW",
+            senior_dev_role_md: "# Senior Dev Role\n\nNEW",
+            qa_lead_role_md: "# QA Lead Role\n\nNEW",
+            product_owner_role_md: "# Product Owner Role\n\nNEW"
           } as T,
           rawMessage: "{}",
           stdout: "",
@@ -154,6 +170,7 @@ describe("ensureProjectRoleDefinitions", () => {
     });
 
     expect(await fs.readFile(path.join(homeDir, "PLANNER_ROLE.md"), "utf8")).toContain("NEW");
+    expect(await fs.readFile(path.join(homeDir, "PRODUCT_MANAGER_ROLE.md"), "utf8")).toContain("NEW");
     expect(await fs.readFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "utf8")).toContain("NEW");
     expect(await fs.readFile(path.join(homeDir, "EVALUATOR_ROLE.md"), "utf8")).toContain("NEW");
 
@@ -183,7 +200,8 @@ describe("ensureProjectRoleDefinitions", () => {
       codexClient: mockCodex as never
     });
 
-    expect(await fs.readFile(path.join(homeDir, "PLANNER_ROLE.md"), "utf8")).toContain("Product Manager (Planner) Role");
+    expect(await fs.readFile(path.join(homeDir, "PLANNER_ROLE.md"), "utf8")).toContain("Project Planner Role");
+    expect(await fs.readFile(path.join(homeDir, "PRODUCT_MANAGER_ROLE.md"), "utf8")).toContain("Product Manager Role");
     expect(await fs.readFile(path.join(homeDir, "DESIGNER_ROLE.md"), "utf8")).toContain("UI/UX Designer Role");
     expect(await fs.readFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "utf8")).toContain("Project Executor Role");
     expect(await fs.readFile(path.join(homeDir, "EVALUATOR_ROLE.md"), "utf8")).toContain("Project Evaluator Role");
@@ -199,6 +217,7 @@ describe("ensureProjectRoleDefinitions", () => {
     // Write initial README, role files, and an old source hash
     await fs.writeFile(path.join(workspaceRoot, "README.md"), "# Old README\n", "utf8");
     await fs.writeFile(path.join(homeDir, "PLANNER_ROLE.md"), "# Planner\n\nOLD", "utf8");
+    await fs.writeFile(path.join(homeDir, "PRODUCT_MANAGER_ROLE.md"), "# Product Manager\n\nOLD", "utf8");
     await fs.writeFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "# Executor\n\nOLD", "utf8");
     await fs.writeFile(path.join(homeDir, "EVALUATOR_ROLE.md"), "# Evaluator\n\nOLD", "utf8");
     await fs.writeFile(path.join(homeDir, "LEADER_ROLE.md"), "# Leader\n\nOLD", "utf8");
@@ -219,6 +238,7 @@ describe("ensureProjectRoleDefinitions", () => {
           ok: true,
           data: {
             planner_role_md: "# Planner\n\nREFRESHED",
+            product_manager_role_md: "# Product Manager\n\nREFRESHED",
             executor_role_md: "# Executor\n\nREFRESHED",
             evaluator_role_md: "# Evaluator\n\nREFRESHED",
             leader_role_md: "# Leader\n\nREFRESHED",
@@ -241,9 +261,10 @@ describe("ensureProjectRoleDefinitions", () => {
     });
 
     expect(calls).toBe(1);
-    expect(result.generated.length).toBe(8);
+    expect(result.generated.length).toBe(9);
     expect(result.source).toBe("ai");
     expect(await fs.readFile(path.join(homeDir, "PLANNER_ROLE.md"), "utf8")).toContain("REFRESHED");
+    expect(await fs.readFile(path.join(homeDir, "PRODUCT_MANAGER_ROLE.md"), "utf8")).toContain("REFRESHED");
     expect(await fs.readFile(path.join(homeDir, "LEADER_ROLE.md"), "utf8")).toContain("REFRESHED");
 
     // Hash file should now be updated
@@ -268,6 +289,7 @@ describe("ensureProjectRoleDefinitions", () => {
     // Write role files and a matching hash
     const matchingHash = computeSourceHash(readmeContent, goalContent);
     await fs.writeFile(path.join(homeDir, "PLANNER_ROLE.md"), "# Planner\n\nEXISTING", "utf8");
+    await fs.writeFile(path.join(homeDir, "PRODUCT_MANAGER_ROLE.md"), "# Product Manager\n\nEXISTING", "utf8");
     await fs.writeFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "# Executor\n\nEXISTING", "utf8");
     await fs.writeFile(path.join(homeDir, "EVALUATOR_ROLE.md"), "# Evaluator\n\nEXISTING", "utf8");
     await fs.writeFile(path.join(homeDir, "LEADER_ROLE.md"), "# Leader\n\nEXISTING", "utf8");
@@ -300,13 +322,13 @@ describe("ensureProjectRoleDefinitions", () => {
     // Codex should NOT be called since hash matches
     expect(calls).toBe(0);
     expect(result.source).toBe("none");
-    expect(result.skipped.length).toBe(8);
+    expect(result.skipped.length).toBe(9);
     expect(result.generated.length).toBe(0);
 
     // Roles should remain unchanged
     expect(await fs.readFile(path.join(homeDir, "PLANNER_ROLE.md"), "utf8")).toContain("EXISTING");
+    expect(await fs.readFile(path.join(homeDir, "PRODUCT_MANAGER_ROLE.md"), "utf8")).toContain("EXISTING");
 
     await fs.rm(workspaceRoot, { recursive: true, force: true });
   });
 });
-

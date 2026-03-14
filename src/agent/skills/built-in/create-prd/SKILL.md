@@ -44,5 +44,5 @@ When asked to draft a PRD, structure your output using these sections:
 *   Phases (e.g., Internal Dogfooding -> Beta -> GA).
 *   GTM strategy or user communication.
 
-## Instructions for Product Manager (Planner)
-Use this template when rewriting or expanding the `GOAL.md` or when instructed to formally document a new feature request. Ensure you validate assumptions before writing the final draft.
+## Instructions for Product Manager
+Use this template when the Product Manager role needs to rewrite or expand the active requirement slice from `GOAL.md` and related project context. Ensure assumptions are validated before writing the final draft.

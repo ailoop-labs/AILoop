@@ -18,13 +18,18 @@ This document complements the product and system documentation (`README.md` and 
 
 The system consists of several highly specialized core Agents. Each Agent operates within a specific sandbox environment and permission level. They can be customized at the project level via role definition files (e.g., `PLANNER_ROLE.md`) in the `.ailoop/` directory:
 
-* **PlannerAgent (The Strategist)**
-  * **Responsibility**: Acts as the Product Manager (Planning). Based on the overarching goal (`Goal`) and the history (including failure reasons or human instructions), it formulates an atomic sub-task (`SubTask`) to be executed in the current round.
+* **ProjectPlannerAgent (The Strategist / Workflow Owner)**
+  * **Responsibility**: Acts as the round-level project planning role. Based on the overarching goal (`Goal`), current requirement artifacts, and the history (including failure reasons or human instructions), it determines the next smallest meaningful unit of work for the current round and formulates one atomic sub-task (`SubTask`).
   * **Permissions**: Read-only. It does not modify any code; it only observes and decides.
   * **Output**: A JSON-formatted task execution plan containing detailed `rationale`, `objective`, and `expected_outcome`.
 
+* **ProductManagerAgent (The Product Definer)** *(Used when product definition is missing or exhausted)*
+  * **Responsibility**: Produces and updates human-readable product requirement documents. It defines user value, scope, non-goals, acceptance criteria, and design expectations for the current requirement slice.
+  * **Permissions**: Read-only by default, or workspace-write only for creating approved Markdown requirement artifacts.
+  * **Output**: A Markdown requirement document used by the `ProjectPlannerAgent` as upstream planning input.
+
 * **ExecutorAgent (The Doer)**
-  * **Responsibility**: Receives the sub-task from the Planner and uses tools (e.g., writing files, executing shell commands) in a ReAct (Reason + Act) loop to accomplish the task. It must verify the target state before execution and perform tests/validation afterward.
+  * **Responsibility**: Receives the sub-task from the ProjectPlanner and uses tools (e.g., writing files, executing shell commands) in a ReAct (Reason + Act) loop to accomplish the task. It must verify the target state before execution and perform tests/validation afterward.
   * **Permissions**: Danger-full-access (Highest execution permission).
   * **Characteristics**: Subject to strict limits on the number of actions, time, and budget. Must proactively attempt to fix errors when they occur.
 
@@ -50,6 +55,11 @@ The system consists of several highly specialized core Agents. Each Agent operat
 * **ProductOwnerAgent / CCB (Product Owner Expert)** *(Used in governance phases)*
   * **Responsibility**: Acts as the business value expert on the CCB. Protects the core product value and rejects any architectural or UI changes that reduce the system's observability to humans (violating the High-Bandwidth UX mandate).
 
+Note on terminology:
+
+- `ProductManagerAgent` is a runtime product-definition role used to write and refresh requirement artifacts.
+- `ProductOwnerAgent` remains a governance-phase CCB expert and is not the same role.
+
 ## 2. Core Principles for All Agents
 
 * **Deterministic Fallback**: When encountering unsolvable tool errors or missing context, agents must gracefully stop and request human intervention. Blind guessing is strictly prohibited.
@@ -70,8 +80,10 @@ The transition of each "Round" strictly follows this lifecycle, orchestrated by 
 
 ### Phase 2: Plan
 1. The engine collects the current workspace Snapshot (file tree state) and accumulated changes (Diff).
-2. Invokes the **PlannerAgent**.
-3. The Planner analyzes the goal, history, and intervention instructions to output a clear, JSON-formatted `SubTask`.
+2. Invokes the **ProjectPlannerAgent**.
+3. The ProjectPlanner analyzes the goal, history, intervention instructions, and current requirement artifacts.
+4. If product requirements are missing, stale, or exhausted, the ProjectPlanner wakes the **ProductManagerAgent** to produce or refresh the requirement Markdown for the next requirement slice.
+5. The ProjectPlanner then outputs a clear, JSON-formatted `SubTask` for the current round.
 
 ### Phase 3: Execute
 1. The engine passes the `SubTask` to the **ExecutorAgent**.
@@ -99,9 +111,9 @@ The transition of each "Round" strictly follows this lifecycle, orchestrated by 
 
 If a human operator manually modifies the codebase or infrastructure outside the autonomous loop to fix a bug or advance a goal:
 1. **Mandatory Notification**: The operator MUST provide a brief summary of the changes to `instructions.queue.json`.
-2. **Agent Behavior**: The Planner and Leader MUST prioritize these intervention instructions to align their "memory" (internal state history) with the current codebase "reality."
+2. **Agent Behavior**: The ProjectPlanner and Leader MUST prioritize these intervention instructions to align their "memory" (internal state history) with the current codebase "reality." If the manual change materially alters product scope or acceptance criteria, the ProjectPlanner should refresh the requirement artifact through the ProductManager before resuming normal implementation rounds.
 3. **Verification**: Before proceeding to the next architectural goal, the Agent should first verify the manual fix (e.g., by running tests).
 4. **Escalation Triggers**: Agents will proactively request human assistance when: they continuously fail to resolve the same error, lack necessary context, face destructive instruction conflicts, or lack required tools.
 
 ## 5. Design Philosophy
-This workflow implements the principle of **Separation of Decision and Execution**. The Planner cannot write code, the Executor does not evaluate its own results, and the Evaluator acts as an independent third party for quality control, ensuring high Causal Validity for every code change. When the machine cannot close the loop, it requests human intervention through the Leader and CCB mechanisms, ensuring the system never enters an out-of-control infinite loop.
+This workflow implements the principle of **Separation of Product Definition, Delivery Planning, and Execution**. The ProductManager defines requirements, the ProjectPlanner decides the next round-level task, the Executor does not evaluate its own results, and the Evaluator acts as an independent third party for quality control, ensuring high Causal Validity for every code change. When the machine cannot close the loop, it requests human intervention through the Leader and CCB mechanisms, ensuring the system never enters an out-of-control infinite loop.

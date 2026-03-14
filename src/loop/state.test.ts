@@ -15,8 +15,11 @@ describe("loop state persistence", () => {
   test("buildLoopPaths includes project role definition paths and canonical instruction queue path", () => {
     const paths = buildLoopPaths("/tmp/ailoop-home");
     expect(paths.plannerRolePath).toBe("/tmp/ailoop-home/PLANNER_ROLE.md");
+    expect(paths.productManagerRolePath).toBe("/tmp/ailoop-home/PRODUCT_MANAGER_ROLE.md");
     expect(paths.executorRolePath).toBe("/tmp/ailoop-home/EXECUTOR_ROLE.md");
     expect(paths.evaluatorRolePath).toBe("/tmp/ailoop-home/EVALUATOR_ROLE.md");
+    expect(paths.productRequirementsDirPath).toBe("/tmp/ailoop-home/product-requirements");
+    expect(paths.activeRequirementPath).toBe("/tmp/ailoop-home/product-requirements/current.md");
     expect(paths.instructionsPath).toBe("/tmp/ailoop-home/instructions.queue.json");
     expect(paths.legacyInstructionsPath).toBe("/tmp/ailoop-home/instructions.json");
   });

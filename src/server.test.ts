@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { AppConfig } from "./config/env";
 import { readRuntimeLoopConfig, saveRuntimeLoopConfig } from "./config/runtime";
 import { buildLoopPaths, defaultLoopState, readLoopState, writeLoopState } from "./loop/state";
+import { writeActiveRequirementArtifact } from "./product/requirements";
 
 const ENV_KEYS = [
   "AILOOP_CONSOLE_ADMIN_TOKEN",
@@ -551,6 +552,59 @@ describe("console server API contract", () => {
     expect(body.updated_at).toEqual(expect.any(String));
     expect((await readLoopState(paths)).state).toBe("paused");
     expect(config.homeDir).toBe(paths.homeDir);
+  });
+
+  test("returns the active requirement snapshot inside authenticated loop status responses", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "paused",
+      round: 4
+    });
+    await writeActiveRequirementArtifact(
+      paths,
+      [
+        "# Requirement Slice: Operator Clarity",
+        "",
+        "## Problem",
+        "Operators need to inspect the active requirement without leaving the console.",
+        "",
+        "## Acceptance Criteria",
+        "- The status API exposes the current requirement summary.",
+        "- The console can render the full requirement markdown."
+      ].join("\n")
+    );
+
+    const response = await fetchHandler(createAuthorizedRequest("http://console.test/api/status", token));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      state: "paused",
+      round: 4,
+      pid: null,
+      pid_alive: false,
+      last_error: null,
+      consecutive_evaluator_failures: 0,
+      previous_tool_result: null,
+      current_budget: null,
+      updated_at: expect.any(String),
+      active_requirement: {
+        path: paths.activeRequirementPath,
+        exists: true,
+        artifact_status: "ready",
+        lifecycle_status: "active",
+        title: "Requirement Slice: Operator Clarity",
+        summary: "Operators need to inspect the active requirement without leaving the console.",
+        acceptance_criteria_total: 2,
+        acceptance_criteria_completed: 0,
+        markdown: expect.stringContaining("# Requirement Slice: Operator Clarity"),
+        updated_at: expect.any(String)
+      }
+    });
   });
 
   test("returns runtime config overrides for authenticated requests", async () => {
@@ -1111,6 +1165,18 @@ describe("console server API contract", () => {
       log: "OPENAI_API_KEY=[REDACTED]\n",
       stateChange: "+SESSION_SECRET=[REDACTED]\n"
     });
+    await writeActiveRequirementArtifact(
+      paths,
+      [
+        "# Requirement Slice: Artifact Visibility",
+        "",
+        "## Problem",
+        "Operators need the selected run report to show the current requirement context.",
+        "",
+        "## Acceptance Criteria",
+        "- The run artifact bundle returns the active requirement snapshot."
+      ].join("\n")
+    );
 
     const response = await fetchHandler(
       createAuthorizedRequest(`http://console.test/api/runs/${timestamp}/artifacts`, token)
@@ -1132,6 +1198,18 @@ describe("console server API contract", () => {
       },
       log: "OPENAI_API_KEY=[REDACTED]\n",
       state_change: "+SESSION_SECRET=[REDACTED]\n",
+      active_requirement: {
+        path: paths.activeRequirementPath,
+        exists: true,
+        artifact_status: "ready",
+        lifecycle_status: "active",
+        title: "Requirement Slice: Artifact Visibility",
+        summary: "Operators need the selected run report to show the current requirement context.",
+        acceptance_criteria_total: 1,
+        acceptance_criteria_completed: 0,
+        markdown: expect.stringContaining("# Requirement Slice: Artifact Visibility"),
+        updated_at: expect.any(String)
+      },
       governance: {
         leader: null,
         ccb: null
@@ -1211,6 +1289,18 @@ describe("console server API contract", () => {
       },
       log: "round log\n",
       state_change: "+state change\n",
+      active_requirement: {
+        path: paths.activeRequirementPath,
+        exists: false,
+        artifact_status: "missing",
+        lifecycle_status: "active",
+        title: null,
+        summary: null,
+        acceptance_criteria_total: 0,
+        acceptance_criteria_completed: 0,
+        markdown: null,
+        updated_at: null
+      },
       governance: {
         leader: {
           rationale: "Retry with a narrower API patch.",
@@ -1279,6 +1369,18 @@ describe("console server API contract", () => {
       },
       log: "sessionSecret=[REDACTED]\n",
       state_change: "+apiToken=[REDACTED]\n",
+      active_requirement: {
+        path: paths.activeRequirementPath,
+        exists: false,
+        artifact_status: "missing",
+        lifecycle_status: "active",
+        title: null,
+        summary: null,
+        acceptance_criteria_total: 0,
+        acceptance_criteria_completed: 0,
+        markdown: null,
+        updated_at: null
+      },
       governance: {
         leader: null,
         ccb: null

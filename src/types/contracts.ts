@@ -73,6 +73,30 @@ export interface PlannerContext {
   previous_tool_result: ToolResult | null;
   previous_round_error: string | null;
   consecutive_evaluator_failures: number;
+  requirement_artifact_status?: "missing" | "ready" | "needs_refresh";
+  requirement_artifact_summary?: string | null;
+}
+
+export interface ProductManagerContext {
+  goal: string;
+  instructions: string[];
+  round: number;
+  current_requirement_markdown: string | null;
+  previous_tool_result: ToolResult | null;
+  previous_round_error: string | null;
+}
+
+export interface RequirementArtifactSnapshot {
+  path: string;
+  exists: boolean;
+  artifact_status: "missing" | "ready" | "needs_refresh";
+  lifecycle_status: "active" | "complete";
+  title: string | null;
+  summary: string | null;
+  acceptance_criteria_total: number;
+  acceptance_criteria_completed: number;
+  markdown: string | null;
+  updated_at: string | null;
 }
 
 export interface LeaderContext {
@@ -109,7 +133,10 @@ export interface LoopPaths {
   homeDir: string;
   runsDir: string;
   taskPath: string;
+  productRequirementsDirPath: string;
+  activeRequirementPath: string;
   plannerRolePath: string;
+  productManagerRolePath: string;
   executorRolePath: string;
   designerRolePath: string;
   evaluatorRolePath: string;
@@ -152,7 +179,7 @@ export interface BudgetUsage {
   elapsedMs: number;
 }
 
-export type AgentRole = "planner" | "executor" | "evaluator" | "leader" | "designer" | "senior_dev" | "qa_lead" | "product_owner";
+export type AgentRole = "planner" | "product_manager" | "executor" | "evaluator" | "leader" | "designer" | "senior_dev" | "qa_lead" | "product_owner";
 
 export type EvaluationDimension = string;
 

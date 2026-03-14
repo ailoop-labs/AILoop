@@ -45,6 +45,6 @@ The database is currently hitting 90% CPU load during peak hours due to repeated
 2.  Integration test proves that updating a profile clears the corresponding Redis key.
 3.  Load testing script shows API response under 50ms for cached profiles.
 
-## Instructions for Product Manager (Planner)
-When you are analyzing the `GOAL.md` and creating a task for the current round, always structure your output logic internally using the WWA framework. 
-This ensures the Executor knows *why* it's doing the task, *what* exact files/logic to change, and how the Evaluator will verify the *acceptance*.
+## Instructions for Project Planner and Product Manager
+When the Product Manager is shaping a requirement slice or the Project Planner is deriving the next round from that slice, use the WWA framework internally.
+This keeps the requirement and the round task aligned on *why* the work matters, *what* the intended end state is, and how the Evaluator will verify *acceptance*.

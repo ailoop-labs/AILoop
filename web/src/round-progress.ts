@@ -9,7 +9,7 @@ export interface RoundProgressInput {
 export interface RoundProgressView {
   roundLabel: string;
   percent: number;
-  role: "Planner" | "Executor" | "Evaluator" | "System";
+  role: "Project Planner" | "Executor" | "Evaluator" | "System";
   phase: "idle" | "starting" | "planner" | "executor" | "evaluator" | "cooldown" | "paused" | "stopping" | "error";
   step: string;
 }
@@ -206,26 +206,30 @@ export function deriveRoundProgress(input: RoundProgressInput): RoundProgressVie
     };
   }
 
-  if (normalizedLogs.some((line) => line.includes("Planner Codex planning finished"))) {
+  if (
+    normalizedLogs.some((line) => line.includes("ProjectPlanner Codex planning finished")) ||
+    normalizedLogs.some((line) => line.includes("Planner Codex planning finished"))
+  ) {
     return {
       roundLabel,
       percent: 35,
-      role: "Planner",
+      role: "Project Planner",
       phase: "planner",
-      step: "Planner produced next sub-task"
+      step: "Project Planner produced next sub-task"
     };
   }
 
   if (
+    normalizedLogs.some((line) => line.includes("ProjectPlanner started Codex planning")) ||
     normalizedLogs.some((line) => line.includes("Planner started Codex planning")) ||
     normalizedLogs.some((line) => line.startsWith("[planner] "))
   ) {
     return {
       roundLabel,
       percent: 20,
-      role: "Planner",
+      role: "Project Planner",
       phase: "planner",
-      step: "Planner is planning next sub-task"
+      step: "Project Planner is planning next sub-task"
     };
   }
 

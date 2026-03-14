@@ -8,7 +8,11 @@ RUN_DIR=".ailoop"
 PID_FILE="$RUN_DIR/prod.server.pid"
 LOG_FILE="$RUN_DIR/prod.server.log"
 TOKEN_CACHE_FILE="$RUN_DIR/console.admin.token.cache"
+START_LOCK_DIR="$RUN_DIR/prod.server.start.lock"
+CONSOLE_PORT="${AILOOP_CONSOLE_PORT:-3090}"
 STOP_TIMEOUT_SECONDS="${AILOOP_PROD_STOP_TIMEOUT_SECONDS:-20}"
+START_LOCK_WAIT_SECONDS="${AILOOP_PROD_START_LOCK_WAIT_SECONDS:-30}"
+STARTUP_TIMEOUT_SECONDS="${AILOOP_PROD_STARTUP_TIMEOUT_SECONDS:-20}"
 BUN_BIN="$(command -v bun)"
 
 if [[ -z "$BUN_BIN" ]]; then
@@ -20,6 +24,80 @@ if ! [[ "$STOP_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
   echo "AILOOP_PROD_STOP_TIMEOUT_SECONDS must be a non-negative integer."
   exit 1
 fi
+
+if ! [[ "$START_LOCK_WAIT_SECONDS" =~ ^[0-9]+$ ]]; then
+  echo "AILOOP_PROD_START_LOCK_WAIT_SECONDS must be a non-negative integer."
+  exit 1
+fi
+
+if ! [[ "$STARTUP_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
+  echo "AILOOP_PROD_STARTUP_TIMEOUT_SECONDS must be a non-negative integer."
+  exit 1
+fi
+
+release_start_lock() {
+  if [[ ! -d "$START_LOCK_DIR" ]]; then
+    return 0
+  fi
+
+  local lock_pid=""
+  if [[ -f "$START_LOCK_DIR/pid" ]]; then
+    read -r lock_pid <"$START_LOCK_DIR/pid" || true
+  fi
+
+  if [[ -z "$lock_pid" || "$lock_pid" == "$$" ]]; then
+    rm -rf "$START_LOCK_DIR"
+  fi
+}
+
+acquire_start_lock() {
+  mkdir -p "$RUN_DIR"
+  local deadline=$((SECONDS + START_LOCK_WAIT_SECONDS))
+
+  while true; do
+    if mkdir "$START_LOCK_DIR" 2>/dev/null; then
+      printf "%s\n" "$$" >"$START_LOCK_DIR/pid"
+      trap release_start_lock EXIT
+      return 0
+    fi
+
+    local lock_pid=""
+    if [[ -f "$START_LOCK_DIR/pid" ]]; then
+      read -r lock_pid <"$START_LOCK_DIR/pid" || true
+    fi
+
+    if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" >/dev/null 2>&1; then
+      rm -rf "$START_LOCK_DIR"
+      continue
+    fi
+
+    if (( SECONDS >= deadline )); then
+      echo "Timed out waiting for the production server startup lock."
+      exit 1
+    fi
+
+    sleep 0.2
+  done
+}
+
+wait_for_server_start() {
+  local server_pid="$1"
+  local deadline=$((SECONDS + STARTUP_TIMEOUT_SECONDS))
+
+  while (( SECONDS < deadline )); do
+    if ! kill -0 "$server_pid" >/dev/null 2>&1; then
+      return 1
+    fi
+
+    if curl -fsS "http://127.0.0.1:${CONSOLE_PORT}/api/health" >/dev/null 2>&1; then
+      return 0
+    fi
+
+    sleep 0.2
+  done
+
+  return 1
+}
 
 graceful_stop_server() {
   if [[ ! -f "$PID_FILE" ]]; then
@@ -77,7 +155,7 @@ if [[ "$MODE" == "restart" ]]; then
 fi
 
 if [[ "$MODE" == "daemon" ]]; then
-  mkdir -p "$RUN_DIR"
+  acquire_start_lock
   if [[ -f "$PID_FILE" ]]; then
     existing_pid="$(cat "$PID_FILE")"
     if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" >/dev/null 2>&1; then
@@ -160,15 +238,15 @@ fi
 
 bun run web:build
 
-# Kill any process occupying port 3090 before starting
-port_pids=$(lsof -t -i:3090 2>/dev/null || true)
+# Kill any process occupying the configured console port before starting
+port_pids=$(lsof -t -i:"${CONSOLE_PORT}" 2>/dev/null || true)
 if [[ -n "$port_pids" ]]; then
-  echo "Port 3090 is in use. Killing process(es) ($port_pids)..."
+  echo "Port ${CONSOLE_PORT} is in use. Killing process(es) ($port_pids)..."
   echo "$port_pids" | xargs kill -9 2>/dev/null || true
   sleep 1
 fi
 
-echo "AILoop Production server is running at http://127.0.0.1:3090"
+echo "AILoop Production server is running at http://127.0.0.1:${CONSOLE_PORT}"
 echo "Use the web console for all loop operations and parameter settings."
 
 if [[ "$MODE" == "daemon" ]]; then
@@ -177,7 +255,13 @@ if [[ "$MODE" == "daemon" ]]; then
   nohup bun run src/server.ts >>"$LOG_FILE" 2>&1 < /dev/null &
   server_pid="$!"
   echo "$server_pid" >"$PID_FILE"
-  
+
+  if ! wait_for_server_start "$server_pid"; then
+    rm -f "$PID_FILE"
+    echo "Production server failed to become healthy on port ${CONSOLE_PORT}. Check ${LOG_FILE}."
+    exit 1
+  fi
+
   echo "Started in background daemon mode."
   echo "PID: $server_pid"
   echo "Log: $LOG_FILE"

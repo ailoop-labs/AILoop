@@ -6,12 +6,19 @@ import type { AppConfig } from "../config/env";
 import { ExecutorAgent } from "../agent/executor";
 import { DesignerAgent } from "../agent/designer";
 import { Guardrails, BudgetBreachError } from "../agent/guardrails";
-import { PlannerAgent } from "../agent/planner";
+import { PlannerAgent, resolvePlannerRequirementMode } from "../agent/planner";
 import { LeaderAgent } from "../agent/leader";
+import { ProductManagerAgent } from "../agent/product-manager";
 import { CCBSession } from "./ccb";
 import { UIEvaluator } from "../evaluation/strategies/ui-evaluator";
 import { ToolRegistry } from "../agent/tool-registry";
 import { WorkspaceManager } from "../environment/workspace";
+import { readActiveRequirementArtifact, writeActiveRequirementArtifact } from "../product/requirements";
+import {
+  assessRequirementCompletion,
+  getRequirementLifecycleStatus,
+  upsertRequirementLifecycleStatus
+} from "../planning/requirement-completion";
 import { createEvaluator } from "../evaluation/evaluator";
 import {
   writeMetricsFile,
@@ -82,6 +89,29 @@ interface OperationalEvidence {
 type CommandRunner = (command: string) => Promise<ExecResult>;
 type HealthChecker = () => Promise<HealthCheckResult>;
 
+function summarizeRequirementArtifact(markdown: string | null): string | null {
+  if (!markdown?.trim()) {
+    return null;
+  }
+
+  return markdown
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 6)
+    .join(" ")
+    .slice(0, 240);
+}
+
+function resolveRequirementArtifactStatus(markdown: string | null): "missing" | "ready" | "needs_refresh" {
+  if (!markdown?.trim()) {
+    return "missing";
+  }
+
+  return getRequirementLifecycleStatus(markdown) === "complete" ? "needs_refresh" : "ready";
+}
+
 function isPathInside(root: string, candidate: string): boolean {
   const relative = path.relative(root, candidate);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
@@ -104,6 +134,17 @@ function extractPathTokens(text: string): string[] {
     if (value) tokens.push(value);
   }
   return tokens;
+}
+
+function subTaskRequestsRequirementArtifact(subTask: SubTask): boolean {
+  if (subTask.impacted_files.includes(".ailoop/product-requirements/current.md")) {
+    return true;
+  }
+
+  const combined = `${subTask.objective} ${subTask.expected_outcome}`.toLowerCase();
+  return combined.includes(".ailoop/product-requirements/current.md") && combined.includes("productmanager")
+    ? true
+    : combined.includes(".ailoop/product-requirements/current.md") && combined.includes("product manager");
 }
 
 function resolveSnapshotToken(token: string, workspaceRoot: string): string {
@@ -191,11 +232,15 @@ function withOperationalEvidence(toolResult: ToolResult, evidence: OperationalEv
   };
 }
 
-function appendOperationalEvidenceToStateChange(stateChange: string, notes: string[]): string {
+function appendNotesToStateChange(stateChange: string, heading: string, notes: string[]): string {
   if (notes.length === 0) return stateChange;
   const trimmed = stateChange.trimEnd();
   const prefix = trimmed ? `${trimmed}\n\n` : "";
-  return `${prefix}### Operational Follow-up\n${notes.join("\n")}\n`;
+  return `${prefix}### ${heading}\n${notes.join("\n")}\n`;
+}
+
+function appendOperationalEvidenceToStateChange(stateChange: string, notes: string[]): string {
+  return appendNotesToStateChange(stateChange, "Operational Follow-up", notes);
 }
 
 async function checkConsoleHealth(consolePort: number): Promise<HealthCheckResult> {
@@ -290,6 +335,7 @@ export async function collectOperationalEvidence(
 export class LoopEngine {
   private readonly paths;
   private readonly planner: PlannerAgent;
+  private readonly productManager: ProductManagerAgent;
   private readonly tools: ToolRegistry;
   private readonly executor: ExecutorAgent;
   private readonly designer: DesignerAgent;
@@ -305,6 +351,7 @@ export class LoopEngine {
     this.paths = buildLoopPaths(config.homeDir);
     this.tools = new ToolRegistry();
     this.planner = new PlannerAgent(this.tools, config);
+    this.productManager = new ProductManagerAgent(config);
     this.executor = new ExecutorAgent(this.tools, config);
     this.designer = new DesignerAgent(this.tools, config);
     this.leader = new LeaderAgent(config);
@@ -530,19 +577,59 @@ export class LoopEngine {
       const instructions = await drainInstructions(this.paths);
       const priorState = await readLoopState(this.paths);
       const tacticalReworkLimit = Math.max(0, this.config.evaluatorReworkMaxAttempts);
+      let requirementMarkdown = await readActiveRequirementArtifact(this.paths);
 
       // --- TACTICAL STEP 1: Plan & Execute ---
+      const planWithRequirements = async (currentRequirementMarkdown: string | null): Promise<SubTask> => {
+        const plannerContext = {
+          goal,
+          instructions,
+          round,
+          budget: this.config.budget,
+          previous_tool_result: priorState.previous_tool_result,
+          previous_round_error: priorState.last_error,
+          consecutive_evaluator_failures: priorState.consecutive_evaluator_failures,
+          requirement_artifact_status: resolveRequirementArtifactStatus(currentRequirementMarkdown),
+          requirement_artifact_summary: summarizeRequirementArtifact(currentRequirementMarkdown)
+        } as const;
+
+        await enforceBudgetBeforeAction("planner.plan");
+        const planned = await this.planner.plan(plannerContext, { onLog: log });
+
+        if (
+          resolvePlannerRequirementMode(plannerContext) === "normal_execution" ||
+          !subTaskRequestsRequirementArtifact(planned)
+        ) {
+          return planned;
+        }
+
+        await enforceBudgetBeforeAction("productManager.generateRequirement");
+        const generatedRequirement = await this.productManager.generateRequirement(
+          {
+            goal,
+            instructions,
+            round,
+            current_requirement_markdown: currentRequirementMarkdown,
+            previous_tool_result: priorState.previous_tool_result,
+            previous_round_error: priorState.last_error
+          },
+          { onLog: log }
+        );
+        await writeActiveRequirementArtifact(this.paths, generatedRequirement);
+        requirementMarkdown = await readActiveRequirementArtifact(this.paths);
+        await log("ProductManager refreshed the active requirement artifact.");
+
+        const refreshedPlannerContext = {
+          ...plannerContext,
+          requirement_artifact_status: "ready" as const,
+          requirement_artifact_summary: summarizeRequirementArtifact(requirementMarkdown)
+        };
+        await enforceBudgetBeforeAction("planner.plan after productManager");
+        return this.planner.plan(refreshedPlannerContext, { onLog: log });
+      };
+
       const planningStartedAt = Date.now();
-      await enforceBudgetBeforeAction("planner.plan");
-      subTask = await this.planner.plan({ 
-        goal, 
-        instructions, 
-        round, 
-        budget: this.config.budget, 
-        previous_tool_result: priorState.previous_tool_result,
-        previous_round_error: priorState.last_error,
-        consecutive_evaluator_failures: priorState.consecutive_evaluator_failures
-      }, { onLog: log });
+      subTask = await planWithRequirements(requirementMarkdown);
       phaseTimings.planning += Date.now() - planningStartedAt;
       snapshot = await workspace.createSnapshot(subTask.impacted_files.length > 0 ? subTask.impacted_files : extractSnapshotTargetsFromSubTask(subTask, process.cwd()));
       
@@ -604,6 +691,30 @@ export class LoopEngine {
         stateChange = appendOperationalEvidenceToStateChange(stateChange, operationalEvidence.stateChangeNotes);
         if (operationalEvidence.summaryNote.trim()) {
           await log(`Operational follow-up: ${operationalEvidence.summaryNote}`);
+        }
+      }
+
+      if (evaluation.decision === "pass" && requirementMarkdown?.trim()) {
+        const completion = assessRequirementCompletion({
+          requirementMarkdown,
+          evaluation,
+          toolResult: finalToolResult,
+          stateChange
+        });
+
+        if (completion.isComplete) {
+          requirementMarkdown = upsertRequirementLifecycleStatus(requirementMarkdown, completion, round);
+          await writeActiveRequirementArtifact(this.paths, requirementMarkdown);
+          stateChange = appendNotesToStateChange(stateChange, "Requirement Lifecycle", [
+            `Requirement: marked .ailoop/product-requirements/current.md as complete for round ${round}.`,
+            `Requirement: matched acceptance criteria ${completion.matchedCriteria.length}/${completion.matchedCriteria.length + completion.unmatchedCriteria.length}.`
+          ]);
+          await log("Requirement slice marked complete.");
+
+          if (finalToolResult.next_state_hint === "stop") {
+            await setFlag(this.paths.stopFlagPath);
+            await log("Executor requested stop after completing the active requirement slice.");
+          }
         }
       }
 

@@ -5,6 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../config/env";
 import type { ActionRecord, EvaluationResult, SubTask, ToolResult } from "../types/contracts";
 import { ensureLoopHome, readLoopState, type LoopPaths, writeLoopState } from "./state";
+import { writeActiveRequirementArtifact } from "../product/requirements";
 import {
   LoopEngine,
   collectOperationalEvidence,
@@ -152,6 +153,312 @@ describe("resolveNextLastError", () => {
 });
 
 describe("LoopEngine auto rework", () => {
+  test("invokes ProductManager and persists the active requirement artifact before normal execution when requirements are missing", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-product-manager-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const plannerCalls: Array<{ requirement_artifact_status?: string; requirement_artifact_summary?: string | null }> = [];
+    const requirementPlan: SubTask = {
+      assignee: "executor",
+      rationale: "Requirement artifact is missing.",
+      objective: "Create the active requirement artifact at .ailoop/product-requirements/current.md via the ProductManager before normal execution planning resumes.",
+      expected_outcome: "The active requirement artifact exists as human-readable Markdown and is specific enough for the next atomic round.",
+      impacted_files: [".ailoop/product-requirements/current.md"],
+      recommended_tools: ["read_file"]
+    };
+    const finalPlan: SubTask = {
+      assignee: "executor",
+      rationale: "Requirements are now available.",
+      objective: "Implement the first requirement-backed console health improvement",
+      expected_outcome: "A tracked change demonstrates requirement-backed execution",
+      impacted_files: ["src/"],
+      recommended_tools: ["read_file", "write_file", "run_shell"]
+    };
+
+    const mutable = engine as unknown as {
+      planner: { plan: (context: Record<string, unknown>) => Promise<SubTask> };
+      productManager: { generateRequirement: (context: Record<string, unknown>) => Promise<string> };
+      executor: {
+        execute: () => Promise<{
+          actions: ActionRecord[];
+          toolResult: ToolResult;
+        }>;
+      };
+      evaluator: { evaluate: () => Promise<EvaluationResult> };
+      collectOperationalEvidence: () => Promise<{
+        summaryNote: string;
+        lines: string[];
+        stateChangeNotes: string[];
+      }>;
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+
+    mutable.planner = {
+      plan: async (context) => {
+        plannerCalls.push({
+          requirement_artifact_status: context.requirement_artifact_status as string | undefined,
+          requirement_artifact_summary: (context.requirement_artifact_summary as string | null | undefined) ?? null
+        });
+        return plannerCalls.length === 1 ? requirementPlan : finalPlan;
+      }
+    };
+    mutable.productManager = {
+      generateRequirement: async () =>
+        "# Requirement Slice: Console Health\n\n## Problem\nOperators need a reviewable health signal.\n"
+    };
+    mutable.executor = {
+      execute: async () => ({
+        actions: [makeAction("read_file"), makeAction("write_file")],
+        toolResult: makeToolResult("Executed requirement-backed round")
+      })
+    };
+    mutable.evaluator = {
+      evaluate: async () => makeEvaluation("pass", "Requirement-backed execution succeeded.")
+    };
+    mutable.collectOperationalEvidence = async () => ({
+      summaryNote: "",
+      lines: [],
+      stateChangeNotes: []
+    });
+
+    const outcome = await mutable.runRound(1);
+
+    expect(outcome.success).toBe(true);
+    expect(plannerCalls).toHaveLength(2);
+    expect(plannerCalls[0]).toEqual({
+      requirement_artifact_status: "missing",
+      requirement_artifact_summary: null
+    });
+    expect(plannerCalls[1].requirement_artifact_status).toBe("ready");
+    expect(plannerCalls[1].requirement_artifact_summary).toContain("Requirement Slice: Console Health");
+    expect(await fs.readFile(paths.activeRequirementPath, "utf8")).toContain("# Requirement Slice: Console Health");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("marks a completed requirement slice and asks for ProductManager refresh on the next round", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-requirement-refresh-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+    await writeActiveRequirementArtifact(
+      paths,
+      [
+        "# Requirement Slice: Requirement Lifecycle",
+        "",
+        "## Acceptance Criteria",
+        "- src/planning/requirement-completion.ts records a lifecycle status update for the active requirement artifact.",
+        "- ProjectPlanner requests a ProductManager refresh after the current slice is complete."
+      ].join("\n")
+    );
+
+    const plannerCalls: Array<{ round: number; requirement_artifact_status?: string }> = [];
+    const implementationPlan: SubTask = {
+      assignee: "executor",
+      rationale: "Current slice is still active.",
+      objective: "Implement requirement completion tracking in src/planning/requirement-completion.ts",
+      expected_outcome:
+        "A passing round proves src/planning/requirement-completion.ts records completion and ProjectPlanner requests a ProductManager refresh.",
+      impacted_files: ["src/planning/requirement-completion.ts"],
+      recommended_tools: ["read_file", "write_file", "run_shell"]
+    };
+    const refreshPlan: SubTask = {
+      assignee: "executor",
+      rationale: "The active requirement slice is complete.",
+      objective: "Refresh the active requirement artifact at .ailoop/product-requirements/current.md via the ProductManager before normal execution planning resumes.",
+      expected_outcome: "A new human-readable requirement slice replaces the completed one.",
+      impacted_files: [".ailoop/product-requirements/current.md"],
+      recommended_tools: ["read_file"]
+    };
+    const postRefreshPlan: SubTask = {
+      assignee: "executor",
+      rationale: "A refreshed requirement slice is available.",
+      objective: "Implement the next requirement-backed execution step",
+      expected_outcome: "A tracked change advances the refreshed requirement slice",
+      impacted_files: ["src/"],
+      recommended_tools: ["read_file", "write_file", "run_shell"]
+    };
+
+    const mutable = engine as unknown as {
+      planner: { plan: (context: Record<string, unknown>) => Promise<SubTask> };
+      productManager: { generateRequirement: () => Promise<string> };
+      executor: {
+        execute: () => Promise<{
+          actions: ActionRecord[];
+          toolResult: ToolResult;
+        }>;
+      };
+      evaluator: { evaluate: () => Promise<EvaluationResult> };
+      collectOperationalEvidence: () => Promise<{
+        summaryNote: string;
+        lines: string[];
+        stateChangeNotes: string[];
+      }>;
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+
+    mutable.planner = {
+      plan: async (context) => {
+        plannerCalls.push({
+          round: Number(context.round),
+          requirement_artifact_status: context.requirement_artifact_status as string | undefined
+        });
+
+        if (plannerCalls.length === 1) {
+          return implementationPlan;
+        }
+
+        if ((context.requirement_artifact_status as string | undefined) === "needs_refresh") {
+          return refreshPlan;
+        }
+
+        return postRefreshPlan;
+      }
+    };
+    mutable.productManager = {
+      generateRequirement: async () =>
+        "# Requirement Slice: Refreshed\n\n## Acceptance Criteria\n- The next atomic execution task is clearly defined.\n"
+    };
+    mutable.executor = {
+      execute: async () => ({
+        actions: [makeAction("write_file"), makeAction("run_shell")],
+        toolResult: {
+          ...makeToolResult("Completed requirement slice"),
+          next_state_hint: "continue"
+        }
+      })
+    };
+    mutable.evaluator = {
+      evaluate: async () => ({
+        decision: "pass",
+        justification:
+          "src/planning/requirement-completion.ts records a lifecycle status update for the active requirement artifact.",
+        evidence: [
+          "src/planning/requirement-completion.ts records a lifecycle status update for the active requirement artifact.",
+          "ProjectPlanner requests a ProductManager refresh after the current slice is complete."
+        ],
+        recommended_next_action: "continue"
+      })
+    };
+    mutable.collectOperationalEvidence = async () => ({
+      summaryNote: "",
+      lines: [],
+      stateChangeNotes: []
+    });
+
+    const firstOutcome = await mutable.runRound(1);
+    expect(firstOutcome.success).toBe(true);
+
+    const completedRequirement = await fs.readFile(paths.activeRequirementPath, "utf8");
+    expect(completedRequirement).toContain("## Lifecycle Status");
+    expect(completedRequirement).toContain("- Status: complete");
+
+    const secondOutcome = await mutable.runRound(2);
+    expect(secondOutcome.success).toBe(true);
+    expect(plannerCalls.map((call) => `${call.round}:${call.requirement_artifact_status}`)).toEqual([
+      "1:ready",
+      "2:needs_refresh",
+      "2:ready"
+    ]);
+
+    const refreshedRequirement = await fs.readFile(paths.activeRequirementPath, "utf8");
+    expect(refreshedRequirement).toContain("# Requirement Slice: Refreshed");
+    expect(refreshedRequirement).not.toContain("- Status: complete");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("does not mark the requirement slice complete when evaluator fails", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-requirement-fail-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+    await writeActiveRequirementArtifact(
+      paths,
+      [
+        "# Requirement Slice: Requirement Lifecycle",
+        "",
+        "## Acceptance Criteria",
+        "- src/planning/requirement-completion.ts records a lifecycle status update for the active requirement artifact.",
+        "- ProjectPlanner requests a ProductManager refresh after the current slice is complete."
+      ].join("\n")
+    );
+
+    const plan: SubTask = {
+      assignee: "executor",
+      rationale: "Current slice is still active.",
+      objective: "Implement requirement completion tracking in src/planning/requirement-completion.ts",
+      expected_outcome:
+        "A passing round proves src/planning/requirement-completion.ts records completion and ProjectPlanner requests a ProductManager refresh.",
+      impacted_files: ["src/planning/requirement-completion.ts"],
+      recommended_tools: ["read_file", "write_file", "run_shell"]
+    };
+
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      executor: {
+        execute: () => Promise<{
+          actions: ActionRecord[];
+          toolResult: ToolResult;
+        }>;
+      };
+      evaluator: { evaluate: () => Promise<EvaluationResult> };
+      collectOperationalEvidence: () => Promise<{
+        summaryNote: string;
+        lines: string[];
+        stateChangeNotes: string[];
+      }>;
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+
+    mutable.planner = { plan: async () => plan };
+    mutable.executor = {
+      execute: async () => ({
+        actions: [makeAction("write_file")],
+        toolResult: {
+          ...makeToolResult("Attempted requirement completion change"),
+          next_state_hint: "continue"
+        }
+      })
+    };
+    mutable.evaluator = {
+      evaluate: async () => ({
+        decision: "fail",
+        justification:
+          "src/planning/requirement-completion.ts records a lifecycle status update for the active requirement artifact.",
+        evidence: [
+          "src/planning/requirement-completion.ts records a lifecycle status update for the active requirement artifact.",
+          "ProjectPlanner requests a ProductManager refresh after the current slice is complete."
+        ],
+        recommended_next_action: "add targeted verification"
+      })
+    };
+    mutable.collectOperationalEvidence = async () => ({
+      summaryNote: "",
+      lines: [],
+      stateChangeNotes: []
+    });
+
+    const outcome = await mutable.runRound(1);
+
+    expect(outcome.success).toBe(false);
+    const persistedRequirement = await fs.readFile(paths.activeRequirementPath, "utf8");
+    expect(persistedRequirement).not.toContain("## Lifecycle Status");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
   test("writes a markdown summary artifact with core round details after a successful round", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-summary-artifact-test-"));
     const config = loadConfig({

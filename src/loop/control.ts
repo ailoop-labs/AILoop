@@ -10,8 +10,9 @@ import {
 } from "../agent/role-definitions";
 import type { AppConfig } from "../config/env";
 import { readRuntimeLoopConfig, runtimeLoopConfigToEnv } from "../config/runtime";
+import { readActiveRequirementSnapshot } from "../product/requirements";
 import { buildRoundArtifactPaths, listRunRecords, readLastLogTail } from "../reporting/summary";
-import type { BudgetLimits, EvaluationResult, LoopStateData } from "../types/contracts";
+import type { BudgetLimits, EvaluationResult, LoopStateData, RequirementArtifactSnapshot } from "../types/contracts";
 import { fileExists, readJsonFile, readTextFile } from "../utils/fs";
 import { redactJsonStrings, SecretRedactor } from "../utils/redaction";
 
@@ -68,7 +69,10 @@ export interface ProjectRoleView {
 
 function roleTitle(role: ProjectRole): string {
   if (role === "planner") {
-    return "Planner";
+    return "Project Planner";
+  }
+  if (role === "product_manager") {
+    return "Product Manager";
   }
   if (role === "executor") {
     return "Executor";
@@ -79,6 +83,9 @@ function roleTitle(role: ProjectRole): string {
 function rolePath(paths: LoopPaths, role: ProjectRole): string {
   if (role === "planner") {
     return paths.plannerRolePath;
+  }
+  if (role === "product_manager") {
+    return paths.productManagerRolePath;
   }
   if (role === "executor") {
     return paths.executorRolePath;
@@ -92,10 +99,19 @@ export async function ensureLoopHomeAndGetPaths(config: AppConfig): Promise<Loop
   return paths;
 }
 
+function redactRequirementSnapshot(snapshot: RequirementArtifactSnapshot, redactor: SecretRedactor): RequirementArtifactSnapshot {
+  return {
+    ...snapshot,
+    title: snapshot.title ? redactor.redact(snapshot.title) : null,
+    summary: snapshot.summary ? redactor.redact(snapshot.summary) : null,
+    markdown: snapshot.markdown ? redactor.redact(snapshot.markdown) : null
+  };
+}
+
 export async function listProjectRoles(config: AppConfig): Promise<ProjectRoleView[]> {
   const paths = await ensureLoopHomeAndGetPaths(config);
 
-  const roles: ProjectRole[] = ["planner", "executor", "evaluator"];
+  const roles: ProjectRole[] = ["planner", "product_manager", "executor", "evaluator"];
   const output: ProjectRoleView[] = [];
 
   for (const role of roles) {
@@ -255,12 +271,19 @@ export async function instructLoop(config: AppConfig, message: string): Promise<
   await appendInstruction(paths, message);
 }
 
-export async function getLoopStatus(config: AppConfig): Promise<LoopStateData & { pid_alive: boolean }> {
+export interface LoopStatusView extends LoopStateData {
+  pid_alive: boolean;
+  active_requirement: RequirementArtifactSnapshot;
+}
+
+export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> {
   const paths = await ensureLoopHomeAndGetPaths(config);
+  const redactor = new SecretRedactor(process.env);
+  const activeRequirement = redactRequirementSnapshot(await readActiveRequirementSnapshot(paths), redactor);
 
   const recovered = await recoverInterruptedLoopState(paths, "status check");
   if (recovered) {
-    return { ...recovered, pid_alive: false };
+    return { ...recovered, pid_alive: false, active_requirement: activeRequirement };
   }
 
   const state = await readLoopState(paths);
@@ -278,7 +301,8 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStateData & 
     await writeLoopState(paths, normalized);
     return {
       ...normalized,
-      pid_alive: false
+      pid_alive: false,
+      active_requirement: activeRequirement
     };
   }
 
@@ -292,19 +316,21 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStateData & 
     await writeLoopState(paths, normalized);
     return {
       ...normalized,
-      pid_alive: false
+      pid_alive: false,
+      active_requirement: activeRequirement
     };
   }
 
   return {
     ...state,
     pid: pid ?? null,
-    pid_alive: pidAlive
+    pid_alive: pidAlive,
+    active_requirement: activeRequirement
   };
 }
 
 export interface CliStatusPayload {
-  state: LoopStateData & { pid_alive: boolean };
+  state: LoopStatusView;
   budget: BudgetLimits;
 }
 
@@ -365,6 +391,7 @@ export interface RunArtifactBundle {
   log: string;
   state_change: string;
   evaluation: EvaluationResult | null;
+  active_requirement: RequirementArtifactSnapshot;
 }
 
 const RUN_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/;
@@ -380,6 +407,7 @@ export async function getRunArtifacts(config: AppConfig, timestamp: string): Pro
   }
 
   const paths = await ensureLoopHomeAndGetPaths(config);
+  const activeRequirement = await readActiveRequirementSnapshot(paths);
   const artifactPaths = buildRoundArtifactPaths(paths.runsDir, normalizedTimestamp);
   const requiredArtifactsExist = await Promise.all([
     fileExists(artifactPaths.summaryPath),
@@ -414,7 +442,12 @@ export async function getRunArtifacts(config: AppConfig, timestamp: string): Pro
     metrics,
     log: redact(log),
     state_change: redact(stateChange),
-    evaluation: evaluation ? redactJsonStrings(evaluation, redactor) : null
+    evaluation: evaluation ? redactJsonStrings(evaluation, redactor) : null,
+    active_requirement: {
+      ...activeRequirement,
+      markdown: activeRequirement.markdown ? redact(activeRequirement.markdown) : null,
+      summary: activeRequirement.summary ? redact(activeRequirement.summary) : null
+    }
   };
 }
 

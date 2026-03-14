@@ -19,6 +19,7 @@ import {
 } from "./control";
 import type { AppConfig } from "../config/env";
 import { saveRuntimeLoopConfig } from "../config/runtime";
+import { writeActiveRequirementArtifact } from "../product/requirements";
 
 function makeTestConfig(homeDir: string): AppConfig {
   return {
@@ -568,6 +569,7 @@ describe("listRuns", () => {
 describe("getRunArtifacts", () => {
   test("returns the full artifact bundle for a specific completed run", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-run-artifacts-test-"));
+    const paths = buildLoopPaths(homeDir);
     const runsDir = path.join(homeDir, "runs");
     const timestamp = "2026-03-01T02-00-00-000Z";
 
@@ -598,7 +600,89 @@ describe("getRunArtifacts", () => {
         evidence: ["bun test src/loop/control.test.ts"]
       },
       log: "OPENAI_API_KEY=[REDACTED]\n",
-      state_change: "+ SESSION_SECRET=[REDACTED]\n"
+      state_change: "+ SESSION_SECRET=[REDACTED]\n",
+      active_requirement: {
+        path: paths.activeRequirementPath,
+        exists: false,
+        artifact_status: "missing",
+        lifecycle_status: "active",
+        title: null,
+        summary: null,
+        acceptance_criteria_total: 0,
+        acceptance_criteria_completed: 0,
+        markdown: null,
+        updated_at: null
+      }
+    });
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("includes the active requirement snapshot alongside the run artifact bundle", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-run-artifacts-requirement-test-"));
+    const paths = buildLoopPaths(homeDir);
+    const timestamp = "2026-03-01T02-00-00-000Z";
+
+    await writeRunArtifacts(paths.runsDir, timestamp, {
+      summary: "summary\n",
+      metrics: { round: 2, status: "success" },
+      evaluation: {
+        decision: "pass",
+        justification: "Artifacts verified.",
+        evidence: ["bun test src/loop/control.test.ts"]
+      },
+      log: "round log\n",
+      stateChange: "state diff\n"
+    });
+    await writeActiveRequirementArtifact(
+      paths,
+      [
+        "# Requirement Slice: Operator Visibility",
+        "",
+        "## Problem",
+        "Operators need a readable requirement snapshot in the control plane.",
+        "",
+        "## Acceptance Criteria",
+        "- The status API exposes the active requirement summary.",
+        "- The run artifact bundle exposes the active requirement snapshot.",
+        "",
+        "## Lifecycle Status",
+        "- Status: complete",
+        "- Completed In Round: 4",
+        "- Completion Reason: All acceptance criteria matched.",
+        "- Matched Acceptance Criteria: 2",
+        "- Remaining Acceptance Criteria: 0"
+      ].join("\n")
+    );
+
+    const artifacts = await getRunArtifacts(makeTestConfig(homeDir), timestamp);
+
+    expect(artifacts).toEqual({
+      timestamp,
+      summary: "summary\n",
+      metrics: {
+        round: 2,
+        status: "success"
+      },
+      evaluation: {
+        decision: "pass",
+        justification: "Artifacts verified.",
+        evidence: ["bun test src/loop/control.test.ts"]
+      },
+      log: "round log\n",
+      state_change: "state diff\n",
+      active_requirement: {
+        path: paths.activeRequirementPath,
+        exists: true,
+        artifact_status: "needs_refresh",
+        lifecycle_status: "complete",
+        title: "Requirement Slice: Operator Visibility",
+        summary: "Operators need a readable requirement snapshot in the control plane.",
+        acceptance_criteria_total: 2,
+        acceptance_criteria_completed: 2,
+        markdown: expect.stringContaining("# Requirement Slice: Operator Visibility"),
+        updated_at: expect.any(String)
+      }
     });
 
     await fs.rm(homeDir, { recursive: true, force: true });
@@ -606,6 +690,7 @@ describe("getRunArtifacts", () => {
 
   test("redacts mixed-case secret assignments from archived run artifacts at serve time", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-run-artifacts-redaction-test-"));
+    const paths = buildLoopPaths(homeDir);
     const runsDir = path.join(homeDir, "runs");
     const timestamp = "2026-03-01T03-00-00-000Z";
 
@@ -637,7 +722,19 @@ describe("getRunArtifacts", () => {
           evidence: ["sessionSecret=[REDACTED]"]
         },
         log: "sessionSecret=[REDACTED]\n",
-        state_change: "+ apiToken=[REDACTED]\n"
+        state_change: "+ apiToken=[REDACTED]\n",
+        active_requirement: {
+          path: paths.activeRequirementPath,
+          exists: false,
+          artifact_status: "missing",
+          lifecycle_status: "active",
+          title: null,
+          summary: null,
+          acceptance_criteria_total: 0,
+          acceptance_criteria_completed: 0,
+          markdown: null,
+          updated_at: null
+        }
       });
     } finally {
       await fs.rm(homeDir, { recursive: true, force: true });
@@ -764,6 +861,53 @@ describe("resumeLoop", () => {
 });
 
 describe("getLoopStatus", () => {
+  test("includes a safe active requirement summary in loop status", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-requirement-test-"));
+    const paths = buildLoopPaths(homeDir);
+    await fs.mkdir(homeDir, { recursive: true });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "paused",
+      round: 3
+    });
+    await writeActiveRequirementArtifact(
+      paths,
+      [
+        "# Requirement Slice: Console Health",
+        "",
+        "## Problem",
+        "Operators need the console to reveal the active requirement at a glance.",
+        "",
+        "## Acceptance Criteria",
+        "- The status API includes the active requirement summary.",
+        "- The console can open the full requirement markdown."
+      ].join("\n")
+    );
+
+    const status = await getLoopStatus(makeTestConfig(homeDir));
+
+    expect(status).toMatchObject({
+      state: "paused",
+      round: 3,
+      pid_alive: false,
+      active_requirement: {
+        path: paths.activeRequirementPath,
+        exists: true,
+        artifact_status: "ready",
+        lifecycle_status: "active",
+        title: "Requirement Slice: Console Health",
+        summary: "Operators need the console to reveal the active requirement at a glance.",
+        acceptance_criteria_total: 2,
+        acceptance_criteria_completed: 0,
+        markdown: expect.stringContaining("# Requirement Slice: Console Health")
+      }
+    });
+    expect(status.active_requirement.updated_at).toEqual(expect.any(String));
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
   test("marks a dead starting process as paused and preserves interrupted start context", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-starting-test-"));
     const paths = buildLoopPaths(homeDir);
@@ -909,8 +1053,14 @@ describe("ensureProjectRoles", () => {
           ok: true,
           data: {
             planner_role_md: "# Planner Role\n\nGenerated",
+            product_manager_role_md: "# Product Manager Role\n\nGenerated",
             executor_role_md: "# Executor Role\n\nGenerated",
-            evaluator_role_md: "# Evaluator Role\n\nGenerated"
+            evaluator_role_md: "# Evaluator Role\n\nGenerated",
+            leader_role_md: "# Leader Role\n\nGenerated",
+            designer_role_md: "# Designer Role\n\nGenerated",
+            senior_dev_role_md: "# Senior Dev Role\n\nGenerated",
+            qa_lead_role_md: "# QA Lead Role\n\nGenerated",
+            product_owner_role_md: "# Product Owner Role\n\nGenerated"
           } as T,
           rawMessage: "{}",
           stdout: "",
@@ -926,6 +1076,7 @@ describe("ensureProjectRoles", () => {
     });
 
     expect(await fs.readFile(path.join(homeDir, "PLANNER_ROLE.md"), "utf8")).toContain("Generated");
+    expect(await fs.readFile(path.join(homeDir, "PRODUCT_MANAGER_ROLE.md"), "utf8")).toContain("Generated");
     expect(await fs.readFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "utf8")).toContain("Generated");
     expect(await fs.readFile(path.join(homeDir, "EVALUATOR_ROLE.md"), "utf8")).toContain("Generated");
 
@@ -939,16 +1090,20 @@ describe("listProjectRoles", () => {
     const homeDir = path.join(workspaceRoot, ".ailoop");
     await fs.mkdir(homeDir, { recursive: true });
     await fs.writeFile(path.join(homeDir, "PLANNER_ROLE.md"), "# Planner Role\n\nCustom planner\n", "utf8");
+    await fs.writeFile(path.join(homeDir, "PRODUCT_MANAGER_ROLE.md"), "# Product Manager Role\n\nCustom product manager\n", "utf8");
     await fs.writeFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "# Executor Role\n\nCustom executor\n", "utf8");
 
     const roles = await listProjectRoles(makeTestConfig(homeDir));
 
-    expect(roles.length).toBe(3);
-    expect(roles.map((role) => role.role)).toEqual(["planner", "executor", "evaluator"]);
+    expect(roles.length).toBe(4);
+    expect(roles.map((role) => role.role)).toEqual(["planner", "product_manager", "executor", "evaluator"]);
+    expect(roles[0]?.title).toBe("Project Planner");
+    expect(roles[1]?.title).toBe("Product Manager");
     expect(roles[0]?.definition).toContain("Custom planner");
-    expect(roles[1]?.definition).toContain("Custom executor");
-    expect(roles[2]?.definition).toContain("Project Evaluator Role");
-    expect(typeof roles[2]?.exists).toBe("boolean");
+    expect(roles[1]?.definition).toContain("Custom product manager");
+    expect(roles[2]?.definition).toContain("Custom executor");
+    expect(roles[3]?.definition).toContain("Project Evaluator Role");
+    expect(typeof roles[3]?.exists).toBe("boolean");
 
     await fs.rm(workspaceRoot, { recursive: true, force: true });
   });

@@ -2,20 +2,36 @@ import { describe, expect, test } from "bun:test";
 import { deriveRoundProgress } from "./round-progress";
 
 describe("deriveRoundProgress", () => {
-  test("reports planner stage when planner starts", () => {
+  test("reports project planner stage when ProjectPlanner starts", () => {
     const result = deriveRoundProgress({
       state: "running",
       round: 3,
       logs: [
         "[2026-03-02T12:00:00.000Z] Round 3 started.",
+        "[2026-03-02T12:00:01.000Z] ProjectPlanner started Codex planning."
+      ]
+    });
+
+    expect(result.percent).toBe(20);
+    expect(result.role).toBe("Project Planner");
+    expect(result.phase).toBe("planner");
+    expect(result.step).toContain("planning");
+  });
+
+  test("maps legacy planner logs onto the Project Planner stage", () => {
+    const result = deriveRoundProgress({
+      state: "running",
+      round: 4,
+      logs: [
+        "[2026-03-02T12:00:00.000Z] Round 4 started.",
         "[2026-03-02T12:00:01.000Z] Planner started Codex planning."
       ]
     });
 
     expect(result.percent).toBe(20);
-    expect(result.role).toBe("Planner");
+    expect(result.role).toBe("Project Planner");
     expect(result.phase).toBe("planner");
-    expect(result.step).toContain("planning");
+    expect(result.step).toContain("Project Planner");
   });
 
   test("reports evaluator dimension stage with parsed dimension name", () => {
