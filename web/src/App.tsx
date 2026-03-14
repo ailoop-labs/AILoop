@@ -17,6 +17,7 @@ interface LoopStatus {
   round: number;
   pid: number | null;
   pid_alive: boolean;
+  crash_recovery: CrashRecoveryStatus | null;
   last_error: string | null;
   updated_at: string;
   consecutive_evaluator_failures: number;
@@ -33,6 +34,18 @@ interface LoopStatus {
     };
   } | null;
   active_requirement: RequirementArtifactView;
+}
+
+interface CrashRecoveryStatus {
+  interruption_type: "startup_interrupted" | "round_interrupted";
+  interrupted_state: LoopStateName;
+  recovered_by: "startup" | "status_check";
+  status_check_finalized: boolean;
+  normal_round_execution_started: boolean;
+  incomplete_work: boolean;
+  reason: string;
+  summary: string;
+  next_action: string;
 }
 
 type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
@@ -331,6 +344,57 @@ export function RunArtifactEvidenceGrid({ report }: { report: RoundReport }) {
         items={report.operationalEvidence}
         emptyMessage="No operational evidence captured."
       />
+    </div>
+  );
+}
+
+export function CrashRecoveryPanel({ crashRecovery }: { crashRecovery: CrashRecoveryStatus | null }) {
+  if (!crashRecovery) {
+    return null;
+  }
+
+  const interruptionLabel =
+    crashRecovery.interruption_type === "startup_interrupted" ? "Startup interrupted" : "Round interrupted";
+  const recoverySourceLabel = crashRecovery.recovered_by === "startup" ? "Recovered during engine startup" : "Recovered during status check";
+  const recoveryMutationLabel = crashRecovery.status_check_finalized ? "Finalized during status check" : "Already finalized before this refresh";
+  const executionLabel = crashRecovery.normal_round_execution_started
+    ? "Normal round execution had started"
+    : "Normal round execution never started";
+  const workLabel = crashRecovery.incomplete_work ? "Round may be incomplete" : "No incomplete round work detected";
+
+  return (
+    <div className="mt-4 rounded-2xl border border-warning/40 bg-warning/10 p-4 shadow-[0_0_0_1px_rgba(255,196,92,0.08)]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-warning">Crash Recovery</p>
+          <h2 className="mt-2 text-xl font-semibold text-mist">{interruptionLabel}</h2>
+          <p className="mt-2 text-sm leading-6 text-mist/80">{crashRecovery.summary}</p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.16em]">
+          <span className="rounded-full border border-warning/40 bg-warning/15 px-3 py-1 text-warning">{recoveryMutationLabel}</span>
+          <span className="rounded-full border border-white/10 bg-ink/70 px-3 py-1 text-mist/80">{workLabel}</span>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-xl border border-white/10 bg-ink/70 p-3">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-mist/60">Recovery Source</p>
+          <p className="mt-2 text-sm font-semibold text-mist">{recoverySourceLabel}</p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-ink/70 p-3">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-mist/60">Affected State</p>
+          <p className="mt-2 text-sm font-semibold text-mist">{crashRecovery.interrupted_state}</p>
+          <p className="mt-1 text-xs text-mist/60">{executionLabel}</p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-ink/70 p-3">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-mist/60">Recovery Reason</p>
+          <p className="mt-2 text-sm font-semibold text-mist">{crashRecovery.reason}</p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-ink/70 p-3">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-mist/60">Next Safe Action</p>
+          <p className="mt-2 text-sm font-semibold text-mist">{crashRecovery.next_action}</p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -803,6 +867,11 @@ export default function App() {
             >
               {status ? stateLabel[status.state] : "loading"}
             </span>
+            {status?.crash_recovery ? (
+              <span className="rounded-full border border-warning/40 bg-warning/15 px-4 py-2 text-sm font-semibold uppercase tracking-[0.2em] text-warning">
+                crash recovery
+              </span>
+            ) : null}
             {tokenRequired ? (
               <button
                 onClick={logout}
@@ -824,6 +893,8 @@ export default function App() {
             Evaluator failures: {status?.consecutive_evaluator_failures ?? 0}
           </div>
         </div>
+
+        <CrashRecoveryPanel crashRecovery={status?.crash_recovery ?? null} />
 
         {frictionIndex && (
           <div className="mt-4 rounded-xl border border-white/10 bg-ink/60 p-4">

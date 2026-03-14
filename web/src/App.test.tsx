@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { RunArtifactEvidenceGrid, summarizeApiError } from "./App";
+import { CrashRecoveryPanel, RunArtifactEvidenceGrid, summarizeApiError } from "./App";
 import type { RoundReport } from "./run-history";
 
 function makeReport(overrides: Partial<RoundReport> = {}): RoundReport {
@@ -69,6 +69,37 @@ describe("RunArtifactEvidenceGrid", () => {
     expect(html).toContain("No material state change summary captured.");
     expect(html).toContain("No verification evidence captured.");
     expect(html).toContain("No operational evidence captured.");
+  });
+});
+
+describe("CrashRecoveryPanel", () => {
+  test("renders distinct recovery signals for a startup interruption", () => {
+    const html = renderToStaticMarkup(
+      <CrashRecoveryPanel
+        crashRecovery={{
+          interruption_type: "startup_interrupted",
+          interrupted_state: "starting",
+          recovered_by: "status_check",
+          status_check_finalized: true,
+          normal_round_execution_started: false,
+          incomplete_work: false,
+          reason: "process 999999 was not alive",
+          summary: "Initialization was interrupted before normal round execution began.",
+          next_action: "Inspect the run state and resume explicitly when safe."
+        }}
+      />
+    );
+
+    expect(html).toContain("Crash Recovery");
+    expect(html).toContain("Startup interrupted");
+    expect(html).toContain("Initialization was interrupted before normal round execution began.");
+    expect(html).toContain("Finalized during status check");
+    expect(html).toContain("No incomplete round work detected");
+    expect(html).toContain("Inspect the run state and resume explicitly when safe.");
+  });
+
+  test("renders nothing when no recovery status is present", () => {
+    expect(renderToStaticMarkup(<CrashRecoveryPanel crashRecovery={null} />)).toBe("");
   });
 });
 
