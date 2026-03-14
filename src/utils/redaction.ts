@@ -1,4 +1,4 @@
-import { redactSecretLikeText } from "../secret-redaction";
+import { redactSecretLikeText } from "./secret-redaction";
 
 const SECRET_ASSIGNMENT_IDENTIFIER_PATTERN =
   /\b([A-Za-z][A-Za-z0-9_]*(?:token|key|secret)[A-Za-z0-9_]*)\s*=\s*([^\s|;,:"'`]+?)([.!?])?(?=$|[\s|;,:"'`])/gi;

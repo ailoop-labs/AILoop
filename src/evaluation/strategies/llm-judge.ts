@@ -7,7 +7,7 @@ import type {
 } from "../../types/contracts";
 import { CodexClient, type JsonSchema } from "../../agent/codex-client";
 import { loadProjectRoleDefinition } from "../../agent/role-definitions";
-import { redactSecretLikeText } from "../../secret-redaction";
+import { redactSecretLikeText } from "../utils/secret-redaction";
 import type { Evaluator } from "../evaluator";
 
 const DIMENSION_SCHEMA: JsonSchema = {
