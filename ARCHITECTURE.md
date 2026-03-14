@@ -20,7 +20,8 @@ The MVP follows five implementation principles derived from the product goal:
 2. **Control plane separated from execution plane.** UI and CLI issue commands, while the loop engine owns scheduling, budgets, and state transitions.
 3. **Product definition, project planning, execution, and evaluation are distinct contracts.** Requirement shaping, round-level task selection, acting, and judging must be swappable and independently testable.
 4. **Artifacts are first-class outputs.** Each round must leave behind reviewable files that explain what happened.
-5. **Pause is the default safety response.** Budget breaches, repeated evaluator failures, crash recovery, and explicit human intervention all converge on a paused state.
+5. **Cross-agent handoffs must stay compact and navigational.** Agents should receive concise evidence briefs, artifact manifests, and targeted excerpts by default instead of raw log dumps or full artifact bodies.
+6. **Pause is the default safety response.** Budget breaches, repeated evaluator failures, crash recovery, and explicit human intervention all converge on a paused state.
 
 ## 3. MVP System Boundaries
 
@@ -126,6 +127,8 @@ It persists:
 - evaluator results,
 - and current run state.
 
+Artifact storage must preserve reviewable raw evidence, but cross-agent prompts should reference those artifacts through compact manifests and summaries rather than inlining full files by default.
+
 ## 5. High-Level Data Flow
 
 ```mermaid
@@ -156,6 +159,12 @@ Round flow:
 6. Executor attempts the `SubTask` using registered tools.
 7. Evaluator checks objective versus observed state change.
 8. Engine writes artifacts, updates run state, and either enters cooldown, pause, or stop.
+
+Evaluator handoff rule:
+
+- the engine should pass a compact evidence brief first,
+- include artifact paths and small, high-signal excerpts,
+- avoid embedding full `round.log` or multi-hundred-kilobyte `state_change` bodies directly into evaluator prompts unless a narrow excerpt is required to resolve ambiguity.
 
 ## 6. Loop State Machine
 
@@ -265,6 +274,17 @@ Executor behavior:
 
 The evaluator compares the `SubTask.objective` and `expected_outcome` against observed changes.
 
+The evaluation context should be compact by default:
+
+- task objective and expected outcome,
+- executor status and summary,
+- validation-result summary,
+- compact state-change summary,
+- artifact manifest with concrete paths to the round log, state-change file, metrics, and summary,
+- and only the smallest targeted excerpts needed for judgment.
+
+The engine must not treat engine-managed run artifacts such as `.ailoop/runs/*.round.log` as ordinary product workspace diffs when constructing the evaluator handoff.
+
 Possible decisions:
 
 - `pass`
@@ -276,6 +296,8 @@ If the evaluator fails the round:
 - increments evaluator-failure history,
 - attempts rollback when policy requires it,
 - and pauses automatically if the configured failure threshold is reached.
+
+If the evaluator itself cannot complete because of Codex authentication, tooling, transport, or prompt-construction failure, the engine must classify that as evaluator infrastructure failure rather than mislabeling it as ordinary lack of task evidence.
 
 ### 7.5 Phase 4: Persist and Transition
 
@@ -359,7 +381,15 @@ Evaluator requirements:
 
 - skeptical by default,
 - tied to the round objective rather than superficial activity,
-- explicit justification on fail.
+- explicit justification on fail,
+- compact, navigational input by default instead of full raw artifact bodies,
+- infrastructure failures surfaced distinctly from ordinary judgment failures.
+
+Evaluator infrastructure failure requirements:
+
+- preserve the underlying stderr or transport clue when available,
+- return a root cause that distinguishes evaluator infrastructure from task-quality failure,
+- recommend repair of authentication, tooling, or prompt-shape issues before further tactical rework.
 
 ### 8.5 Tool Contract
 
@@ -436,6 +466,12 @@ The MVP uses file-based persistence rooted at `AILOOP_HOME`, defaulting to `.ail
 - `*.round.summary.md`: human-readable summary of the round.
 - `*.round.metrics.json`: budget use, duration, retries, and phase timings.
 - `*.round.state_change.txt`: unified diff or concise mutation log.
+
+Artifact composition requirements:
+
+- `*.round.state_change.txt` should focus on intentional workspace mutations and concise evidence notes,
+- engine-managed observability artifacts under `.ailoop/runs/` should not recursively dominate the state-change body,
+- large artifacts remain on disk for human review, but downstream agent prompts should receive compact summaries plus artifact paths.
 - `*.round.evaluation.json`: evaluator decision and evidence.
 
 ### 10.3 Secret Redaction

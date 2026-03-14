@@ -277,6 +277,13 @@ const CODEX_TOOLING_FAILURE_PATTERNS: RegExp[] = [
   /no such file or directory/i
 ];
 
+const CODEX_PROCESS_FAILURE_PATTERNS: RegExp[] = [
+  /codex exited with code [1-9]\d*/i,
+  /prompt likely exceeded/i,
+  /context length/i,
+  /too large/i
+];
+
 function hasPattern(patterns: RegExp[], text: string): boolean {
   return patterns.some((pattern) => pattern.test(text));
 }
@@ -300,6 +307,89 @@ function emitEvaluationLog(context: RoundEvaluationContext, message: string): vo
   void Promise.resolve(context.onLog(message)).catch(() => {
     // Evaluator logging is best-effort and must never block evaluation.
   });
+}
+
+function summarizeStateChangeForEvaluation(stateChange: string): {
+  changed_files: string[];
+  added_lines: number;
+  removed_lines: number;
+  notes: string[];
+} {
+  const normalized = stateChange.trim();
+  if (!normalized || normalized === "No state changes detected.") {
+    return {
+      changed_files: [],
+      added_lines: 0,
+      removed_lines: 0,
+      notes: ["No material state changes detected."]
+    };
+  }
+
+  const changedFiles = Array.from(
+    new Set(
+      normalized
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.startsWith("+++ "))
+        .map((line) => line.slice(4).trim())
+        .filter((line) => line && line !== "/dev/null")
+        .map((line) => line.replace(/^b\//, ""))
+        .filter((line) => !line.startsWith(".ailoop/runs/"))
+    )
+  );
+  const addedLines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+    .length;
+  const removedLines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("-") && !line.startsWith("---"))
+    .length;
+  const notes = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("### "))
+    .slice(0, 6);
+
+  return {
+    changed_files: changedFiles.slice(0, 12),
+    added_lines: addedLines,
+    removed_lines: removedLines,
+    notes
+  };
+}
+
+function buildArtifactManifest(context: RoundEvaluationContext): Record<string, string> {
+  return {
+    round_log_path: context.toolResult.artifacts.log_path || "",
+    state_change_path: context.toolResult.artifacts.state_change_path || "",
+    bundle_path: context.toolResult.artifacts.bundle_path || ""
+  };
+}
+
+function buildCompactEvaluationContext(context: RoundEvaluationContext): Record<string, unknown> {
+  return {
+    objective: context.subTask.objective,
+    expected_outcome: context.subTask.expected_outcome,
+    tool_result_summary: {
+      status: context.toolResult.status,
+      summary: context.toolResult.summary,
+      next_state_hint: context.toolResult.next_state_hint ?? "continue",
+      error: context.toolResult.error
+        ? {
+            type: context.toolResult.error.type,
+            message: context.toolResult.error.message
+          }
+        : null
+    },
+    artifact_manifest: buildArtifactManifest(context),
+    budget_limits: context.budgetLimits,
+    budget_usage: context.budgetUsage,
+    state_change_summary: summarizeStateChangeForEvaluation(context.stateChange),
+    recent_logs: context.logLines.slice(-40)
+  };
 }
 
 function softenScopeOnlyHardGateFailure(assessment: DimensionAssessment): DimensionAssessment {
@@ -367,6 +457,24 @@ function detectEvaluatorInfrastructureFailure(
       rootCause: "evaluator_infrastructure:codex_tooling",
       recommendedNextAction:
         "pause and repair evaluator Codex tooling (binary path, executable permissions, and sandbox environment) before retrying evaluation"
+    };
+  }
+
+  const genericProcessFailures = assessments.filter((assessment) => {
+    if (assessment.decision !== "unknown") {
+      return false;
+    }
+
+    return hasPattern(CODEX_PROCESS_FAILURE_PATTERNS, toAssessmentText(assessment));
+  });
+  if (genericProcessFailures.length > 0) {
+    const dimensions = genericProcessFailures.map((assessment) => assessment.dimension).join(", ");
+    return {
+      matchedAssessments: genericProcessFailures,
+      justification: `Evaluator infrastructure failure: Codex process execution failed while checking ${dimensions}.`,
+      rootCause: "evaluator_infrastructure:codex_process_failure",
+      recommendedNextAction:
+        "pause and inspect evaluator Codex stderr, CLI health, and prompt size before retrying evaluation"
     };
   }
 
@@ -530,19 +638,7 @@ export function buildDimensionPrompt(
       : []),
     "",
     "Round context:",
-    JSON.stringify(
-      {
-        objective: context.subTask.objective,
-        expected_outcome: context.subTask.expected_outcome,
-        tool_result: context.toolResult,
-        budget_limits: context.budgetLimits,
-        budget_usage: context.budgetUsage,
-        state_change: context.stateChange,
-        recent_logs: context.logLines.slice(-40)
-      },
-      null,
-      2
-    )
+    JSON.stringify(buildCompactEvaluationContext(context), null, 2)
   ].join("\n");
 }
 

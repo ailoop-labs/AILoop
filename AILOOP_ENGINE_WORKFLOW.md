@@ -36,7 +36,7 @@ The system consists of several highly specialized core Agents. Each Agent operat
 * **Evaluator (The Judge)**
   * **Responsibility**: Independently reviews the results of the Executor. Compares the expected outcome with the actual State Change to determine a Pass or Fail, providing clear justification.
   * **Permissions**: High permission or Read-only (depending on the evaluation strategy configuration).
-  * **Characteristics**: Maintains a skeptical attitude towards results. It focuses not only on whether the functionality is implemented but also vetoes over-engineered code that violates the "Ruthless Simplicity" principle.
+  * **Characteristics**: Maintains a skeptical attitude towards results. It focuses not only on whether the functionality is implemented but also vetoes over-engineered code that violates the "Ruthless Simplicity" principle. It should receive compact evidence briefs and artifact navigation hints by default rather than full raw log dumps.
 
 * **LeaderAgent (The Governance Intervener)**
   * **Responsibility**: Takes over and analyzes the root cause when the loop encounters an anomaly or pauses due to automatic rework failures.
@@ -69,6 +69,7 @@ Note on terminology:
 * **Single-Task Rounds**: Each Round should pursue only one atomic goal. Avoid hidden, multi-step scope expansions.
 * **Anti-Hallucination Measures**: Before modifying files or databases, the Executor *must* use a "read" tool to confirm the current state of the target. Blind writing is strictly prohibited.
 * **Workflow-First Failure Analysis**: When a task fails, first diagnose why the *governance and loop mechanisms* failed to resolve the issue, prioritizing the reliability of the autonomous system.
+* **Compact Handoffs**: When one role hands off to another, prefer a concise summary, artifact manifest, and targeted evidence excerpts. Do not force downstream roles to ingest entire logs or massive raw diffs unless a narrow excerpt is strictly necessary.
 
 ## 3. Core Workflow and Sequence (The Loop Sequence)
 
@@ -94,14 +95,25 @@ The transition of each "Round" strictly follows this lifecycle, orchestrated by 
 
 ### Phase 4: Artifacts & Evaluate
 1. The engine collects the Executor's post-execution state and generates a difference file (`State Change Artifact`).
-2. Invokes the **Evaluator** to analyze this data.
-3. **Pass**: If the comprehensive score meets or exceeds the configured passing threshold, the Round is deemed successful. The engine cleans up temporary states, saves summary results, and prepares for the next round.
-4. **Fail**: If the score is too low or judged as Over-engineering, it returns the failure justification and enters the **Auto-Rework** mechanism.
+2. The engine prepares a compact evaluation brief that includes the round objective, expected outcome, executor summary, validation summary, artifact paths, and only the smallest targeted excerpts needed for judgment.
+3. Invokes the **Evaluator** to analyze this data.
+4. **Pass**: If the comprehensive score meets or exceeds the configured passing threshold, the Round is deemed successful. The engine cleans up temporary states, saves summary results, and prepares for the next round.
+5. **Fail**: If the score is too low or judged as Over-engineering, it returns the failure justification and enters the **Auto-Rework** mechanism.
+
+Evaluation handoff rules:
+- engine-managed observability artifacts such as `.ailoop/runs/*.round.log` must remain reviewable on disk, but should not be recursively embedded wholesale into the evaluator prompt
+- `State Change Artifact` should emphasize intentional workspace mutations and concise evidence notes
+- if the Evaluator itself cannot complete because its Codex call fails, the engine must record that as evaluator infrastructure failure instead of pretending the round merely lacked ordinary evidence
 
 ### Phase 5: Rework & Break
 1. If judged as a failure, the engine feeds the Failure Justification back to the Executor.
 2. The Executor initiates a retry within the same round, attempting to fix the code it just broke.
 3. If the number of retries exceeds the threshold (e.g., 2 or 3 consecutive failures), the system breaks, the state is set to `paused`, and a fatal failure is recorded.
+
+Rework handoff rule:
+- evaluator-to-executor rework instructions should be navigational and issue-focused
+- pass blocking dimensions, recommended next action, and artifact references
+- avoid replaying entire raw state-change files into the rework prompt unless the minimal relevant excerpt is known
 
 ### Phase 6: Leader / CCB Intervention
 1. When the loop is set to `paused` (whether due to human intervention or severe failure), if governance intervention (`AILOOP_ENABLE_LEADER`) is enabled, the engine awakens the **LeaderAgent** (and potentially introduces CCB experts like SeniorDev, QALead, ProductOwner for consultation).

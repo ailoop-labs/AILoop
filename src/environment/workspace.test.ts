@@ -108,6 +108,35 @@ describe("WorkspaceManager.buildStateChange", () => {
     await fs.rm(repoDir, { recursive: true, force: true });
   });
 
+  test("excludes engine-managed .ailoop/runs artifacts from snapshot file diffs", async () => {
+    const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-workspace-run-artifact-test-"));
+    const homeDir = path.join(repoDir, ".ailoop");
+    const paths = createLoopPaths(homeDir);
+    await fs.mkdir(paths.homeDir, { recursive: true });
+    await fs.mkdir(paths.runsDir, { recursive: true });
+    await fs.writeFile(paths.taskPath, "# task\n", "utf8");
+
+    run("git init", repoDir);
+    run("git config user.email test@example.com", repoDir);
+    run("git config user.name tester", repoDir);
+    await fs.writeFile(path.join(repoDir, ".gitignore"), ".ailoop/*\n!.ailoop/goal.md\n", "utf8");
+    run("git add .ailoop/goal.md", repoDir);
+    run("git add .gitignore", repoDir);
+    run("git commit -m 'init'", repoDir);
+
+    const runLogPath = path.join(paths.runsDir, "example.round.log");
+    const manager = new WorkspaceManager(paths, repoDir);
+    const snapshot = await manager.createSnapshot([runLogPath]);
+
+    await fs.writeFile(runLogPath, "executor output\n", "utf8");
+    const stateChange = await manager.buildStateChange(snapshot);
+
+    expect(stateChange).not.toContain(".ailoop/runs/example.round.log");
+    expect(stateChange).not.toContain("executor output");
+
+    await fs.rm(repoDir, { recursive: true, force: true });
+  });
+
   test("rollback removes files that did not exist before snapshot", async () => {
     const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-workspace-rollback-test-"));
     const homeDir = path.join(repoDir, ".ailoop");

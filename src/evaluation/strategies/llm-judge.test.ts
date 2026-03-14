@@ -165,6 +165,49 @@ describe("aggregateDimensionAssessments", () => {
     expect(result.recommended_next_action).not.toContain("gather evidence");
   });
 
+  test("surfaces generic Codex process failures as evaluator infrastructure blockers", () => {
+    const result = aggregateDimensionAssessments(
+      [
+        makeAssessment({
+          dimension: "goal_alignment",
+          decision: "unknown",
+          score: 0,
+          confidence: 0,
+          justification: "Dimension evaluator call failed.",
+          evidence: [
+            "Codex exited with code 1",
+            "Evaluator prompt likely exceeded practical size after embedding a very large state-change body."
+          ],
+          recommended_next_action: "pause and inspect evaluator failure"
+        }),
+        makeAssessment({
+          dimension: "causal_validity",
+          decision: "unknown",
+          score: 0,
+          confidence: 0,
+          justification: "Dimension evaluator call failed.",
+          evidence: ["Codex exited with code 1"],
+          recommended_next_action: "pause and inspect evaluator failure"
+        }),
+        makeAssessment({
+          dimension: "constraint_compliance",
+          decision: "unknown",
+          score: 0,
+          confidence: 0,
+          justification: "Dimension evaluator call failed.",
+          evidence: ["Codex exited with code 1"],
+          recommended_next_action: "pause and inspect evaluator failure"
+        })
+      ],
+      75
+    );
+
+    expect(result.decision).toBe("fail");
+    expect(result.justification).toContain("Evaluator infrastructure failure");
+    expect(result.root_cause).toBe("evaluator_infrastructure:codex_process_failure");
+    expect(result.recommended_next_action).toContain("prompt");
+  });
+
   test("surfaces concrete evidence and follow-up actions when a key dimension fails", () => {
     const result = aggregateDimensionAssessments(
       [
@@ -328,6 +371,37 @@ describe("buildDimensionPrompt", () => {
 
     expect(prompt).toContain("Project-specific Evaluator Role Definition");
     expect(prompt).toContain("Project-specific evaluator instructions.");
+  });
+
+  test("uses a compact evidence brief instead of embedding the full raw state change", () => {
+    const context = makeRoundContext();
+    context.stateChange = [
+      "### Snapshot File Diffs",
+      "```diff",
+      "--- .ailoop/runs/example.round.log",
+      "+++ .ailoop/runs/example.round.log",
+      "@@ -1 +1,2000 @@",
+      "+very large log body line 1",
+      "+very large log body line 2",
+      "```",
+      "",
+      "### Git Untracked Delta",
+      "```diff",
+      "+++ src/loop/engine.state-json-contract.test.ts",
+      "```"
+    ].join("\n");
+    context.logLines = Array.from({ length: 60 }, (_, index) => `log line ${index + 1}`);
+
+    const prompt = buildDimensionPrompt("goal_alignment", context);
+
+    expect(prompt).toContain("\"artifact_manifest\"");
+    expect(prompt).toContain("\"state_change_summary\"");
+    expect(prompt).toContain("src/loop/engine.state-json-contract.test.ts");
+    expect(prompt).not.toContain("very large log body line 1");
+    expect(prompt).not.toContain("\"state_change\":");
+    expect(prompt).not.toContain("log line 1");
+    expect(prompt).toContain("log line 21");
+    expect(prompt).toContain("log line 60");
   });
 });
 

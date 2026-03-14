@@ -8,6 +8,7 @@ import { ensureLoopHome, readLoopState, type LoopPaths, writeLoopState } from ".
 import { writeActiveRequirementArtifact } from "../product/requirements";
 import {
   LoopEngine,
+  buildEvaluatorReworkInstructions,
   collectOperationalEvidence,
   extractSnapshotTargetsFromSubTask,
   resolveNextLastError
@@ -149,6 +150,34 @@ describe("resolveNextLastError", () => {
 
   test("writes explicit next error message when provided", () => {
     expect(resolveNextLastError("blocked", "new-error")).toBe("new-error");
+  });
+});
+
+describe("buildEvaluatorReworkInstructions", () => {
+  test("uses compact navigational rework instructions instead of embedding the full raw state change", () => {
+    const instructions = buildEvaluatorReworkInstructions(
+      ["Human instruction: stay minimal."],
+      {
+        decision: "fail",
+        justification: "goal_alignment failed because verification evidence is missing.",
+        evidence: ["State change references src/loop/engine.state-json-contract.test.ts."],
+        recommended_next_action: "rerun the targeted bun test and capture its concrete output"
+      },
+      1,
+      3,
+      "### Snapshot File Diffs\n```diff\n+very large raw diff body\n```",
+      {
+        logPath: "/tmp/example.round.log",
+        stateChangePath: "/tmp/example.round.state_change.txt"
+      }
+    );
+
+    expect(instructions.some((line) => line.includes("Evaluator failure: goal_alignment failed"))).toBe(true);
+    expect(instructions.some((line) => line.includes("Evaluator recommended next action"))).toBe(true);
+    expect(instructions.some((line) => line.includes("/tmp/example.round.state_change.txt"))).toBe(true);
+    expect(instructions.some((line) => line.includes("/tmp/example.round.log"))).toBe(true);
+    expect(instructions.some((line) => line.includes("Current Modified Content"))).toBe(false);
+    expect(instructions.some((line) => line.includes("very large raw diff body"))).toBe(false);
   });
 });
 
@@ -921,6 +950,108 @@ describe("LoopEngine auto rework", () => {
     expect(summaryText).toContain("Attempt 1/1:");
     expect(summaryText).toContain("trigger='Missing negative tests for edge cases.'");
     expect(summaryText).toContain("evaluation=pass");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("preserves first successful execution evidence in the summary when later rework execution fails", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-rework-summary-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir,
+      AILOOP_EVAL_REWORK_MAX_ATTEMPTS: "1"
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const plan: SubTask = {
+      assignee: "executor",
+      rationale: "test rationale",
+      objective: "Add one failing regression test",
+      expected_outcome: "The workspace records one red regression test with clear evidence",
+      impacted_files: [],
+      recommended_tools: ["read_file", "write_file", "run_shell"]
+    };
+
+    let executeCall = 0;
+    const execute = async () => {
+      executeCall += 1;
+      if (executeCall === 1) {
+        return {
+          actions: [makeAction("write_file"), makeAction("run_shell")],
+          toolResult: makeToolResult("Added focused regression test and captured the expected red signal")
+        };
+      }
+
+      return {
+        actions: [
+          {
+            tool: "codex_step",
+            args: { index: 1 },
+            ok: false,
+            output: "No action details returned by Codex.",
+            error: "Codex exited with code 1"
+          }
+        ],
+        toolResult: {
+          status: "failure",
+          summary: "Executor could not complete the task because Codex execution failed.",
+          artifacts: {
+            log_path: "",
+            state_change_path: ""
+          },
+          error: {
+            type: "CodexExecError",
+            message: "Codex exited with code 1"
+          },
+          next_state_hint: "pause"
+        }
+      };
+    };
+
+    let evaluationCall = 0;
+    const evaluate = async (): Promise<EvaluationResult> => {
+      evaluationCall += 1;
+      return makeEvaluation("fail", evaluationCall === 1 ? "Evaluator infrastructure failed." : "Still blocked.");
+    };
+
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      executor: { execute: typeof execute };
+      evaluator: { evaluate: typeof evaluate };
+      collectOperationalEvidence: () => Promise<{
+        summaryNote: string;
+        lines: string[];
+        stateChangeNotes: string[];
+      }>;
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+    mutable.planner = { plan: async () => plan };
+    mutable.executor = { execute };
+    mutable.evaluator = { evaluate };
+    mutable.collectOperationalEvidence = async () => ({
+      summaryNote: "",
+      lines: [],
+      stateChangeNotes: []
+    });
+
+    const outcome = await mutable.runRound(1);
+
+    expect(outcome.success).toBe(false);
+    const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+    const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
+    expect(summaryFile).toBeDefined();
+
+    const summaryText = await fs.readFile(path.join(homeDir, "runs", summaryFile as string), "utf8");
+    expect(summaryText).toContain("Initial executor pass succeeded before later rework/governance failure");
+    expect(summaryText).toContain("Added focused regression test and captured the expected red signal");
+    expect(summaryText).toContain("write_file ok");
+    expect(summaryText).toContain("Later tactical rework/governance step failed after an earlier successful executor pass.");
+
+    const persistedState = await readLoopState(paths);
+    expect(persistedState.previous_tool_result?.summary).toContain(
+      "Initial executor pass succeeded before later rework/governance failure"
+    );
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });

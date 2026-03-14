@@ -181,19 +181,34 @@ export function extractSnapshotTargetsFromSubTask(subTask: SubTask, workspaceRoo
   return Array.from(new Set(normalized));
 }
 
-function buildEvaluatorReworkInstructions(
+export function buildEvaluatorReworkInstructions(
   baseInstructions: string[],
   evaluation: EvaluationResult,
   attempt: number,
   maxAttempts: number,
-  stateChange: string
+  _stateChange: string,
+  artifactRefs?: { logPath?: string; stateChangePath?: string }
 ): string[] {
   const next = [...baseInstructions, `Evaluator failure: ${evaluation.justification}`];
   if (evaluation.recommended_next_action?.trim()) {
     next.push(`Evaluator recommended next action: ${evaluation.recommended_next_action.trim()}`);
   }
   next.push(`Auto rework attempt ${attempt}/${maxAttempts}: apply the smallest safe change that resolves blocking issues.`);
-  next.push(`Current Modified Content:\n\n${stateChange}`);
+  if (evaluation.dimensions && evaluation.dimensions.length > 0) {
+    const blockingDimensions = evaluation.dimensions
+      .filter((dimension) => dimension.decision !== "pass")
+      .slice(0, 3)
+      .map((dimension) => `${dimension.dimension}: ${dimension.justification}`);
+    if (blockingDimensions.length > 0) {
+      next.push(`Evaluator dimensions to address: ${blockingDimensions.join(" | ")}`);
+    }
+  }
+  if (artifactRefs?.stateChangePath) {
+    next.push(`Review state change artifact if needed: ${artifactRefs.stateChangePath}`);
+  }
+  if (artifactRefs?.logPath) {
+    next.push(`Review round log if needed: ${artifactRefs.logPath}`);
+  }
   return next;
 }
 
@@ -230,6 +245,42 @@ function withOperationalEvidence(toolResult: ToolResult, evidence: OperationalEv
     summary: nextSummary,
     operational_evidence: nextEvidence
   };
+}
+
+function withPriorSuccessfulExecution(toolResult: ToolResult, priorSuccessfulSummary: string): ToolResult {
+  if (toolResult.status !== "failure") {
+    return toolResult;
+  }
+
+  return {
+    ...toolResult,
+    summary: [
+      "Initial executor pass succeeded before later rework/governance failure.",
+      `Initial success: ${priorSuccessfulSummary}`,
+      `Final failure: ${toolResult.summary}`
+    ].join(" "),
+    operational_evidence: [
+      ...(toolResult.operational_evidence ?? []),
+      `Initial executor pass succeeded before rework failure: ${priorSuccessfulSummary}`
+    ]
+  };
+}
+
+function buildSummaryActionsWithPriorSuccess(
+  successfulActions: ActionRecord[],
+  failureMessage: string
+): ActionRecord[] {
+  return [
+    ...successfulActions,
+    {
+      tool: "governance",
+      args: { phase: "auto_rework" },
+      status: "failure",
+      ok: false,
+      output: "Later tactical rework/governance step failed after an earlier successful executor pass.",
+      error: failureMessage
+    }
+  ];
 }
 
 function appendNotesToStateChange(stateChange: string, heading: string, notes: string[]): string {
@@ -639,6 +690,14 @@ export class LoopEngine {
       let execution = await activeAgent.execute({ subTask, round, goal, instructions, guardrails, paths: this.paths, onLog: log });
       phaseTimings.execution += Date.now() - executionStartedAt;
       let finalToolResult = withConcreteArtifactPaths(execution.toolResult, artifacts);
+      let summaryActions = execution.actions;
+      let lastSuccessfulExecution =
+        finalToolResult.status === "success"
+          ? {
+              actions: execution.actions,
+              toolResult: finalToolResult
+            }
+          : null;
       stateChange = await workspace.buildStateChange(snapshot);
       
       const activeEvaluator = subTask.assignee === "designer" ? this.uiEvaluator : this.evaluator;
@@ -658,11 +717,28 @@ export class LoopEngine {
           await enforceBudgetBeforeAction(`executor.execute auto-rework ${attempt}`);
           execution = await activeAgent.execute({ 
             subTask, round, goal, 
-            instructions: buildEvaluatorReworkInstructions(instructions, evaluation, attempt, tacticalReworkLimit, stateChange), 
+            instructions: buildEvaluatorReworkInstructions(
+              instructions,
+              evaluation,
+              attempt,
+              tacticalReworkLimit,
+              stateChange,
+              {
+                logPath: artifacts.logPath,
+                stateChangePath: artifacts.stateChangePath
+              }
+            ), 
             guardrails, paths: this.paths, onLog: log 
           });
           phaseTimings.execution += Date.now() - reworkExecutionStartedAt;
           finalToolResult = withConcreteArtifactPaths(execution.toolResult, artifacts);
+          if (finalToolResult.status === "success") {
+            lastSuccessfulExecution = {
+              actions: execution.actions,
+              toolResult: finalToolResult
+            };
+            summaryActions = execution.actions;
+          }
           stateChange = await workspace.buildStateChange(snapshot);
           const reworkEvaluationStartedAt = Date.now();
           await enforceBudgetBeforeAction(`evaluator.evaluate auto-rework ${attempt}`);
@@ -673,6 +749,17 @@ export class LoopEngine {
           );
           if (evaluation.decision === "pass") break;
         }
+      }
+
+      if (finalToolResult.status === "failure" && lastSuccessfulExecution) {
+        finalToolResult = withPriorSuccessfulExecution(
+          finalToolResult,
+          lastSuccessfulExecution.toolResult.summary
+        );
+        summaryActions = buildSummaryActionsWithPriorSuccess(
+          lastSuccessfulExecution.actions,
+          finalToolResult.error?.message ?? "rework/governance failure"
+        );
       }
 
       // --- Finalize Round ---
@@ -739,7 +826,7 @@ export class LoopEngine {
         artifacts,
         goal,
         subTask,
-        execution.actions,
+        summaryActions,
         finalToolResult,
         evaluation,
         metrics,

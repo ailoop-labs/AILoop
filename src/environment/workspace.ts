@@ -284,6 +284,9 @@ export class WorkspaceManager {
     const sections: string[] = [];
     const fileDiffs: string[] = [];
     for (const file of snapshot.files) {
+      if (isPathInside(this.paths.runsDir, file.path)) {
+        continue;
+      }
       const stat = await statIfExists(file.path);
       if (stat && !stat.isFile()) {
         continue;

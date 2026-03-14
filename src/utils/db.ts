@@ -11,6 +11,7 @@ export class DatabaseManager {
 
   constructor(config: DBConfig) {
     this.db = new Database(config.dbPath, { create: true });
+    this.db.exec("PRAGMA busy_timeout = 5000;");
     this.initializeSchema();
   }
 
