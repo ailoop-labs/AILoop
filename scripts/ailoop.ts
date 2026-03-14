@@ -7,6 +7,7 @@ import {
   instructLoop,
   listRuns,
   pauseLoop,
+  renderCliStatus,
   resumeLoop,
   startBackgroundLoop,
   stopLoop,
@@ -24,7 +25,7 @@ async function runForeground(): Promise<void> {
 
 async function printStatus(): Promise<void> {
   const status = await getCliStatus(config);
-  console.log(JSON.stringify(status, null, 2));
+  console.log(renderCliStatus(status));
 }
 
 async function watchLogs(): Promise<void> {

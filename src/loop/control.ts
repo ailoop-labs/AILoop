@@ -359,6 +359,58 @@ export async function getCliStatus(config: AppConfig): Promise<CliStatusPayload>
   };
 }
 
+function formatRoundContext(round: number): string {
+  return round > 0 ? `run round ${round}` : "not started";
+}
+
+function formatBudgetLimits(budget: BudgetLimits): string {
+  return `$${budget.usdPerRound}/round, ${budget.timeMinutes}m, ${budget.actions} actions`;
+}
+
+export function renderCliStatus(status: CliStatusPayload): string {
+  const lines = [
+    `State: ${status.state.state}`,
+    `Round context: ${formatRoundContext(status.state.round)}`,
+    `Process alive: ${status.state.pid_alive ? "yes" : "no"}`,
+    `Budget limits: ${formatBudgetLimits(status.budget)}`
+  ];
+
+  const crashRecovery = status.state.crash_recovery;
+  if (crashRecovery) {
+    lines.push("Reason: Crash recovery");
+    lines.push(`Interruption: ${crashRecovery.interruption_type === "startup_interrupted" ? "startup interrupted" : "round interrupted"}`);
+    if (crashRecovery.interruption_type === "round_interrupted") {
+      lines.push(`Interrupted during: ${crashRecovery.interrupted_state}`);
+    }
+    lines.push(`Round incomplete: ${crashRecovery.incomplete_work ? "yes" : "no"}`);
+    lines.push(`Details: ${crashRecovery.summary}`);
+    lines.push(
+      crashRecovery.status_check_finalized
+        ? "Recovery was finalized during this status check."
+        : "Run is already paused for crash review."
+    );
+    lines.push(`Next safe action: ${crashRecovery.next_action}`);
+    return lines.join("\n");
+  }
+
+  if (status.state.last_error) {
+    lines.push(`Last error: ${status.state.last_error}`);
+  }
+
+  if (status.state.current_budget) {
+    const { usage } = status.state.current_budget;
+    lines.push(
+      `Current budget usage: $${usage.usdUsed}, ${usage.elapsedMs}ms, ${usage.actionsUsed} actions`
+    );
+  }
+
+  if (status.state.active_requirement.summary) {
+    lines.push(`Active requirement: ${status.state.active_requirement.summary}`);
+  }
+
+  return lines.join("\n");
+}
+
 export async function listRuns(config: AppConfig, limit = 20): Promise<
   Array<{
     timestamp: string;

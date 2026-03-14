@@ -13,6 +13,7 @@ import {
   listRuns,
   listProjectRoles,
   prepareStartFlags,
+  renderCliStatus,
   resumeLoop,
   startBackgroundLoop,
   tailLatestLog
@@ -1060,6 +1061,105 @@ describe("getCliStatus", () => {
     });
 
     await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("renders compact startup-interrupted crash recovery status without marking work incomplete", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-cli-status-startup-test-"));
+    const paths = buildLoopPaths(homeDir);
+    const config = makeTestConfig(homeDir);
+    await fs.mkdir(homeDir, { recursive: true });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      round: 4,
+      state: "starting",
+      pid: 999999
+    });
+
+    const output = renderCliStatus(await getCliStatus(config));
+
+    expect(output).toContain("State: paused");
+    expect(output).toContain("Reason: Crash recovery");
+    expect(output).toContain("Interruption: startup interrupted");
+    expect(output).toContain("Round context: run round 4");
+    expect(output).toContain("Round incomplete: no");
+    expect(output).toContain("Initialization was interrupted before normal round execution began.");
+    expect(output).toContain("Recovery was finalized during this status check.");
+    expect(output).toContain("Next safe action: Inspect the run state and resume explicitly when safe.");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("renders compact round-interrupted crash recovery status with incomplete work", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-cli-status-round-test-"));
+    const paths = buildLoopPaths(homeDir);
+    const config = makeTestConfig(homeDir);
+    await fs.mkdir(homeDir, { recursive: true });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      round: 3,
+      state: "cooldown",
+      pid: 999999
+    });
+
+    const output = renderCliStatus(await getCliStatus(config));
+
+    expect(output).toContain("State: paused");
+    expect(output).toContain("Reason: Crash recovery");
+    expect(output).toContain("Interruption: round interrupted");
+    expect(output).toContain("Interrupted during: cooldown");
+    expect(output).toContain("Round context: run round 3");
+    expect(output).toContain("Round incomplete: yes");
+    expect(output).toContain("Round execution was interrupted during cooldown; work may be incomplete.");
+    expect(output).toContain("Recovery was finalized during this status check.");
+    expect(output).toContain("Next safe action: Inspect the run state and resume explicitly when safe.");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("renders already-paused crash recovery without implying a new status mutation", async () => {
+    const output = renderCliStatus({
+      budget: {
+        usdPerRound: 1,
+        timeMinutes: 1,
+        actions: 10
+      },
+      state: {
+        ...defaultLoopState(),
+        state: "paused",
+        round: 2,
+        pid_alive: false,
+        last_error:
+          "Crash recovery: Interrupted state recovered during startup. Startup interrupted during initialization because process 123 was not alive. Normal round execution did not begin. Run paused for review. Next action: Inspect the run state and resume explicitly when safe.",
+        crash_recovery: {
+          interruption_type: "startup_interrupted",
+          interrupted_state: "starting",
+          recovered_by: "startup",
+          status_check_finalized: false,
+          normal_round_execution_started: false,
+          incomplete_work: false,
+          reason: "process 123 was not alive",
+          summary: "Initialization was interrupted before normal round execution began.",
+          next_action: "Inspect the run state and resume explicitly when safe."
+        },
+        active_requirement: {
+          path: "",
+          exists: false,
+          artifact_status: "missing",
+          lifecycle_status: "active",
+          title: null,
+          summary: null,
+          acceptance_criteria_total: 0,
+          acceptance_criteria_completed: 0,
+          markdown: null,
+          updated_at: null
+        }
+      }
+    });
+
+    expect(output).toContain("Run is already paused for crash review.");
+    expect(output).not.toContain("Recovery was finalized during this status check.");
   });
 });
 
