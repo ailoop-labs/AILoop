@@ -71,7 +71,30 @@ describe("buildProductManagerPrompt", () => {
   test("forbids execution-task output and requires markdown requirement content", () => {
     const prompt = buildProductManagerPrompt(
       createContext({
-        current_requirement_markdown: "# Requirement Slice: Existing\n"
+        current_requirement_markdown: "# Requirement Slice: Existing\n",
+        runtime_policy_brief: [
+          "Documentation precedes code.",
+          "Use Bun and keep dependencies minimal."
+        ],
+        source_manifest: {
+          mandatory_sources: [
+            {
+              path: "README.md",
+              reason: "Product constitution"
+            },
+            {
+              path: "AGENTS.md",
+              reason: "Project principles only"
+            }
+          ],
+          optional_sources: [
+            {
+              path: "docs/plans/current.md",
+              reason: "Read only if mandatory sources leave a concrete gap."
+            }
+          ],
+          expansion_rule: "Read mandatory sources first, then expand only after naming the missing information."
+        }
       }),
       "# Product Manager Role\n\nProject-specific PM guidance.",
       "/tmp/example-repo"
@@ -80,6 +103,11 @@ describe("buildProductManagerPrompt", () => {
     expect(prompt).toContain("Do not emit round-level execution tasks");
     expect(prompt).toContain("Return Markdown requirement content");
     expect(prompt).toContain("# Requirement Slice: Existing");
+    expect(prompt).toContain("Runtime-safe AGENTS policy brief");
+    expect(prompt).toContain("Documentation precedes code.");
+    expect(prompt).toContain("\"mandatory_sources\"");
+    expect(prompt).toContain("\"AGENTS.md\"");
+    expect(prompt).toContain("Read mandatory sources first");
   });
 });
 
@@ -129,6 +157,9 @@ describe("ProductManagerAgent", () => {
     expect(capturedPrompt).toContain("Custom product manager guidance.");
     expect(capturedPrompt).toContain("Repository root:");
     expect(capturedPrompt).toContain("Do not use external development-assistant skills");
+    expect(capturedPrompt).toContain("Runtime-safe AGENTS policy brief");
+    expect(capturedPrompt).toContain("Source manifest");
+    expect(capturedPrompt).toContain("AGENTS.md");
     expect(capturedIsolationEnabled).toBe(true);
     expect(capturedIsolationGuide).toContain("Internal Runtime Agent Session");
     expect(capturedCwd).toBe(process.cwd());

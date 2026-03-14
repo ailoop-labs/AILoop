@@ -71,6 +71,7 @@ Note on terminology:
 * **Workflow-First Failure Analysis**: When a task fails, first diagnose why the *governance and loop mechanisms* failed to resolve the issue, prioritizing the reliability of the autonomous system.
 * **Compact Handoffs**: When one role hands off to another, prefer a concise summary, artifact manifest, and targeted evidence excerpts. Do not force downstream roles to ingest entire logs or massive raw diffs unless a narrow excerpt is strictly necessary.
 * **Runtime Instruction Isolation**: Internal AILoop agents must not inherit repository-local `AGENTS.md` files, external skill catalogs, or collaborative workflows intended for AI coding assistants helping humans modify the AILoop repository.
+* **Tiered Source Reading**: Runtime roles should read a fixed canonical source set first, then expand only when they can name the missing information and the exact source likely to resolve it.
 
 ## 3. Core Workflow and Sequence (The Loop Sequence)
 
@@ -91,6 +92,9 @@ Planning/runtime isolation rule:
 - internal agent Codex sessions should run from an isolated scratch context rather than the repository root when possible
 - if they need to inspect repository files, the prompt should provide the repo root explicitly and require absolute paths or an explicit `cd`
 - repository-local coding-assistant skills must not be treated as runtime product-planning or evaluation instructions
+- `AGENTS.md` should still influence runtime behavior, but only through an engine-supplied runtime-safe policy brief that preserves project principles such as DoD, Ruthless Simplicity, secret redaction, and high-bandwidth UX
+- the ProductManager should receive a source manifest whose mandatory sources include `README.md`, `ARCHITECTURE.md`, `AILOOP_ENGINE_WORKFLOW.md`, and `AGENTS.md` (project principles only)
+- optional docs/plans should be navigational candidates, not automatically scanned by default
 
 ### Phase 3: Execute
 1. The engine passes the `SubTask` to the **ExecutorAgent**.
@@ -111,6 +115,12 @@ Evaluation handoff rules:
 - `State Change Artifact` should emphasize intentional workspace mutations and concise evidence notes
 - if the Evaluator itself cannot complete because its Codex call fails, the engine must record that as evaluator infrastructure failure instead of pretending the round merely lacked ordinary evidence
 - evaluator runtime sessions must not inherit development-assistant instructions from the repository root
+
+ProductManager handoff rules:
+- start from the mandatory source manifest before exploring optional material
+- treat `AGENTS.md` as a source of project-level runtime principles, not as a direct external-assistant workflow to obey literally
+- if required context is still missing after the mandatory read set, declare the missing gap and inspect only the one or two listed optional sources most likely to resolve it
+- if the gap remains unresolved, write concise `Open Questions` instead of guessing or broadly scanning the repository
 
 ### Phase 5: Rework & Break
 1. If judged as a failure, the engine feeds the Failure Justification back to the Executor.

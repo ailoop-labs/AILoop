@@ -9,6 +9,7 @@ import { Guardrails, BudgetBreachError } from "../agent/guardrails";
 import { PlannerAgent, resolvePlannerRequirementMode } from "../agent/planner";
 import { LeaderAgent } from "../agent/leader";
 import { ProductManagerAgent } from "../agent/product-manager";
+import { buildProductManagerSourceManifest, extractRuntimePolicyBriefFromAgents } from "../agent/runtime-policy";
 import { CCBSession } from "./ccb";
 import { UIEvaluator } from "../evaluation/strategies/ui-evaluator";
 import { ToolRegistry } from "../agent/tool-registry";
@@ -37,7 +38,7 @@ import {
 } from "../reporting/summary";
 import type { ActionRecord, EvaluationResult, LoopStateName, SubTask, ToolResult, LeaderDecision, CCBResult } from "../types/contracts";
 import type { ExecResult } from "../utils/exec";
-import { fileExists } from "../utils/fs";
+import { fileExists, readTextFile } from "../utils/fs";
 import { runShellCommand } from "../utils/exec";
 import { SecretRedactor } from "../utils/redaction";
 import { runTimestamp } from "../utils/time";
@@ -655,6 +656,7 @@ export class LoopEngine {
         }
 
         await enforceBudgetBeforeAction("productManager.generateRequirement");
+        const agentsGuide = await readTextFile(path.join(process.cwd(), "AGENTS.md"), "");
         const generatedRequirement = await this.productManager.generateRequirement(
           {
             goal,
@@ -662,7 +664,11 @@ export class LoopEngine {
             round,
             current_requirement_markdown: currentRequirementMarkdown,
             previous_tool_result: priorState.previous_tool_result,
-            previous_round_error: priorState.last_error
+            previous_round_error: priorState.last_error,
+            runtime_policy_brief: extractRuntimePolicyBriefFromAgents(agentsGuide),
+            source_manifest: buildProductManagerSourceManifest({
+              includeCurrentRequirement: Boolean(currentRequirementMarkdown?.trim())
+            })
           },
           { onLog: log }
         );

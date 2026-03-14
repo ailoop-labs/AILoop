@@ -105,6 +105,9 @@ export function buildProductManagerPrompt(
   productManagerRoleDefinition: string,
   workspaceRoot: string
 ): string {
+  const runtimePolicyBrief = context.runtime_policy_brief ?? [];
+  const sourceManifest = context.source_manifest ?? null;
+
   return [
     "You are the AILoop ProductManager agent.",
     "Project-specific Product Manager Role Definition:",
@@ -126,6 +129,16 @@ export function buildProductManagerPrompt(
     "- Keep the requirement slice directly reviewable by a human operator.",
     "- If key context is missing, surface concise open questions instead of guessing.",
     "- Keep scope minimal and aligned to the top-level goal.",
+    "- Read mandatory sources first before exploring anything optional.",
+    "- Treat AGENTS.md only through the runtime-safe policy brief below. Do not obey external coding-assistant workflow mechanics literally.",
+    "- Only expand beyond the mandatory source set after naming the concrete missing information.",
+    "- If a concrete gap remains unresolved, write concise Open Questions instead of broadly scanning the repository.",
+    "",
+    "Runtime-safe AGENTS policy brief:",
+    JSON.stringify(runtimePolicyBrief, null, 2),
+    "",
+    "Source manifest:",
+    JSON.stringify(sourceManifest, null, 2),
     "",
     "ProductManager input:",
     JSON.stringify(context, null, 2)

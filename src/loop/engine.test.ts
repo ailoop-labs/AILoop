@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../config/env";
-import type { ActionRecord, EvaluationResult, SubTask, ToolResult } from "../types/contracts";
+import type { ActionRecord, EvaluationResult, ProductManagerContext, SubTask, ToolResult } from "../types/contracts";
 import { ensureLoopHome, readLoopState, type LoopPaths, writeLoopState } from "./state";
 import { writeActiveRequirementArtifact } from "../product/requirements";
 import {
@@ -209,9 +209,11 @@ describe("LoopEngine auto rework", () => {
       recommended_tools: ["read_file", "write_file", "run_shell"]
     };
 
+    let capturedProductManagerContext: ProductManagerContext | null = null;
+
     const mutable = engine as unknown as {
       planner: { plan: (context: Record<string, unknown>) => Promise<SubTask> };
-      productManager: { generateRequirement: (context: Record<string, unknown>) => Promise<string> };
+      productManager: { generateRequirement: (context: ProductManagerContext) => Promise<string> };
       executor: {
         execute: () => Promise<{
           actions: ActionRecord[];
@@ -237,8 +239,12 @@ describe("LoopEngine auto rework", () => {
       }
     };
     mutable.productManager = {
-      generateRequirement: async () =>
+      generateRequirement: async (context) => {
+        capturedProductManagerContext = context;
+        return (
         "# Requirement Slice: Console Health\n\n## Problem\nOperators need a reviewable health signal.\n"
+        );
+      }
     };
     mutable.executor = {
       execute: async () => ({
@@ -266,6 +272,31 @@ describe("LoopEngine auto rework", () => {
     expect(plannerCalls[1].requirement_artifact_status).toBe("ready");
     expect(plannerCalls[1].requirement_artifact_summary).toContain("Requirement Slice: Console Health");
     expect(await fs.readFile(paths.activeRequirementPath, "utf8")).toContain("# Requirement Slice: Console Health");
+    expect(capturedProductManagerContext).not.toBeNull();
+    if (!capturedProductManagerContext) {
+      throw new Error("Expected ProductManager context to be captured.");
+    }
+    const productManagerContext: ProductManagerContext =
+      capturedProductManagerContext as unknown as ProductManagerContext;
+    expect(productManagerContext.runtime_policy_brief).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Documentation precedes code"),
+        expect.stringContaining("Ruthless Simplicity"),
+        expect.stringContaining("Secret redaction")
+      ])
+    );
+    expect(productManagerContext.source_manifest).toEqual(
+      expect.objectContaining({
+        mandatory_sources: expect.arrayContaining([
+          expect.objectContaining({ path: "README.md" }),
+          expect.objectContaining({ path: "ARCHITECTURE.md" }),
+          expect.objectContaining({ path: "AILOOP_ENGINE_WORKFLOW.md" }),
+          expect.objectContaining({ path: "AGENTS.md", reason: expect.stringContaining("Project principles only") })
+        ]),
+        optional_sources: expect.any(Array),
+        expansion_rule: expect.stringContaining("Read mandatory sources first")
+      })
+    );
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });

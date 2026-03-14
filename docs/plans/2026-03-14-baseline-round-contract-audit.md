@@ -3,6 +3,16 @@
 Date: 2026-03-14
 Status: Completed audit of the current workspace against the baseline round contract in `README.md` and `ARCHITECTURE.md`.
 
+## Follow-on Status Update
+
+The original missing-`state.json` gap captured below is no longer the current repository state. A follow-on audit at `docs/plans/2026-03-14-canonical-run-state-gap-audit.md` rechecked the canonical persisted run-state slice after the later state-sync work landed.
+
+Minimal evidence excerpt from that follow-on audit:
+
+- Documented contract: `ARCHITECTURE.md:470-490` and `.ailoop/product-requirements/current.md:34-43` still require `AILOOP_HOME/state.json` to be the canonical persisted run state and to expose the current goal or a goal reference.
+- Persistence entry points now present: `src/loop/state.ts:10-31` and `src/loop/state.ts:147-201` define and synchronize `state.json`; `src/loop/control.ts:174-180`, `src/loop/control.ts:210-215`, `src/loop/control.ts:243-247`, and `src/loop/control.ts:279-329` persist lifecycle transitions and return operator-visible status from that state.
+- Verified remaining gap: `src/types/contracts.ts:168-181` and the live `.ailoop/state.json` snapshot still omit goal metadata, while `src/server.ts:166-179` keeps `/api/status` and `/api/goal` separate.
+
 ## Scope
 
 This audit checks the current repository against the baseline MVP round contract captured in:

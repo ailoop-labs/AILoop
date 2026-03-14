@@ -21,8 +21,9 @@ The MVP follows five implementation principles derived from the product goal:
 3. **Product definition, project planning, execution, and evaluation are distinct contracts.** Requirement shaping, round-level task selection, acting, and judging must be swappable and independently testable.
 4. **Artifacts are first-class outputs.** Each round must leave behind reviewable files that explain what happened.
 5. **Cross-agent handoffs must stay compact and navigational.** Agents should receive concise evidence briefs, artifact manifests, and targeted excerpts by default instead of raw log dumps or full artifact bodies.
-6. **Pause is the default safety response.** Budget breaches, repeated evaluator failures, crash recovery, and explicit human intervention all converge on a paused state.
-7. **Internal runtime agents must be isolated from external development-assistant guides.** Repository-local `AGENTS.md` files, skill catalogs, and collaborative coding workflows intended for humans building AILoop must not silently alter the behavior of ProductManager, ProjectPlanner, Evaluator, or other internal runtime agents.
+6. **Mandatory source sets must be explicit and tiered.** Runtime roles should read a small, fixed canonical set first, then expand only when a declared information gap remains.
+7. **Pause is the default safety response.** Budget breaches, repeated evaluator failures, crash recovery, and explicit human intervention all converge on a paused state.
+8. **Internal runtime agents must be isolated from external development-assistant guides.** Repository-local `AGENTS.md` files, skill catalogs, and collaborative coding workflows intended for humans building AILoop must not silently alter the behavior of ProductManager, ProjectPlanner, Evaluator, or other internal runtime agents.
 
 ## 3. MVP System Boundaries
 
@@ -84,6 +85,13 @@ The agent layer contains multiple role-separated contracts, allowing planning, a
 - **CCB Experts (Senior Dev, QA Lead, Product Owner)** provide specialized governance and consensus before any change to the core mission, architecture, or "Constitution" is permitted.
 
 The `ProductManager` is a runtime product-definition role. It is distinct from the governance-phase `Product Owner` CCB expert.
+
+For requirement shaping, the `ProductManager` should consume a compact planning handoff with:
+
+- a fixed mandatory source manifest,
+- a runtime-safe policy brief distilled from `AGENTS.md`,
+- the current requirement lifecycle state,
+- and only the smallest optional source list needed for targeted expansion.
 
 ### 4.4 Tool Registry
 
@@ -257,6 +265,14 @@ ProjectPlanner input:
 - remaining round budget.
 
 If product definition is missing, stale, or complete for the current slice, the engine must invoke `ProductManager` before finalizing the round task. The primary `ProductManager` output is a human-readable Markdown requirement artifact.
+
+`ProductManager` handoff rule:
+
+- the engine should pass a compact source manifest instead of relying on open-ended repository exploration,
+- the mandatory set should include `README.md`, `ARCHITECTURE.md`, `AILOOP_ENGINE_WORKFLOW.md`, and `AGENTS.md`,
+- `AGENTS.md` must enter runtime handoffs only through a runtime-safe policy brief that preserves project-level principles and excludes external coding-assistant workflows,
+- optional plan or artifact sources should be listed as navigational candidates, not inlined wholesale,
+- the `ProductManager` should expand beyond the mandatory set only after declaring a concrete missing-information gap.
 
 ProjectPlanner output is strict JSON matching the `SubTask` contract:
 

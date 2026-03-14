@@ -77,6 +77,17 @@ export interface PlannerContext {
   requirement_artifact_summary?: string | null;
 }
 
+export interface ContextSourceReference {
+  path: string;
+  reason: string;
+}
+
+export interface ContextSourceManifest {
+  mandatory_sources: ContextSourceReference[];
+  optional_sources: ContextSourceReference[];
+  expansion_rule: string;
+}
+
 export interface ProductManagerContext {
   goal: string;
   instructions: string[];
@@ -84,6 +95,8 @@ export interface ProductManagerContext {
   current_requirement_markdown: string | null;
   previous_tool_result: ToolResult | null;
   previous_round_error: string | null;
+  runtime_policy_brief?: string[];
+  source_manifest?: ContextSourceManifest | null;
 }
 
 export interface RequirementArtifactSnapshot {
