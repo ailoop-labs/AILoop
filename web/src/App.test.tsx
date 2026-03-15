@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CrashRecoveryPanel, RunArtifactEvidenceGrid, summarizeApiError } from "./App";
+import { CrashRecoveryPanel, OperatorReasonPanel, RunArtifactEvidenceGrid, summarizeApiError } from "./App";
 import type { RoundReport } from "./run-history";
 
 function makeReport(overrides: Partial<RoundReport> = {}): RoundReport {
@@ -100,6 +100,35 @@ describe("CrashRecoveryPanel", () => {
 
   test("renders nothing when no recovery status is present", () => {
     expect(renderToStaticMarkup(<CrashRecoveryPanel crashRecovery={null} />)).toBe("");
+  });
+});
+
+describe("OperatorReasonPanel", () => {
+  test("renders a prominent operator-facing pause reason with next action guidance", () => {
+    const html = renderToStaticMarkup(
+      <OperatorReasonPanel
+        operatorReason={{
+          kind: "budget_breach",
+          title: "Budget breach",
+          summary: "Paused because the action budget was exceeded (7 / 5).",
+          next_action: "Review the last budget snapshot and reduce scope or raise budgets before resuming.",
+          severity: "critical"
+        }}
+      />
+    );
+
+    expect(html).toContain("Pause / Risk Reason");
+    expect(html).toContain("Budget breach");
+    expect(html).toContain("Paused because the action budget was exceeded (7 / 5).");
+    expect(html).toContain("Next Safe Action");
+    expect(html).toContain("Review the last budget snapshot and reduce scope or raise budgets before resuming.");
+  });
+
+  test("renders a stable empty state when no pause or risk reason is active", () => {
+    const html = renderToStaticMarkup(<OperatorReasonPanel operatorReason={null} />);
+
+    expect(html).toContain("No active pause or risk signal");
+    expect(html).toContain("The current status surface does not show a live pause or safety block.");
   });
 });
 

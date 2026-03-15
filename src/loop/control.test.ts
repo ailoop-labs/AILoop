@@ -892,6 +892,13 @@ describe("getLoopStatus", () => {
       state: "paused",
       round: 3,
       pid_alive: false,
+      operator_reason: {
+        kind: "manual_pause",
+        title: "Manual pause",
+        summary: "Run is paused and waiting for operator review.",
+        next_action: "Inspect the run state and resume explicitly when safe.",
+        severity: "warning"
+      },
       active_requirement: {
         path: paths.activeRequirementPath,
         exists: true,
@@ -905,6 +912,43 @@ describe("getLoopStatus", () => {
       }
     });
     expect(status.active_requirement.updated_at).toEqual(expect.any(String));
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("derives a structured budget breach reason from paused runtime state", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-budget-reason-test-"));
+    const paths = buildLoopPaths(homeDir);
+    await fs.mkdir(homeDir, { recursive: true });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "paused",
+      round: 8,
+      last_error: "BudgetBreach: action budget exceeded",
+      current_budget: {
+        limits: {
+          usdPerRound: 1,
+          timeMinutes: 2,
+          actions: 5
+        },
+        usage: {
+          usdUsed: 0.6,
+          actionsUsed: 7,
+          elapsedMs: 30_000
+        }
+      }
+    });
+
+    const status = await getLoopStatus(makeTestConfig(homeDir));
+
+    expect(status.operator_reason).toEqual({
+      kind: "budget_breach",
+      title: "Budget breach",
+      summary: "Paused because the action budget was exceeded (7 / 5).",
+      next_action: "Review the last budget snapshot and reduce scope or raise budgets before resuming.",
+      severity: "critical"
+    });
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
@@ -929,6 +973,13 @@ describe("getLoopStatus", () => {
     expect(status.pid_alive).toBe(false);
     expect(status.last_error).toContain("Crash recovery");
     expect(status.last_error).toContain("status check");
+    expect(status.operator_reason).toEqual({
+      kind: "crash_recovery",
+      title: "Crash recovery",
+      summary: "Initialization was interrupted before normal round execution began.",
+      next_action: "Inspect the run state and resume explicitly when safe.",
+      severity: "critical"
+    });
     expect(status.crash_recovery).toEqual({
       interruption_type: "startup_interrupted",
       interrupted_state: "starting",
@@ -982,6 +1033,13 @@ describe("getLoopStatus", () => {
     expect(status.current_budget).toEqual(staleState.current_budget);
     expect(status.last_error).toContain("Crash recovery");
     expect(status.last_error).toContain("status check");
+    expect(status.operator_reason).toEqual({
+      kind: "crash_recovery",
+      title: "Crash recovery",
+      summary: "Round execution was interrupted during cooldown; work may be incomplete.",
+      next_action: "Inspect the run state and resume explicitly when safe.",
+      severity: "critical"
+    });
     expect(status.crash_recovery).toEqual({
       interruption_type: "round_interrupted",
       interrupted_state: "cooldown",
@@ -1079,7 +1137,8 @@ describe("getCliStatus", () => {
     const output = renderCliStatus(await getCliStatus(config));
 
     expect(output).toContain("State: paused");
-    expect(output).toContain("Reason: Crash recovery");
+    expect(output).toContain("Pause / risk reason: Crash recovery");
+    expect(output).toContain("Reason summary: Initialization was interrupted before normal round execution began.");
     expect(output).toContain("Interruption: startup interrupted");
     expect(output).toContain("Round context: run round 4");
     expect(output).toContain("Round incomplete: no");
@@ -1106,7 +1165,8 @@ describe("getCliStatus", () => {
     const output = renderCliStatus(await getCliStatus(config));
 
     expect(output).toContain("State: paused");
-    expect(output).toContain("Reason: Crash recovery");
+    expect(output).toContain("Pause / risk reason: Crash recovery");
+    expect(output).toContain("Reason summary: Round execution was interrupted during cooldown; work may be incomplete.");
     expect(output).toContain("Interruption: round interrupted");
     expect(output).toContain("Interrupted during: cooldown");
     expect(output).toContain("Round context: run round 3");
@@ -1130,6 +1190,13 @@ describe("getCliStatus", () => {
         state: "paused",
         round: 2,
         pid_alive: false,
+        operator_reason: {
+          kind: "crash_recovery",
+          title: "Crash recovery",
+          summary: "Initialization was interrupted before normal round execution began.",
+          next_action: "Inspect the run state and resume explicitly when safe.",
+          severity: "critical"
+        },
         last_error:
           "Crash recovery: Interrupted state recovered during startup. Startup interrupted during initialization because process 123 was not alive. Normal round execution did not begin. Run paused for review. Next action: Inspect the run state and resume explicitly when safe.",
         crash_recovery: {
@@ -1160,6 +1227,63 @@ describe("getCliStatus", () => {
 
     expect(output).toContain("Run is already paused for crash review.");
     expect(output).not.toContain("Recovery was finalized during this status check.");
+  });
+
+  test("renders a structured budget breach reason before lower-level status details", () => {
+    const output = renderCliStatus({
+      budget: {
+        usdPerRound: 1,
+        timeMinutes: 1,
+        actions: 10
+      },
+      state: {
+        ...defaultLoopState(),
+        state: "paused",
+        round: 2,
+        pid_alive: false,
+        operator_reason: {
+          kind: "budget_breach",
+          title: "Budget breach",
+          summary: "Paused because the action budget was exceeded (11 / 10).",
+          next_action: "Review the last budget snapshot and reduce scope or raise budgets before resuming.",
+          severity: "critical"
+        },
+        last_error: "BudgetBreach: action budget exceeded",
+        crash_recovery: null,
+        current_budget: {
+          limits: {
+            usdPerRound: 1,
+            timeMinutes: 1,
+            actions: 10
+          },
+          usage: {
+            usdUsed: 0.3,
+            actionsUsed: 11,
+            elapsedMs: 12_000
+          }
+        },
+        active_requirement: {
+          path: "",
+          exists: false,
+          artifact_status: "missing",
+          lifecycle_status: "active",
+          title: null,
+          summary: "Keep the operator-visible reason in sync with persisted state.",
+          acceptance_criteria_total: 0,
+          acceptance_criteria_completed: 0,
+          markdown: null,
+          updated_at: null
+        }
+      }
+    });
+
+    expect(output).toContain("Pause / risk reason: Budget breach");
+    expect(output).toContain("Reason summary: Paused because the action budget was exceeded (11 / 10).");
+    expect(output).toContain(
+      "Next safe action: Review the last budget snapshot and reduce scope or raise budgets before resuming."
+    );
+    expect(output).toContain("Last error: BudgetBreach: action budget exceeded");
+    expect(output).toContain("Current budget usage: $0.3, 12000ms, 11 actions");
   });
 });
 

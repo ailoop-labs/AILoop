@@ -17,6 +17,7 @@ import type {
   CrashRecoveryStatus,
   EvaluationResult,
   LoopStateData,
+  OperatorStatusReason,
   RequirementArtifactSnapshot
 } from "../types/contracts";
 import { fileExists, readJsonFile, readTextFile } from "../utils/fs";
@@ -41,6 +42,7 @@ import {
   clearFlag,
   defaultLoopState,
   ensureLoopHome,
+  hasFlag,
   isPidAlive,
   parseCrashRecoveryMessage,
   readLoopState,
@@ -281,6 +283,7 @@ export async function instructLoop(config: AppConfig, message: string): Promise<
 export interface LoopStatusView extends LoopStateData {
   pid_alive: boolean;
   crash_recovery: CrashRecoveryStatus | null;
+  operator_reason: OperatorStatusReason | null;
   active_requirement: RequirementArtifactSnapshot;
 }
 
@@ -300,6 +303,141 @@ function deriveCrashRecoveryStatus(state: LoopStateData, statusCheckFinalized: b
   };
 }
 
+const DEFAULT_REVIEW_ACTION = "Inspect the run state and resume explicitly when safe.";
+
+function formatBudgetBreachSummary(state: LoopStateData, message: string): string {
+  let label = "configured budget";
+  if (/USD budget exceeded/i.test(message)) {
+    label = "USD budget";
+  } else if (/time budget exceeded/i.test(message)) {
+    label = "time budget";
+  } else if (/action budget exceeded/i.test(message)) {
+    label = "action budget";
+  }
+
+  if (!state.current_budget) {
+    return `Paused because the ${label} was exceeded.`;
+  }
+
+  const { limits, usage } = state.current_budget;
+  if (label === "USD budget") {
+    return `Paused because the USD budget was exceeded (${usage.usdUsed.toFixed(4)} / ${limits.usdPerRound}).`;
+  }
+  if (label === "time budget") {
+    return `Paused because the time budget was exceeded (${Math.round(usage.elapsedMs / 1000)}s / ${limits.timeMinutes}m).`;
+  }
+  if (label === "action budget") {
+    return `Paused because the action budget was exceeded (${usage.actionsUsed} / ${limits.actions}).`;
+  }
+  return `Paused because a configured budget was exceeded.`;
+}
+
+function trimReasonPrefix(message: string, prefixPattern: RegExp): string {
+  return message.replace(prefixPattern, "").trim() || message;
+}
+
+function deriveOperatorReason(
+  state: LoopStateData,
+  options: {
+    crashRecovery: CrashRecoveryStatus | null;
+    pauseRequested: boolean;
+  }
+): OperatorStatusReason | null {
+  if (options.crashRecovery) {
+    return {
+      kind: "crash_recovery",
+      title: "Crash recovery",
+      summary: options.crashRecovery.summary,
+      next_action: options.crashRecovery.next_action,
+      severity: "critical"
+    };
+  }
+
+  const message = state.last_error?.trim() ?? "";
+
+  if (options.pauseRequested && state.state !== "paused") {
+    return {
+      kind: "manual_pause_requested",
+      title: "Pause requested",
+      summary: "Operator requested a pause. The engine will stop at the next safe boundary.",
+      next_action: "Wait for the run to enter paused, then review and resume explicitly when safe.",
+      severity: "warning"
+    };
+  }
+
+  if (/BudgetBreach:/i.test(message)) {
+    return {
+      kind: "budget_breach",
+      title: "Budget breach",
+      summary: formatBudgetBreachSummary(state, message),
+      next_action: "Review the last budget snapshot and reduce scope or raise budgets before resuming.",
+      severity: "critical"
+    };
+  }
+
+  if (/EvaluatorFailureLimit:/i.test(message)) {
+    return {
+      kind: "evaluator_failure_limit",
+      title: "Evaluator failure threshold",
+      summary: trimReasonPrefix(message, /^EvaluatorFailureLimit:\s*/i),
+      next_action: "Inspect the evaluator findings and narrow the next sub-task before resuming.",
+      severity: "critical"
+    };
+  }
+
+  if (/rollback (failed|unsupported|incomplete)/i.test(message)) {
+    return {
+      kind: "rollback_incomplete",
+      title: "Rollback incomplete",
+      summary: message,
+      next_action: "Inspect the workspace state and repair or revert it before resuming.",
+      severity: "critical"
+    };
+  }
+
+  if (/guardrail|unsafe/i.test(message)) {
+    return {
+      kind: "guardrail_block",
+      title: "Guardrail block",
+      summary: message,
+      next_action: "Inspect the blocked condition and resolve it before resuming.",
+      severity: "critical"
+    };
+  }
+
+  if (/^(Fatal error|Governance failed):/i.test(message)) {
+    return {
+      kind: "engine_error",
+      title: "Engine error",
+      summary: trimReasonPrefix(message, /^(Fatal error|Governance failed):\s*/i),
+      next_action: "Inspect the error and recover the run state before resuming.",
+      severity: "critical"
+    };
+  }
+
+  if (state.state === "paused" || options.pauseRequested) {
+    return {
+      kind: "manual_pause",
+      title: "Manual pause",
+      summary: message || "Run is paused and waiting for operator review.",
+      next_action: DEFAULT_REVIEW_ACTION,
+      severity: "warning"
+    };
+  }
+
+  if (state.state === "error" && message) {
+    return {
+      kind: "engine_error",
+      title: "Engine error",
+      summary: message,
+      next_action: "Inspect the error and recover the run state before continuing.",
+      severity: "critical"
+    };
+  }
+
+  return null;
+}
+
 export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> {
   const paths = await ensureLoopHomeAndGetPaths(config);
   const redactor = new SecretRedactor(process.env);
@@ -307,10 +445,15 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
 
   const recovered = await recoverInterruptedLoopState(paths, "status check");
   if (recovered) {
+    const crashRecovery = deriveCrashRecoveryStatus(recovered, true);
     return {
       ...recovered,
       pid_alive: false,
-      crash_recovery: deriveCrashRecoveryStatus(recovered, true),
+      crash_recovery: crashRecovery,
+      operator_reason: deriveOperatorReason(recovered, {
+        crashRecovery,
+        pauseRequested: true
+      }),
       active_requirement: activeRequirement
     };
   }
@@ -318,6 +461,7 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
   const state = await readLoopState(paths);
   const pid = state.pid ?? (await readPid(paths));
   const pidAlive = pid ? isPidAlive(pid) : false;
+  const pauseRequested = await hasFlag(paths.pauseFlagPath);
 
   // Ensure idle state doesn't have stale budget/PID
   if (state.state === "idle" && (state.current_budget || state.pid)) {
@@ -331,15 +475,22 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
       ...normalized,
       pid_alive: false,
       crash_recovery: null,
+      operator_reason: null,
       active_requirement: activeRequirement
     };
   }
+
+  const crashRecovery = deriveCrashRecoveryStatus(state, false);
 
   return {
     ...state,
     pid: pid ?? null,
     pid_alive: pidAlive,
-    crash_recovery: deriveCrashRecoveryStatus(state, false),
+    crash_recovery: crashRecovery,
+    operator_reason: deriveOperatorReason(state, {
+      crashRecovery,
+      pauseRequested
+    }),
     active_requirement: activeRequirement
   };
 }
@@ -375,9 +526,14 @@ export function renderCliStatus(status: CliStatusPayload): string {
     `Budget limits: ${formatBudgetLimits(status.budget)}`
   ];
 
+  if (status.state.operator_reason) {
+    lines.push(`Pause / risk reason: ${status.state.operator_reason.title}`);
+    lines.push(`Reason summary: ${status.state.operator_reason.summary}`);
+    lines.push(`Next safe action: ${status.state.operator_reason.next_action}`);
+  }
+
   const crashRecovery = status.state.crash_recovery;
   if (crashRecovery) {
-    lines.push("Reason: Crash recovery");
     lines.push(`Interruption: ${crashRecovery.interruption_type === "startup_interrupted" ? "startup interrupted" : "round interrupted"}`);
     if (crashRecovery.interruption_type === "round_interrupted") {
       lines.push(`Interrupted during: ${crashRecovery.interrupted_state}`);

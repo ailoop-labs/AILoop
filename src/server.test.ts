@@ -528,6 +528,13 @@ describe("console server API contract", () => {
       pid: null,
       pid_alive: false,
       crash_recovery: null,
+      operator_reason: {
+        kind: "manual_pause",
+        title: "Manual pause",
+        summary: "Waiting for review",
+        next_action: "Inspect the run state and resume explicitly when safe.",
+        severity: "warning"
+      },
       last_error: "Waiting for review",
       consecutive_evaluator_failures: 2,
       previous_tool_result: {
@@ -617,6 +624,13 @@ describe("console server API contract", () => {
       pid: null,
       pid_alive: false,
       crash_recovery: null,
+      operator_reason: {
+        kind: "manual_pause",
+        title: "Manual pause",
+        summary: "Run is paused and waiting for operator review.",
+        next_action: "Inspect the run state and resume explicitly when safe.",
+        severity: "warning"
+      },
       last_error: null,
       consecutive_evaluator_failures: 0,
       previous_tool_result: null,
@@ -658,6 +672,13 @@ describe("console server API contract", () => {
       round: 5,
       pid: null,
       pid_alive: false,
+      operator_reason: {
+        kind: "crash_recovery",
+        title: "Crash recovery",
+        summary: "Initialization was interrupted before normal round execution began.",
+        next_action: "Inspect the run state and resume explicitly when safe.",
+        severity: "critical"
+      },
       crash_recovery: {
         interruption_type: "startup_interrupted",
         interrupted_state: "starting",
@@ -706,6 +727,13 @@ describe("console server API contract", () => {
       round: 6,
       pid: null,
       pid_alive: false,
+      operator_reason: {
+        kind: "crash_recovery",
+        title: "Crash recovery",
+        summary: "Round execution was interrupted during running; work may be incomplete.",
+        next_action: "Inspect the run state and resume explicitly when safe.",
+        severity: "critical"
+      },
       crash_recovery: {
         interruption_type: "round_interrupted",
         interrupted_state: "running",

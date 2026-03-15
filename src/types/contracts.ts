@@ -23,6 +23,26 @@ export interface CrashRecoveryStatus {
   next_action: string;
 }
 
+export type OperatorStatusReasonKind =
+  | "manual_pause_requested"
+  | "manual_pause"
+  | "budget_breach"
+  | "evaluator_failure_limit"
+  | "crash_recovery"
+  | "rollback_incomplete"
+  | "engine_error"
+  | "guardrail_block";
+
+export type OperatorStatusReasonSeverity = "info" | "warning" | "critical";
+
+export interface OperatorStatusReason {
+  kind: OperatorStatusReasonKind;
+  title: string;
+  summary: string;
+  next_action: string;
+  severity: OperatorStatusReasonSeverity;
+}
+
 export interface ActionRecord {
   tool: string;
   input?: any;

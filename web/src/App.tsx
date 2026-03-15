@@ -18,6 +18,7 @@ interface LoopStatus {
   pid: number | null;
   pid_alive: boolean;
   crash_recovery: CrashRecoveryStatus | null;
+  operator_reason: OperatorStatusReason | null;
   last_error: string | null;
   updated_at: string;
   consecutive_evaluator_failures: number;
@@ -34,6 +35,22 @@ interface LoopStatus {
     };
   } | null;
   active_requirement: RequirementArtifactView;
+}
+
+interface OperatorStatusReason {
+  kind:
+    | "manual_pause_requested"
+    | "manual_pause"
+    | "budget_breach"
+    | "evaluator_failure_limit"
+    | "crash_recovery"
+    | "rollback_incomplete"
+    | "engine_error"
+    | "guardrail_block";
+  title: string;
+  summary: string;
+  next_action: string;
+  severity: "info" | "warning" | "critical";
 }
 
 interface CrashRecoveryStatus {
@@ -128,6 +145,12 @@ const stateLabel: Record<LoopStateName, string> = {
   paused: "paused",
   stopping: "stopping",
   error: "error"
+};
+
+const operatorReasonTone: Record<OperatorStatusReason["severity"], string> = {
+  info: "border-white/10 bg-ink/60 text-mist/80",
+  warning: "border-warning/40 bg-warning/10 text-warning",
+  critical: "border-red-400/40 bg-red-500/10 text-red-100"
 };
 
 const TOKEN_STORAGE_KEY = "ailoop-console-admin-token";
@@ -394,6 +417,44 @@ export function CrashRecoveryPanel({ crashRecovery }: { crashRecovery: CrashReco
           <p className="text-[11px] uppercase tracking-[0.18em] text-mist/60">Next Safe Action</p>
           <p className="mt-2 text-sm font-semibold text-mist">{crashRecovery.next_action}</p>
         </div>
+      </div>
+    </div>
+  );
+}
+
+export function OperatorReasonPanel({ operatorReason }: { operatorReason: OperatorStatusReason | null }) {
+  if (!operatorReason) {
+    return (
+      <div className="mt-4 rounded-2xl border border-white/10 bg-ink/60 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-mist/60">Pause / Risk Reason</p>
+            <h2 className="mt-2 text-xl font-semibold text-mist">No active pause or risk signal</h2>
+            <p className="mt-2 text-sm leading-6 text-mist/70">The current status surface does not show a live pause or safety block.</p>
+          </div>
+          <span className="rounded-full border border-white/10 bg-panel/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-mist/70">
+            normal
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`mt-4 rounded-2xl border p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.04)] ${operatorReasonTone[operatorReason.severity]}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-mist/70">Pause / Risk Reason</p>
+          <h2 className="mt-2 text-xl font-semibold text-mist">{operatorReason.title}</h2>
+          <p className="mt-2 text-sm leading-6 text-mist/85">{operatorReason.summary}</p>
+        </div>
+        <span className="rounded-full border border-current/20 bg-ink/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-current">
+          {operatorReason.severity}
+        </span>
+      </div>
+      <div className="mt-4 rounded-xl border border-white/10 bg-ink/70 p-3">
+        <p className="text-[11px] uppercase tracking-[0.18em] text-mist/60">Next Safe Action</p>
+        <p className="mt-2 text-sm font-semibold text-mist">{operatorReason.next_action}</p>
       </div>
     </div>
   );
@@ -894,6 +955,7 @@ export default function App() {
           </div>
         </div>
 
+        <OperatorReasonPanel operatorReason={status?.operator_reason ?? null} />
         <CrashRecoveryPanel crashRecovery={status?.crash_recovery ?? null} />
 
         {frictionIndex && (
