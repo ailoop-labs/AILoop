@@ -9,17 +9,29 @@ function normalizeRequirementMarkdown(markdown: string): string {
 }
 
 function extractTitle(markdown: string): string | null {
-  const line = markdown
+  const lines = markdown
     .replace(/\r\n/g, "\n")
     .split("\n")
     .map((item) => item.trim())
-    .find((item) => item.startsWith("# "));
-  return line ? line.slice(2).trim() : null;
+    .filter(Boolean);
+  const headingIndex = lines.findIndex((item) => item.startsWith("# "));
+
+  if (headingIndex === -1) {
+    return null;
+  }
+
+  const heading = lines[headingIndex].slice(2).trim();
+  if (heading && !/^title$/i.test(heading)) {
+    return heading;
+  }
+
+  const nextLine = lines[headingIndex + 1]?.trim();
+  return nextLine || null;
 }
 
 function extractProblemSummary(markdown: string): string | null {
   const normalized = markdown.replace(/\r\n/g, "\n");
-  const problemSectionMatch = normalized.match(/\n## Problem\b([\s\S]*?)(?=\n##\s+|\s*$)/);
+  const problemSectionMatch = normalized.match(/\n## Problem(?:\s+or\s+Opportunity)?\b([\s\S]*?)(?=\n##\s+|\s*$)/i);
   if (!problemSectionMatch) {
     return null;
   }

@@ -7,6 +7,7 @@ import {
   ensureProductRequirementsHome,
   hasActiveRequirementArtifact,
   readActiveRequirementArtifact,
+  readActiveRequirementSnapshot,
   writeActiveRequirementArtifact
 } from "./requirements";
 
@@ -71,5 +72,34 @@ describe("product requirement artifacts", () => {
     expect(await hasActiveRequirementArtifact(paths)).toBe(true);
     expect(await readActiveRequirementArtifact(paths)).toBe(`${markdown}\n`);
     expect(await fs.readFile(paths.activeRequirementPath, "utf8")).toBe(`${markdown}\n`);
+  });
+
+  test("reads snapshots from the current crash-recovery artifact shape", async () => {
+    const homeDir = await createTempHomeDir();
+    const paths = buildLoopPaths(homeDir);
+    const markdown = [
+      "# Title",
+      "Crash-Recovered Start and Status Visibility",
+      "",
+      "## Problem or Opportunity",
+      "Status should explain crash recovery clearly.",
+      "",
+      "## Acceptance Criteria",
+      "- Status explains the interruption state.",
+      "",
+      "## Lifecycle Status",
+      "- Status: complete",
+      "- Matched Acceptance Criteria: 1",
+      "- Remaining Acceptance Criteria: 0"
+    ].join("\n");
+
+    await writeActiveRequirementArtifact(paths, markdown);
+
+    const snapshot = await readActiveRequirementSnapshot(paths);
+
+    expect(snapshot.title).toBe("Crash-Recovered Start and Status Visibility");
+    expect(snapshot.summary).toBe("Status should explain crash recovery clearly.");
+    expect(snapshot.artifact_status).toBe("needs_refresh");
+    expect(snapshot.lifecycle_status).toBe("complete");
   });
 });

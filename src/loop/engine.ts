@@ -789,6 +789,10 @@ export class LoopEngine {
         }
       }
 
+      if (evaluation.decision === "pass") {
+        requirementMarkdown = await readActiveRequirementArtifact(this.paths);
+      }
+
       if (evaluation.decision === "pass" && requirementMarkdown?.trim()) {
         const completion = assessRequirementCompletion({
           requirementMarkdown,

@@ -1286,6 +1286,102 @@ describe("LoopEngine time budget guard", () => {
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
+
+  test("marks the refreshed requirement artifact complete instead of rewriting the stale pre-refresh artifact", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-refresh-completion-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+    await writeActiveRequirementArtifact(
+      paths,
+      [
+        "# Requirement Slice: Crash-Recovered Start and Status Visibility",
+        "",
+        "## Acceptance Criteria",
+        "- status output preserves crash recovery evidence.",
+        "",
+        "## Lifecycle Status",
+        "- Status: complete",
+        "- Matched Acceptance Criteria: 1",
+        "- Remaining Acceptance Criteria: 0"
+      ].join("\n")
+    );
+
+    const refreshPlan: SubTask = {
+      assignee: "executor",
+      rationale: "The active requirement slice is complete.",
+      objective: "Refresh the active requirement artifact at .ailoop/product-requirements/current.md via the ProductManager before normal execution planning resumes.",
+      expected_outcome: "A new human-readable requirement slice replaces the completed one.",
+      impacted_files: [".ailoop/product-requirements/current.md"],
+      recommended_tools: ["read_file"]
+    };
+    const refreshedRequirement = [
+      "# Requirement Slice: Runtime Agent Session Isolation",
+      "",
+      "## Acceptance Criteria",
+      "- Runtime Agent Session Isolation is the active requirement slice."
+    ].join("\n");
+
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      productManager: { generateRequirement: () => Promise<string> };
+      executor: {
+        execute: () => Promise<{
+          actions: ActionRecord[];
+          toolResult: ToolResult;
+        }>;
+      };
+      evaluator: { evaluate: () => Promise<EvaluationResult> };
+      collectOperationalEvidence: () => Promise<{
+        summaryNote: string;
+        lines: string[];
+        stateChangeNotes: string[];
+      }>;
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+
+    mutable.planner = {
+      plan: async () => refreshPlan
+    };
+    mutable.productManager = {
+      generateRequirement: async () => refreshedRequirement
+    };
+    mutable.executor = {
+      execute: async () => ({
+        actions: [makeAction("write_file"), makeAction("run_shell")],
+        toolResult: makeToolResult(
+          "Rewrote .ailoop/product-requirements/current.md into Runtime Agent Session Isolation."
+        )
+      })
+    };
+    mutable.evaluator = {
+      evaluate: async () => ({
+        decision: "pass",
+        justification: "Runtime Agent Session Isolation is the active requirement slice.",
+        evidence: ["Runtime Agent Session Isolation is the active requirement slice."],
+        recommended_next_action: "continue"
+      })
+    };
+    mutable.collectOperationalEvidence = async () => ({
+      summaryNote: "",
+      lines: [],
+      stateChangeNotes: []
+    });
+
+    const outcome = await mutable.runRound(1);
+
+    expect(outcome.success).toBe(true);
+    const persistedRequirement = await fs.readFile(paths.activeRequirementPath, "utf8");
+    expect(persistedRequirement).toContain("# Requirement Slice: Runtime Agent Session Isolation");
+    expect(persistedRequirement).toContain("## Lifecycle Status");
+    expect(persistedRequirement).toContain("- Status: complete");
+    expect(persistedRequirement).not.toContain("# Requirement Slice: Crash-Recovered Start and Status Visibility");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
 });
 
 describe("LoopEngine round error handling", () => {
