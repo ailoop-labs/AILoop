@@ -13,11 +13,13 @@ import { readRuntimeLoopConfig, runtimeLoopConfigToEnv } from "../config/runtime
 import { readActiveRequirementSnapshot } from "../product/requirements";
 import { buildRoundArtifactPaths, listRunRecords, readLastLogTail } from "../reporting/summary";
 import type {
+  ArtifactCompletenessStatus,
   BudgetLimits,
   CrashRecoveryStatus,
   EvaluationResult,
   LoopStateData,
   OperatorStatusReason,
+  RoundArtifactKind,
   RequirementArtifactSnapshot
 } from "../types/contracts";
 import { fileExists, readJsonFile, readTextFile } from "../utils/fs";
@@ -284,7 +286,115 @@ export interface LoopStatusView extends LoopStateData {
   pid_alive: boolean;
   crash_recovery: CrashRecoveryStatus | null;
   operator_reason: OperatorStatusReason | null;
+  artifact_completeness: ArtifactCompletenessStatus;
   active_requirement: RequirementArtifactSnapshot;
+}
+
+const ROUND_ARTIFACT_KINDS: RoundArtifactKind[] = ["log", "summary", "metrics", "state_change", "evaluation"];
+
+const ROUND_ARTIFACT_SUFFIXES: Record<RoundArtifactKind, string> = {
+  log: ".round.log",
+  summary: ".round.summary.md",
+  metrics: ".round.metrics.json",
+  state_change: ".round.state_change.txt",
+  evaluation: ".round.evaluation.json"
+};
+
+function emptyArtifactCompleteness(): ArtifactCompletenessStatus {
+  return {
+    kind: "none",
+    label: "No artifacts yet",
+    latest_round_timestamp: null,
+    latest_artifact_at: null,
+    present: [],
+    missing: [...ROUND_ARTIFACT_KINDS]
+  };
+}
+
+function classifyArtifactCompleteness(present: RoundArtifactKind[]): ArtifactCompletenessStatus["kind"] {
+  if (present.length === 0) {
+    return "none";
+  }
+  if (present.length === 1 && present[0] === "log") {
+    return "log_only";
+  }
+  if (present.length === ROUND_ARTIFACT_KINDS.length) {
+    return "full_bundle";
+  }
+  return "partial_bundle";
+}
+
+function labelArtifactCompleteness(kind: ArtifactCompletenessStatus["kind"]): string {
+  if (kind === "log_only") {
+    return "Log only";
+  }
+  if (kind === "partial_bundle") {
+    return "Partial bundle";
+  }
+  if (kind === "full_bundle") {
+    return "Full evidence bundle";
+  }
+  return "No artifacts yet";
+}
+
+async function deriveArtifactCompleteness(paths: LoopPaths): Promise<ArtifactCompletenessStatus> {
+  await fs.mkdir(paths.runsDir, { recursive: true });
+  const entries = await fs.readdir(paths.runsDir, { withFileTypes: true });
+  const grouped = new Map<string, { present: Set<RoundArtifactKind>; latestArtifactAt: number }>();
+
+  for (const entry of entries) {
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    let artifactKind: RoundArtifactKind | null = null;
+    for (const kind of ROUND_ARTIFACT_KINDS) {
+      const suffix = ROUND_ARTIFACT_SUFFIXES[kind];
+      if (entry.name.endsWith(suffix)) {
+        artifactKind = kind;
+        break;
+      }
+    }
+
+    if (!artifactKind) {
+      continue;
+    }
+
+    const timestamp = entry.name.slice(0, entry.name.length - ROUND_ARTIFACT_SUFFIXES[artifactKind].length);
+    if (!isValidRunTimestamp(timestamp)) {
+      continue;
+    }
+
+    const fullPath = path.join(paths.runsDir, entry.name);
+    const stat = await fs.stat(fullPath);
+    const record = grouped.get(timestamp) ?? { present: new Set<RoundArtifactKind>(), latestArtifactAt: 0 };
+    record.present.add(artifactKind);
+    record.latestArtifactAt = Math.max(record.latestArtifactAt, stat.mtimeMs);
+    grouped.set(timestamp, record);
+  }
+
+  const latestRoundTimestamp = Array.from(grouped.keys()).sort((a, b) => b.localeCompare(a))[0];
+  if (!latestRoundTimestamp) {
+    return emptyArtifactCompleteness();
+  }
+
+  const record = grouped.get(latestRoundTimestamp);
+  if (!record) {
+    return emptyArtifactCompleteness();
+  }
+
+  const present = ROUND_ARTIFACT_KINDS.filter((kind) => record.present.has(kind));
+  const missing = ROUND_ARTIFACT_KINDS.filter((kind) => !record.present.has(kind));
+  const kind = classifyArtifactCompleteness(present);
+
+  return {
+    kind,
+    label: labelArtifactCompleteness(kind),
+    latest_round_timestamp: latestRoundTimestamp,
+    latest_artifact_at: record.latestArtifactAt > 0 ? new Date(record.latestArtifactAt).toISOString() : null,
+    present,
+    missing
+  };
 }
 
 function deriveCrashRecoveryStatus(state: LoopStateData, statusCheckFinalized: boolean): CrashRecoveryStatus | null {
@@ -441,7 +551,11 @@ function deriveOperatorReason(
 export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> {
   const paths = await ensureLoopHomeAndGetPaths(config);
   const redactor = new SecretRedactor(process.env);
-  const activeRequirement = redactRequirementSnapshot(await readActiveRequirementSnapshot(paths), redactor);
+  const [rawActiveRequirement, artifactCompleteness] = await Promise.all([
+    readActiveRequirementSnapshot(paths),
+    deriveArtifactCompleteness(paths)
+  ]);
+  const activeRequirement = redactRequirementSnapshot(rawActiveRequirement, redactor);
 
   const recovered = await recoverInterruptedLoopState(paths, "status check");
   if (recovered) {
@@ -454,6 +568,7 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
         crashRecovery,
         pauseRequested: true
       }),
+      artifact_completeness: artifactCompleteness,
       active_requirement: activeRequirement
     };
   }
@@ -476,6 +591,7 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
       pid_alive: false,
       crash_recovery: null,
       operator_reason: null,
+      artifact_completeness: artifactCompleteness,
       active_requirement: activeRequirement
     };
   }
@@ -491,6 +607,7 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
       crashRecovery,
       pauseRequested
     }),
+    artifact_completeness: artifactCompleteness,
     active_requirement: activeRequirement
   };
 }
@@ -531,6 +648,11 @@ export function renderCliStatus(status: CliStatusPayload): string {
     lines.push(`Reason summary: ${status.state.operator_reason.summary}`);
     lines.push(`Next safe action: ${status.state.operator_reason.next_action}`);
   }
+
+  lines.push(`Artifact completeness: ${status.state.artifact_completeness.label}`);
+  lines.push(
+    `Latest artifact timestamp: ${status.state.artifact_completeness.latest_artifact_at ?? "none"}`
+  );
 
   const crashRecovery = status.state.crash_recovery;
   if (crashRecovery) {

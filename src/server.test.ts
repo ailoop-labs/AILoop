@@ -556,6 +556,14 @@ describe("console server API contract", () => {
           actionsUsed: 4,
           elapsedMs: 12_000
         }
+      },
+      artifact_completeness: {
+        kind: "none",
+        label: "No artifacts yet",
+        latest_round_timestamp: null,
+        latest_artifact_at: null,
+        present: [],
+        missing: ["log", "summary", "metrics", "state_change", "evaluation"]
       }
     });
     expect(body.updated_at).toEqual(expect.any(String));
@@ -635,6 +643,14 @@ describe("console server API contract", () => {
       consecutive_evaluator_failures: 0,
       previous_tool_result: null,
       current_budget: null,
+      artifact_completeness: {
+        kind: "none",
+        label: "No artifacts yet",
+        latest_round_timestamp: null,
+        latest_artifact_at: null,
+        present: [],
+        missing: ["log", "summary", "metrics", "state_change", "evaluation"]
+      },
       updated_at: expect.any(String),
       active_requirement: {
         path: paths.activeRequirementPath,
@@ -647,6 +663,40 @@ describe("console server API contract", () => {
         acceptance_criteria_completed: 0,
         markdown: expect.stringContaining("# Requirement Slice: Operator Clarity"),
         updated_at: expect.any(String)
+      }
+    });
+  });
+
+  test("serializes latest artifact completeness in authenticated status responses", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "paused",
+      round: 11
+    });
+    await writeRunArtifacts(paths.runsDir, "2026-03-15T02-16-09-241Z", {
+      summary: "partial summary",
+      metrics: { round: 11 },
+      log: "partial log"
+    });
+
+    const response = await fetchHandler(createAuthorizedRequest("http://console.test/api/status", token));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      state: "paused",
+      round: 11,
+      artifact_completeness: {
+        kind: "partial_bundle",
+        label: "Partial bundle",
+        latest_round_timestamp: "2026-03-15T02-16-09-241Z",
+        latest_artifact_at: expect.any(String),
+        present: ["log", "summary", "metrics"],
+        missing: ["state_change", "evaluation"]
       }
     });
   });

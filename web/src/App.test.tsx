@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CrashRecoveryPanel, OperatorReasonPanel, RunArtifactEvidenceGrid, summarizeApiError } from "./App";
+import {
+  ArtifactCompletenessPanel,
+  CrashRecoveryPanel,
+  OperatorReasonPanel,
+  RunArtifactEvidenceGrid,
+  summarizeApiError
+} from "./App";
 import type { RoundReport } from "./run-history";
 
 function makeReport(overrides: Partial<RoundReport> = {}): RoundReport {
@@ -129,6 +135,49 @@ describe("OperatorReasonPanel", () => {
 
     expect(html).toContain("No active pause or risk signal");
     expect(html).toContain("The current status surface does not show a live pause or safety block.");
+  });
+});
+
+describe("ArtifactCompletenessPanel", () => {
+  test("renders the latest artifact completeness label and timestamp", () => {
+    const html = renderToStaticMarkup(
+      <ArtifactCompletenessPanel
+        artifactCompleteness={{
+          kind: "partial_bundle",
+          label: "Partial bundle",
+          latest_round_timestamp: "2026-03-15T02-16-09-241Z",
+          latest_artifact_at: "2026-03-15T02:16:11.000Z",
+          present: ["log", "summary", "metrics"],
+          missing: ["state_change", "evaluation"]
+        }}
+      />
+    );
+
+    expect(html).toContain("Artifact Completeness");
+    expect(html).toContain("Partial bundle");
+    expect(html).toContain("Latest Artifact Timestamp");
+    expect(html).toContain("2026");
+    expect(html).toContain("Latest Round");
+    expect(html).toContain("2026-03-15T02-16-09-241Z");
+    expect(html).toContain("Missing: state change, evaluation");
+  });
+
+  test("renders the full-bundle state without missing artifact copy", () => {
+    const html = renderToStaticMarkup(
+      <ArtifactCompletenessPanel
+        artifactCompleteness={{
+          kind: "full_bundle",
+          label: "Full evidence bundle",
+          latest_round_timestamp: "2026-03-15T03-00-00-000Z",
+          latest_artifact_at: "2026-03-15T03:00:05.000Z",
+          present: ["log", "summary", "metrics", "state_change", "evaluation"],
+          missing: []
+        }}
+      />
+    );
+
+    expect(html).toContain("Full evidence bundle");
+    expect(html).toContain("All required evidence artifacts are present for the latest round.");
   });
 });
 

@@ -43,6 +43,19 @@ export interface OperatorStatusReason {
   severity: OperatorStatusReasonSeverity;
 }
 
+export type ArtifactCompletenessKind = "none" | "log_only" | "partial_bundle" | "full_bundle";
+
+export type RoundArtifactKind = "log" | "summary" | "metrics" | "state_change" | "evaluation";
+
+export interface ArtifactCompletenessStatus {
+  kind: ArtifactCompletenessKind;
+  label: string;
+  latest_round_timestamp: string | null;
+  latest_artifact_at: string | null;
+  present: RoundArtifactKind[];
+  missing: RoundArtifactKind[];
+}
+
 export interface ActionRecord {
   tool: string;
   input?: any;

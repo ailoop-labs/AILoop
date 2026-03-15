@@ -862,6 +862,71 @@ describe("resumeLoop", () => {
 });
 
 describe("getLoopStatus", () => {
+  test("derives log-only completeness from the latest persisted round artifacts", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-artifact-log-only-test-"));
+    const paths = buildLoopPaths(homeDir);
+    await fs.mkdir(homeDir, { recursive: true });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "running",
+      round: 9
+    });
+    await writeRunArtifacts(paths.runsDir, "2026-03-15T01-49-21-350Z", {
+      summary: "older summary",
+      metrics: { round: 8 },
+      log: "older log",
+      stateChange: "older diff",
+      evaluation: { decision: "pass", justification: "older evaluation", evidence: [] }
+    });
+    await writeRunArtifacts(paths.runsDir, "2026-03-15T02-16-09-241Z", {
+      log: "latest in-flight log"
+    });
+
+    const status = await getLoopStatus(makeTestConfig(homeDir));
+
+    expect(status.artifact_completeness).toEqual({
+      kind: "log_only",
+      label: "Log only",
+      latest_round_timestamp: "2026-03-15T02-16-09-241Z",
+      latest_artifact_at: expect.any(String),
+      present: ["log"],
+      missing: ["summary", "metrics", "state_change", "evaluation"]
+    });
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("derives partial bundle completeness from the latest persisted round artifacts", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-artifact-partial-test-"));
+    const paths = buildLoopPaths(homeDir);
+    await fs.mkdir(homeDir, { recursive: true });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "paused",
+      round: 10
+    });
+    await writeRunArtifacts(paths.runsDir, "2026-03-15T03-00-00-000Z", {
+      summary: "partial summary",
+      metrics: { round: 10 },
+      log: "partial log"
+    });
+
+    const status = await getLoopStatus(makeTestConfig(homeDir));
+
+    expect(status.artifact_completeness).toEqual({
+      kind: "partial_bundle",
+      label: "Partial bundle",
+      latest_round_timestamp: "2026-03-15T03-00-00-000Z",
+      latest_artifact_at: expect.any(String),
+      present: ["log", "summary", "metrics"],
+      missing: ["state_change", "evaluation"]
+    });
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
   test("includes a safe active requirement summary in loop status", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-requirement-test-"));
     const paths = buildLoopPaths(homeDir);
@@ -898,6 +963,14 @@ describe("getLoopStatus", () => {
         summary: "Run is paused and waiting for operator review.",
         next_action: "Inspect the run state and resume explicitly when safe.",
         severity: "warning"
+      },
+      artifact_completeness: {
+        kind: "none",
+        label: "No artifacts yet",
+        latest_round_timestamp: null,
+        latest_artifact_at: null,
+        present: [],
+        missing: ["log", "summary", "metrics", "state_change", "evaluation"]
       },
       active_requirement: {
         path: paths.activeRequirementPath,
@@ -1197,6 +1270,14 @@ describe("getCliStatus", () => {
           next_action: "Inspect the run state and resume explicitly when safe.",
           severity: "critical"
         },
+        artifact_completeness: {
+          kind: "none",
+          label: "No artifacts yet",
+          latest_round_timestamp: null,
+          latest_artifact_at: null,
+          present: [],
+          missing: ["log", "summary", "metrics", "state_change", "evaluation"]
+        },
         last_error:
           "Crash recovery: Interrupted state recovered during startup. Startup interrupted during initialization because process 123 was not alive. Normal round execution did not begin. Run paused for review. Next action: Inspect the run state and resume explicitly when safe.",
         crash_recovery: {
@@ -1250,6 +1331,14 @@ describe("getCliStatus", () => {
         },
         last_error: "BudgetBreach: action budget exceeded",
         crash_recovery: null,
+        artifact_completeness: {
+          kind: "full_bundle",
+          label: "Full evidence bundle",
+          latest_round_timestamp: "2026-03-15T02-16-09-241Z",
+          latest_artifact_at: "2026-03-15T02:16:11.000Z",
+          present: ["log", "summary", "metrics", "state_change", "evaluation"],
+          missing: []
+        },
         current_budget: {
           limits: {
             usdPerRound: 1,
@@ -1282,6 +1371,8 @@ describe("getCliStatus", () => {
     expect(output).toContain(
       "Next safe action: Review the last budget snapshot and reduce scope or raise budgets before resuming."
     );
+    expect(output).toContain("Artifact completeness: Full evidence bundle");
+    expect(output).toContain("Latest artifact timestamp: 2026-03-15T02:16:11.000Z");
     expect(output).toContain("Last error: BudgetBreach: action budget exceeded");
     expect(output).toContain("Current budget usage: $0.3, 12000ms, 11 actions");
   });

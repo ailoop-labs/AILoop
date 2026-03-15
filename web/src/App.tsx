@@ -19,6 +19,7 @@ interface LoopStatus {
   pid_alive: boolean;
   crash_recovery: CrashRecoveryStatus | null;
   operator_reason: OperatorStatusReason | null;
+  artifact_completeness: ArtifactCompletenessStatus;
   last_error: string | null;
   updated_at: string;
   consecutive_evaluator_failures: number;
@@ -51,6 +52,15 @@ interface OperatorStatusReason {
   summary: string;
   next_action: string;
   severity: "info" | "warning" | "critical";
+}
+
+interface ArtifactCompletenessStatus {
+  kind: "none" | "log_only" | "partial_bundle" | "full_bundle";
+  label: string;
+  latest_round_timestamp: string | null;
+  latest_artifact_at: string | null;
+  present: Array<"log" | "summary" | "metrics" | "state_change" | "evaluation">;
+  missing: Array<"log" | "summary" | "metrics" | "state_change" | "evaluation">;
 }
 
 interface CrashRecoveryStatus {
@@ -151,6 +161,13 @@ const operatorReasonTone: Record<OperatorStatusReason["severity"], string> = {
   info: "border-white/10 bg-ink/60 text-mist/80",
   warning: "border-warning/40 bg-warning/10 text-warning",
   critical: "border-red-400/40 bg-red-500/10 text-red-100"
+};
+
+const artifactCompletenessTone: Record<ArtifactCompletenessStatus["kind"], string> = {
+  none: "border-white/10 bg-ink/60 text-mist/80",
+  log_only: "border-warning/40 bg-warning/10 text-warning",
+  partial_bundle: "border-warning/40 bg-warning/10 text-warning",
+  full_bundle: "border-accent/30 bg-accent/10 text-accent"
 };
 
 const TOKEN_STORAGE_KEY = "ailoop-console-admin-token";
@@ -425,7 +442,7 @@ export function CrashRecoveryPanel({ crashRecovery }: { crashRecovery: CrashReco
 export function OperatorReasonPanel({ operatorReason }: { operatorReason: OperatorStatusReason | null }) {
   if (!operatorReason) {
     return (
-      <div className="mt-4 rounded-2xl border border-white/10 bg-ink/60 p-4">
+      <div className="rounded-2xl border border-white/10 bg-ink/60 p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-mist/60">Pause / Risk Reason</p>
@@ -441,7 +458,7 @@ export function OperatorReasonPanel({ operatorReason }: { operatorReason: Operat
   }
 
   return (
-    <div className={`mt-4 rounded-2xl border p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.04)] ${operatorReasonTone[operatorReason.severity]}`}>
+    <div className={`rounded-2xl border p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.04)] ${operatorReasonTone[operatorReason.severity]}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-mist/70">Pause / Risk Reason</p>
@@ -455,6 +472,58 @@ export function OperatorReasonPanel({ operatorReason }: { operatorReason: Operat
       <div className="mt-4 rounded-xl border border-white/10 bg-ink/70 p-3">
         <p className="text-[11px] uppercase tracking-[0.18em] text-mist/60">Next Safe Action</p>
         <p className="mt-2 text-sm font-semibold text-mist">{operatorReason.next_action}</p>
+      </div>
+    </div>
+  );
+}
+
+function formatArtifactKindLabel(kind: ArtifactCompletenessStatus["present"][number]): string {
+  if (kind === "state_change") {
+    return "state change";
+  }
+  return kind;
+}
+
+export function ArtifactCompletenessPanel({
+  artifactCompleteness
+}: {
+  artifactCompleteness: ArtifactCompletenessStatus | null;
+}) {
+  if (!artifactCompleteness) {
+    return null;
+  }
+
+  const latestArtifactLabel = artifactCompleteness.latest_artifact_at
+    ? formatRunTimestamp(artifactCompleteness.latest_artifact_at)
+    : "No persisted round artifacts yet";
+  const detailLabel =
+    artifactCompleteness.kind === "none"
+      ? "No persisted round evidence has been written yet."
+      : artifactCompleteness.missing.length === 0
+      ? "All required evidence artifacts are present for the latest round."
+      : `Missing: ${artifactCompleteness.missing.map(formatArtifactKindLabel).join(", ")}`;
+
+  return (
+    <div className={`rounded-2xl border p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.04)] ${artifactCompletenessTone[artifactCompleteness.kind]}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-mist/70">Artifact Completeness</p>
+          <h2 className="mt-2 text-xl font-semibold text-mist">{artifactCompleteness.label}</h2>
+          <p className="mt-2 text-sm leading-6 text-mist/85">{detailLabel}</p>
+        </div>
+        <span className="rounded-full border border-current/20 bg-ink/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-current">
+          {artifactCompleteness.kind.replace("_", " ")}
+        </span>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="rounded-xl border border-white/10 bg-ink/70 p-3">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-mist/60">Latest Artifact Timestamp</p>
+          <p className="mt-2 text-sm font-semibold text-mist">{latestArtifactLabel}</p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-ink/70 p-3">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-mist/60">Latest Round</p>
+          <p className="mt-2 text-sm font-semibold text-mist">{artifactCompleteness.latest_round_timestamp ?? "No round artifacts yet"}</p>
+        </div>
       </div>
     </div>
   );
@@ -955,7 +1024,10 @@ export default function App() {
           </div>
         </div>
 
-        <OperatorReasonPanel operatorReason={status?.operator_reason ?? null} />
+        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+          <OperatorReasonPanel operatorReason={status?.operator_reason ?? null} />
+          <ArtifactCompletenessPanel artifactCompleteness={status?.artifact_completeness ?? null} />
+        </div>
         <CrashRecoveryPanel crashRecovery={status?.crash_recovery ?? null} />
 
         {frictionIndex && (
