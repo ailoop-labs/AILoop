@@ -4,7 +4,7 @@ import path from "node:path";
 import * as childProcess from "node:child_process";
 import { Database } from "bun:sqlite";
 import { describe, expect, mock, spyOn, test } from "bun:test";
-import { buildLoopPaths, defaultLoopState, hasFlag, readLoopState, setFlag, writeLoopState } from "./state";
+import { appendInstruction, buildLoopPaths, defaultLoopState, hasFlag, readLoopState, setFlag, writeLoopState } from "./state";
 import {
   ensureProjectRoles,
   getCliStatus,
@@ -999,6 +999,26 @@ describe("resumeLoop", () => {
 });
 
 describe("getLoopStatus", () => {
+  test("includes the current queued operator instruction count in the status payload", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-instruction-count-test-"));
+    const paths = buildLoopPaths(homeDir);
+    await fs.mkdir(homeDir, { recursive: true });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "running",
+      round: 6
+    });
+    await appendInstruction(paths, "Re-check the failing console status test.");
+    await appendInstruction(paths, "Keep the next change minimal.");
+
+    const status = await getLoopStatus(makeTestConfig(homeDir));
+
+    expect(status.pending_instruction_count).toBe(2);
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
   test("derives log-only completeness from the latest persisted round artifacts", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-artifact-log-only-test-"));
     const paths = buildLoopPaths(homeDir);
@@ -1430,6 +1450,7 @@ describe("getCliStatus", () => {
         state: "paused",
         round: 2,
         pid_alive: false,
+        pending_instruction_count: 0,
         operator_reason: {
           kind: "crash_recovery",
           title: "Crash recovery",
@@ -1490,6 +1511,7 @@ describe("getCliStatus", () => {
         state: "paused",
         round: 2,
         pid_alive: false,
+        pending_instruction_count: 3,
         operator_reason: {
           kind: "budget_breach",
           title: "Budget breach",
@@ -1569,6 +1591,7 @@ describe("getCliStatus", () => {
     expect(output).toContain(
       "Next safe action: Review the last budget snapshot and reduce scope or raise budgets before resuming."
     );
+    expect(output).toContain("Pending instructions: 3");
     expect(output).toContain("Budget health: breached");
     expect(output).toContain("Budget dimension health: USD=healthy, Actions=breached, Time=healthy");
     expect(output).toContain("Breached dimension: Actions");

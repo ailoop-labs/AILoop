@@ -4,6 +4,7 @@ import {
   ArtifactCompletenessPanel,
   BudgetHealthPanel,
   CrashRecoveryPanel,
+  LifecycleStatusGrid,
   OperatorReasonPanel,
   RunArtifactEvidenceGrid,
   summarizeApiError
@@ -239,6 +240,54 @@ describe("BudgetHealthPanel", () => {
     expect(html).toContain("0.9000 / 1");
     expect(html).toContain("11 / 10");
     expect(html).toContain("30s / 2m");
+  });
+});
+
+describe("LifecycleStatusGrid", () => {
+  test("renders the queued operator instruction count alongside the lifecycle status cards", () => {
+    const html = renderToStaticMarkup(
+      <LifecycleStatusGrid
+        status={{
+          state: "running",
+          round: 12,
+          pid: 4312,
+          pid_alive: true,
+          pending_instruction_count: 4,
+          crash_recovery: null,
+          operator_reason: null,
+          artifact_completeness: {
+            kind: "none",
+            label: "No artifacts yet",
+            latest_round_timestamp: null,
+            latest_artifact_at: null,
+            present: [],
+            missing: ["log", "summary", "metrics", "state_change", "evaluation"]
+          },
+          last_error: null,
+          updated_at: "2026-03-15T03:12:00.000Z",
+          consecutive_evaluator_failures: 1,
+          budget_health: null,
+          current_budget: null,
+          active_requirement: {
+            path: "",
+            exists: false,
+            artifact_status: "missing",
+            lifecycle_status: "active",
+            title: null,
+            summary: null,
+            acceptance_criteria_total: 0,
+            acceptance_criteria_completed: 0,
+            markdown: null,
+            updated_at: null
+          }
+        }}
+      />
+    );
+
+    expect(html).toContain("Pending instructions");
+    expect(html).toContain("4 queued");
+    expect(html).toContain("Round: 12");
+    expect(html).toContain("PID: 4312");
   });
 });
 

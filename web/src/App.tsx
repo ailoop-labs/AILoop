@@ -26,6 +26,7 @@ interface LoopStatus {
   round: number;
   pid: number | null;
   pid_alive: boolean;
+  pending_instruction_count: number;
   crash_recovery: CrashRecoveryStatus | null;
   operator_reason: OperatorStatusReason | null;
   artifact_completeness: ArtifactCompletenessStatus;
@@ -682,6 +683,24 @@ export function BudgetHealthPanel({
   );
 }
 
+export function LifecycleStatusGrid({ status }: { status: LoopStatus | null }) {
+  const pendingInstructionCount = status?.pending_instruction_count ?? 0;
+
+  return (
+    <div className="mt-5 grid gap-3 text-sm text-mist/80 md:grid-cols-5">
+      <div className="rounded-xl border border-white/10 bg-ink/60 p-3">Round: {status?.round ?? "-"}</div>
+      <div className="rounded-xl border border-white/10 bg-ink/60 p-3">PID: {status?.pid ?? "-"}</div>
+      <div className="rounded-xl border border-white/10 bg-ink/60 p-3">Process: {status?.pid_alive ? "alive" : "not running"}</div>
+      <div className="rounded-xl border border-white/10 bg-ink/60 p-3">
+        Pending instructions: {pendingInstructionCount} queued
+      </div>
+      <div className="rounded-xl border border-white/10 bg-ink/60 p-3">
+        Evaluator failures: {status?.consecutive_evaluator_failures ?? 0}
+      </div>
+    </div>
+  );
+}
+
 function ArtifactPresenceCard({ artifacts }: { artifacts: RunArtifactPresence }) {
   const tone =
     artifacts.kind === "full_bundle"
@@ -1168,16 +1187,7 @@ export default function App() {
           </div>
         </div>
 
-        <div className="mt-5 grid gap-3 text-sm text-mist/80 md:grid-cols-4">
-          <div className="rounded-xl border border-white/10 bg-ink/60 p-3">Round: {status?.round ?? "-"}</div>
-          <div className="rounded-xl border border-white/10 bg-ink/60 p-3">PID: {status?.pid ?? "-"}</div>
-          <div className="rounded-xl border border-white/10 bg-ink/60 p-3">
-            Process: {status?.pid_alive ? "alive" : "not running"}
-          </div>
-          <div className="rounded-xl border border-white/10 bg-ink/60 p-3">
-            Evaluator failures: {status?.consecutive_evaluator_failures ?? 0}
-          </div>
-        </div>
+        <LifecycleStatusGrid status={status} />
 
         <div className="mt-4 grid gap-4 xl:grid-cols-2">
           <OperatorReasonPanel operatorReason={status?.operator_reason ?? null} />

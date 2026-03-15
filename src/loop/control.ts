@@ -40,6 +40,7 @@ import {
   hasFlag,
   isPidAlive,
   parseCrashRecoveryMessage,
+  peekInstructions,
   readLoopState,
   readPid,
   recoverInterruptedLoopState,
@@ -277,6 +278,7 @@ export async function instructLoop(config: AppConfig, message: string): Promise<
 
 export interface LoopStatusView extends LoopStateData {
   pid_alive: boolean;
+  pending_instruction_count: number;
   crash_recovery: CrashRecoveryStatus | null;
   operator_reason: OperatorStatusReason | null;
   budget_health: BudgetHealthStatus | null;
@@ -673,11 +675,13 @@ function deriveOperatorReason(
 export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> {
   const paths = await ensureLoopHomeAndGetPaths(config);
   const redactor = new SecretRedactor(process.env);
-  const [rawActiveRequirement, artifactCompleteness] = await Promise.all([
+  const [rawActiveRequirement, artifactCompleteness, pendingInstructions] = await Promise.all([
     readActiveRequirementSnapshot(paths),
-    deriveArtifactCompleteness(paths)
+    deriveArtifactCompleteness(paths),
+    peekInstructions(paths)
   ]);
   const activeRequirement = redactRequirementSnapshot(rawActiveRequirement, redactor);
+  const pendingInstructionCount = pendingInstructions.length;
 
   const recovered = await recoverInterruptedLoopState(paths, "status check");
   if (recovered) {
@@ -685,6 +689,7 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
     return {
       ...recovered,
       pid_alive: false,
+      pending_instruction_count: pendingInstructionCount,
       crash_recovery: crashRecovery,
       operator_reason: deriveOperatorReason(recovered, {
         crashRecovery,
@@ -712,6 +717,7 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
     return {
       ...normalized,
       pid_alive: false,
+      pending_instruction_count: pendingInstructionCount,
       crash_recovery: null,
       operator_reason: null,
       budget_health: null,
@@ -726,6 +732,7 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
     ...state,
     pid: pid ?? null,
     pid_alive: pidAlive,
+    pending_instruction_count: pendingInstructionCount,
     crash_recovery: crashRecovery,
     operator_reason: deriveOperatorReason(state, {
       crashRecovery,
@@ -765,6 +772,7 @@ export function renderCliStatus(status: CliStatusPayload): string {
     `State: ${status.state.state}`,
     `Round context: ${formatRoundContext(status.state.round)}`,
     `Process alive: ${status.state.pid_alive ? "yes" : "no"}`,
+    `Pending instructions: ${status.state.pending_instruction_count}`,
     `Budget limits: ${formatBudgetLimits(status.budget)}`
   ];
 
