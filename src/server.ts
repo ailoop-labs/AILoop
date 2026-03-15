@@ -7,6 +7,7 @@ import { DatabaseManager } from "./utils/db";
 import {
   getLoopStatus,
   getRunArtifacts,
+  InvalidLifecycleTransitionError,
   instructLoop,
   listProjectRoles,
   listRuns,
@@ -298,7 +299,18 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
       }
 
       return json({ error: "Not Found" }, 404);
-    } catch {
+    } catch (error) {
+      if (url.pathname.startsWith("/api/") && error instanceof InvalidLifecycleTransitionError) {
+        return json(
+          {
+            ok: false,
+            error: error.message,
+            code: error.code
+          },
+          error.status
+        );
+      }
+
       if (url.pathname.startsWith("/api/")) {
         console.error(`[AILoop console] API handler failed for ${request.method} ${url.pathname}`);
         return jsonError("Internal Server Error", 500);

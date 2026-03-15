@@ -24,7 +24,8 @@ import type {
   OperatorStatusReason,
   RoundArtifactPresence,
   RoundArtifactKind,
-  RequirementArtifactSnapshot
+  RequirementArtifactSnapshot,
+  LoopStateName
 } from "../types/contracts";
 import { fileExists, readJsonFile, readTextFile } from "../utils/fs";
 import { redactJsonStrings, SecretRedactor } from "../utils/redaction";
@@ -51,6 +52,46 @@ import type { LoopPaths } from "./state";
 
 const startOperations = new Map<string, Promise<{ started: boolean; message: string }>>();
 const resumeOperations = new Map<string, Promise<void>>();
+const PAUSEABLE_STATES: LoopStateName[] = ["starting", "running", "cooldown"];
+const RESUMABLE_STATES: LoopStateName[] = ["paused"];
+const STOPPABLE_STATES: LoopStateName[] = ["starting", "running", "cooldown", "paused"];
+
+export class InvalidLifecycleTransitionError extends Error {
+  readonly code = "invalid_lifecycle_transition";
+  readonly status = 409;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidLifecycleTransitionError";
+  }
+}
+
+function formatStateList(states: LoopStateName[]): string {
+  if (states.length === 1) {
+    return states[0];
+  }
+  if (states.length === 2) {
+    return `${states[0]} or ${states[1]}`;
+  }
+
+  return `${states.slice(0, -1).join(", ")}, or ${states.at(-1)}`;
+}
+
+function assertValidLifecycleControlTransition(
+  action: "pause" | "resume" | "stop",
+  state: LoopStateName
+): void {
+  const allowedStates =
+    action === "pause" ? PAUSEABLE_STATES : action === "resume" ? RESUMABLE_STATES : STOPPABLE_STATES;
+
+  if (allowedStates.includes(state)) {
+    return;
+  }
+
+  throw new InvalidLifecycleTransitionError(
+    `Invalid control transition: ${action} is only allowed from ${formatStateList(allowedStates)}.`
+  );
+}
 
 export async function ensureProjectRoles(
   config: AppConfig,
@@ -212,11 +253,13 @@ function clearPausedOperatorState(state: LoopStateData): LoopStateData {
 
 export async function stopLoop(config: AppConfig): Promise<void> {
   const paths = await ensureLoopHomeAndGetPaths(config);
+  const state = await readLoopState(paths);
+  assertValidLifecycleControlTransition("stop", state.state);
+
   await setFlag(paths.stopFlagPath);
 
   // If no process is actually running, we should transition the state to idle immediately
   // otherwise it stays stuck in 'paused' or 'running' forever in the DB.
-  const state = await readLoopState(paths);
   const pid = state.pid ?? (await readPid(paths));
   const pidAlive = pid ? isPidAlive(pid) : false;
 
@@ -232,6 +275,9 @@ export async function stopLoop(config: AppConfig): Promise<void> {
 
 export async function pauseLoop(config: AppConfig): Promise<void> {
   const paths = await ensureLoopHomeAndGetPaths(config);
+  const state = await readLoopState(paths);
+  assertValidLifecycleControlTransition("pause", state.state);
+
   await setFlag(paths.pauseFlagPath);
 }
 
@@ -244,13 +290,11 @@ export async function resumeLoop(config: AppConfig): Promise<void> {
 
   const operation = (async () => {
     const paths = await ensureLoopHomeAndGetPaths(config);
-    await clearFlag(paths.pauseFlagPath);
-
     const state = await readLoopState(paths);
+    assertValidLifecycleControlTransition("resume", state.state);
+
+    await clearFlag(paths.pauseFlagPath);
     const pid = state.pid ?? (await readPid(paths));
-    if (state.state !== "paused") {
-      return;
-    }
 
     if (pid && isPidAlive(pid)) {
       await writeLoopState(paths, {

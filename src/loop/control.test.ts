@@ -12,6 +12,7 @@ import {
   getRunArtifacts,
   listRuns,
   listProjectRoles,
+  pauseLoop,
   prepareStartFlags,
   renderCliStatus,
   resumeLoop,
@@ -263,6 +264,24 @@ describe("prepareStartFlags", () => {
 
     expect(await hasFlag(paths.stopFlagPath)).toBe(false);
     expect(await hasFlag(paths.pauseFlagPath)).toBe(false);
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+});
+
+describe("pauseLoop", () => {
+  test("fails clearly without mutating state or flags when the loop is idle", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-pause-invalid-idle-test-"));
+    const paths = buildLoopPaths(homeDir);
+    const config = makeTestConfig(homeDir);
+    await fs.mkdir(homeDir, { recursive: true });
+
+    const beforeState = await readLoopState(paths);
+
+    await expect(pauseLoop(config)).rejects.toThrow("Invalid control transition: pause is only allowed from starting, running, or cooldown.");
+
+    expect(await hasFlag(paths.pauseFlagPath)).toBe(false);
+    expect(await readLoopState(paths)).toEqual(beforeState);
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
@@ -1048,6 +1067,29 @@ describe("resumeLoop", () => {
       await fs.rm(workspaceRoot, { recursive: true, force: true });
     }
   });
+
+  test("fails clearly without mutating state or flags when the loop is not paused", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-resume-invalid-state-test-"));
+    const paths = buildLoopPaths(homeDir);
+    const config = makeTestConfig(homeDir);
+    await fs.mkdir(homeDir, { recursive: true });
+
+    await setFlag(paths.pauseFlagPath);
+    await writeLoopState(paths, {
+      ...defaultLoopState(process.pid),
+      state: "running",
+      pid: process.pid
+    });
+
+    const beforeState = await readLoopState(paths);
+
+    await expect(resumeLoop(config)).rejects.toThrow("Invalid control transition: resume is only allowed from paused.");
+
+    expect(await hasFlag(paths.pauseFlagPath)).toBe(true);
+    expect(await readLoopState(paths)).toEqual(beforeState);
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
 });
 
 describe("stopLoop", () => {
@@ -1098,6 +1140,24 @@ describe("stopLoop", () => {
     const output = renderCliStatus(status);
     expect(output).not.toContain("Pause / risk reason:");
     expect(output).not.toContain("Last error:");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("fails clearly without mutating state or flags when the loop is idle", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-stop-invalid-idle-test-"));
+    const paths = buildLoopPaths(homeDir);
+    const config = makeTestConfig(homeDir);
+    await fs.mkdir(homeDir, { recursive: true });
+
+    const beforeState = await readLoopState(paths);
+
+    await expect(stopLoop(config)).rejects.toThrow(
+      "Invalid control transition: stop is only allowed from starting, running, cooldown, or paused."
+    );
+
+    expect(await hasFlag(paths.stopFlagPath)).toBe(false);
+    expect(await readLoopState(paths)).toEqual(beforeState);
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });

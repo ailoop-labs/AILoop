@@ -1129,6 +1129,12 @@ describe("console server API contract", () => {
       consoleAdminToken: token
     });
 
+    await writeLoopState(paths, {
+      ...defaultLoopState(process.pid),
+      state: "running",
+      pid: process.pid
+    });
+
     const response = await fetchHandler(
       createAuthorizedRequest("http://console.test/api/loop/pause", token, {
         method: "POST"
@@ -1138,6 +1144,30 @@ describe("console server API contract", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
     expect(await fs.readFile(paths.pauseFlagPath, "utf8")).toBe("1\n");
+  });
+
+  test("rejects invalid authenticated pause requests without mutating persisted state", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    const beforeState = await readLoopState(paths);
+
+    const response = await fetchHandler(
+      createAuthorizedRequest("http://console.test/api/loop/pause", token, {
+        method: "POST"
+      })
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "Invalid control transition: pause is only allowed from starting, running, or cooldown.",
+      code: "invalid_lifecycle_transition"
+    });
+    expect(await fs.stat(paths.pauseFlagPath).catch(() => null)).toBeNull();
+    expect(await readLoopState(paths)).toEqual(beforeState);
   });
 
   test("clears the pause flag and marks paused loops as running for authenticated requests", async () => {
@@ -1259,10 +1289,47 @@ describe("console server API contract", () => {
     }
   });
 
+  test("rejects invalid authenticated resume requests without mutating persisted state", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    await fs.writeFile(paths.pauseFlagPath, "1\n", "utf8");
+    await writeLoopState(paths, {
+      ...defaultLoopState(process.pid),
+      state: "running",
+      pid: process.pid
+    });
+
+    const beforeState = await readLoopState(paths);
+
+    const response = await fetchHandler(
+      createAuthorizedRequest("http://console.test/api/loop/resume", token, {
+        method: "POST"
+      })
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "Invalid control transition: resume is only allowed from paused.",
+      code: "invalid_lifecycle_transition"
+    });
+    expect(await fs.readFile(paths.pauseFlagPath, "utf8")).toBe("1\n");
+    expect(await readLoopState(paths)).toEqual(beforeState);
+  });
+
   test("sets the stop flag for authenticated requests", async () => {
     const token = "test-token";
     const { fetchHandler, paths } = await createFixture({
       consoleAdminToken: token
+    });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(process.pid),
+      state: "running",
+      pid: process.pid
     });
 
     const response = await fetchHandler(
@@ -1274,6 +1341,30 @@ describe("console server API contract", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
     expect(await fs.readFile(paths.stopFlagPath, "utf8")).toBe("1\n");
+  });
+
+  test("rejects invalid authenticated stop requests without mutating persisted state", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    const beforeState = await readLoopState(paths);
+
+    const response = await fetchHandler(
+      createAuthorizedRequest("http://console.test/api/loop/stop", token, {
+        method: "POST"
+      })
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "Invalid control transition: stop is only allowed from starting, running, cooldown, or paused.",
+      code: "invalid_lifecycle_transition"
+    });
+    expect(await fs.stat(paths.stopFlagPath).catch(() => null)).toBeNull();
+    expect(await readLoopState(paths)).toEqual(beforeState);
   });
 
   test("clears stale pause metadata from authenticated status responses after stop without a live pid", async () => {
