@@ -1,6 +1,10 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, test } from "bun:test";
+import type { AppConfig } from "../config/env";
 import type { PlannerContext } from "../types/contracts";
-import { buildAdaptivePlannerDirectives, buildPlannerPrompt, resolvePlannerRequirementMode } from "./planner";
+import { buildAdaptivePlannerDirectives, buildPlannerPrompt, PlannerAgent, resolvePlannerRequirementMode } from "./planner";
 
 function createContext(overrides: Partial<PlannerContext> = {}): PlannerContext {
   return {
@@ -18,6 +22,44 @@ function createContext(overrides: Partial<PlannerContext> = {}): PlannerContext 
     requirement_artifact_status: "ready",
     requirement_artifact_summary: null,
     ...overrides
+  };
+}
+
+function makeConfig(homeDir: string): AppConfig {
+  return {
+    homeDir,
+    intervalSeconds: 1,
+    maxCycles: 1,
+    exitOnError: false,
+    enableLeader: false,
+    evaluatorReworkMaxAttempts: 1,
+    consoleHost: "127.0.0.1",
+    consolePort: 3090,
+    consoleAdminToken: "",
+    maxRetainRuns: 10,
+    budget: {
+      usdPerRound: 0.5,
+      timeMinutes: 15,
+      actions: 30
+    },
+    codex: {
+      bin: "codex",
+      model: "",
+      profile: "",
+      plannerSandbox: "read-only",
+      executorSandbox: "workspace-write",
+      evaluatorSandbox: "workspace-write",
+      timeoutMs: 30_000,
+      llmEvaluatorDimensions: [
+        "goal_alignment",
+        "causal_validity",
+        "constraint_compliance",
+        "risk_externality",
+        "reversibility_resilience",
+        "learning_yield"
+      ],
+      llmEvaluatorMinPassScore: 75
+    }
   };
 }
 
@@ -97,5 +139,92 @@ describe("buildPlannerPrompt", () => {
 
     expect(prompt).toContain("\"requirement_artifact_status\": \"needs_refresh\"");
     expect(prompt).toContain("lacks operator-facing UX acceptance");
+  });
+
+  test("adds runtime isolation guidance and repository-root navigation", () => {
+    const prompt = buildPlannerPrompt(
+      createContext(),
+      [],
+      "# Planner Role\n\nProject-specific planner instructions.",
+      [],
+      "/tmp/example-repo"
+    );
+
+    expect(prompt).toContain("Repository root: /tmp/example-repo");
+    expect(prompt).toContain("This internal runtime session is intentionally isolated");
+    expect(prompt).toContain("use absolute paths under the repository root or explicitly `cd` into the repository root first");
+  });
+});
+
+describe("PlannerAgent", () => {
+  test("runs Codex planning in an isolated runtime session", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-planner-agent-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(path.join(homeDir, "PLANNER_ROLE.md"), "# Planner Role\n\nCustom planner guidance.\n", "utf8");
+
+    let capturedPrompt = "";
+    let capturedCwd = "";
+    let capturedIsolationEnabled = false;
+    let capturedIsolationGuide = "";
+    const mockCodex = {
+      async runJson<T>(options?: {
+        prompt?: string;
+        cwd?: string;
+        sessionIsolation?: {
+          enabled?: boolean;
+          agentsGuide?: string;
+        };
+      }) {
+        capturedPrompt = options?.prompt ?? "";
+        capturedCwd = options?.cwd ?? "";
+        capturedIsolationEnabled = options?.sessionIsolation?.enabled === true;
+        capturedIsolationGuide = options?.sessionIsolation?.agentsGuide ?? "";
+        return {
+          ok: true,
+          data: {
+            rationale: "Use a narrow step.",
+            assignee: "executor",
+            objective: "Inspect one file.",
+            expected_outcome: "A minimal next step is defined.",
+            impacted_files: ["src/example.ts"],
+            recommended_tools: ["read_file"]
+          } as T,
+          rawMessage: "{}",
+          stdout: "",
+          stderr: ""
+        };
+      }
+    };
+    const stubTools = {
+      async initialize() {},
+      getSkillManager() {
+        return {
+          getAvailableSkills() {
+            return [];
+          }
+        };
+      }
+    };
+
+    const originalCwd = process.cwd();
+    process.chdir(workspaceRoot);
+
+    try {
+      const realWorkspaceRoot = await fs.realpath(process.cwd());
+      const agent = new PlannerAgent(stubTools as never, makeConfig(homeDir), mockCodex as never);
+      const result = await agent.plan(createContext(), { onLog: async () => {} });
+
+      expect(result.objective).toBe("Inspect one file.");
+      expect(capturedPrompt).toContain("Custom planner guidance.");
+      expect(capturedPrompt).toContain(`Repository root: ${realWorkspaceRoot}`);
+      expect(capturedIsolationEnabled).toBe(true);
+      expect(capturedIsolationGuide).toContain("Internal Runtime Agent Session");
+      expect(capturedIsolationGuide).toContain("external skill catalogs");
+      expect(capturedCwd).toBe(realWorkspaceRoot);
+    } finally {
+      process.chdir(originalCwd);
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
   });
 });

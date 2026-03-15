@@ -7,6 +7,7 @@ import type {
 } from "../../types/contracts";
 import { CodexClient, type JsonSchema } from "../../agent/codex-client";
 import { loadProjectRoleDefinition } from "../../agent/role-definitions";
+import { buildInternalRuntimeSessionGuide } from "../../agent/runtime-policy";
 import { redactSecretLikeText } from "../../utils/secret-redaction";
 import type { Evaluator } from "../evaluator";
 
@@ -615,6 +616,11 @@ export function buildDimensionPrompt(
     ...(evaluatorRoleDefinition.trim()
       ? ["Project-specific Evaluator Role Definition:", evaluatorRoleDefinition.trim(), ""]
       : []),
+    "Runtime execution notes:",
+    "- This internal runtime session is intentionally isolated from repository-local AGENTS.md files and development-assistant skill workflows.",
+    "- Do not inspect repository files or use external development-assistant skills. Judge only from the provided prompt context.",
+    "- Do not use collaborative brainstorming workflows, human question-asking patterns, or external skill mandates.",
+    "",
     "Return JSON matching schema only.",
     "",
     "Rules:",
@@ -675,6 +681,12 @@ export class LLMJudgeEvaluator implements Evaluator {
           schema: DIMENSION_SCHEMA,
           cwd: process.cwd(),
           sandbox: this.sandbox,
+          sessionIsolation: {
+            enabled: true,
+            agentsGuide: buildInternalRuntimeSessionGuide("Evaluator", [
+              "Do not inspect repository files. Judge only from the provided prompt context."
+            ])
+          },
           onStdoutChunk: (chunk) => {
             for (const line of toLogLines("stdout", chunk)) {
               emitEvaluationLog(context, line);

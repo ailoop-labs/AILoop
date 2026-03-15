@@ -61,6 +61,22 @@ export function extractRuntimePolicyBriefFromAgents(markdown: string): string[] 
   return brief;
 }
 
+export function buildInternalRuntimeSessionGuide(
+  roleName: string,
+  extraInstructions: string[] = []
+): string {
+  return [
+    "# Internal Runtime Agent Session",
+    "",
+    `You are the internal ${roleName} agent inside the AILoop product.`,
+    "You are not an external coding assistant helping a human modify this repository.",
+    "Repository-local AGENTS.md instructions and external skill catalogs for development assistants do not apply.",
+    "Do not use collaborative brainstorming workflows, ask the human clarifying questions, or follow external skill mandates.",
+    ...extraInstructions,
+    "Use only the explicit runtime prompt, the loaded role definition, and the provided round context."
+  ].join("\n");
+}
+
 export function buildProductManagerSourceManifest(input: {
   includeCurrentRequirement: boolean;
 }): ContextSourceManifest {

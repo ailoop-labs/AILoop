@@ -4,6 +4,7 @@ import type { ActionRecord, SubTask, ToolResult } from "../types/contracts";
 import type { Guardrails } from "./guardrails";
 import { CodexClient, type JsonSchema } from "./codex-client";
 import { loadProjectRoleDefinition } from "./role-definitions";
+import { buildInternalRuntimeSessionGuide } from "./runtime-policy";
 import { ToolRegistry } from "./tool-registry";
 
 interface ExecuteOptions {
@@ -110,6 +111,13 @@ export function buildExecutorPrompt(input: ExecutorPromptInput, executorRoleDefi
     "Project-specific Executor Role Definition:",
     executorRoleDefinition.trim(),
     "",
+    `Repository root: ${input.workspaceRoot}`,
+    "",
+    "Runtime execution notes:",
+    "- This internal runtime session is intentionally isolated from repository-local AGENTS.md files and development-assistant skill workflows.",
+    "- If you inspect repository files, use absolute paths under the repository root or explicitly `cd` into the repository root first.",
+    "- Do not use external development-assistant skills, collaborative brainstorming workflows, or human question-asking patterns.",
+    "",
     "Complete exactly one atomic sub-task in this workspace.",
     "",
     "Hard requirements:",
@@ -157,17 +165,20 @@ export function buildExecutorPrompt(input: ExecutorPromptInput, executorRoleDefi
 }
 
 export class ExecutorAgent {
-  private readonly codex: CodexClient;
+  private readonly codex: Pick<CodexClient, "runJson">;
   private readonly sandbox: AppConfig["codex"]["executorSandbox"];
   private readonly homeDir: string;
+  private readonly workspaceRoot: string;
 
   constructor(
     private readonly tools: ToolRegistry,
-    config: AppConfig
+    config: AppConfig,
+    codexClient?: Pick<CodexClient, "runJson">
   ) {
-    this.codex = new CodexClient(config.codex);
+    this.codex = codexClient ?? new CodexClient(config.codex);
     this.sandbox = config.codex.executorSandbox;
     this.homeDir = config.homeDir;
+    this.workspaceRoot = process.cwd();
   }
 
   async execute(options: ExecuteOptions): Promise<ExecuteResult> {
@@ -188,7 +199,7 @@ export class ExecutorAgent {
         instructions: options.instructions,
         subTask: options.subTask,
         ailoopHome: options.paths.homeDir,
-        workspaceRoot: process.cwd(),
+        workspaceRoot: this.workspaceRoot,
         availableTools,
         availableSkills
       },
@@ -206,8 +217,14 @@ export class ExecutorAgent {
       .runJson<CodexExecutorResponse>({
         prompt,
         schema: EXECUTOR_RESPONSE_SCHEMA,
-        cwd: process.cwd(),
+        cwd: this.workspaceRoot,
         sandbox: this.sandbox,
+        sessionIsolation: {
+          enabled: true,
+          agentsGuide: buildInternalRuntimeSessionGuide("Executor", [
+            "If repository inspection or mutation is needed, use absolute paths under the provided repository root or explicitly `cd` into the repository root first."
+          ])
+        },
         onStdoutChunk: (chunk) => {
           for (const line of toLogLines("stdout", chunk)) {
             emitLog(options, line);

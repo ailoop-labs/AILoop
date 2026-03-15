@@ -2,6 +2,7 @@ import type { AppConfig } from "../config/env";
 import type { PlannerContext, SubTask } from "../types/contracts";
 import { CodexClient, type JsonSchema } from "./codex-client";
 import { loadProjectRoleDefinition } from "./role-definitions";
+import { buildInternalRuntimeSessionGuide } from "./runtime-policy";
 import type { ToolRegistry } from "./tool-registry";
 
 const SUBTASK_SCHEMA: JsonSchema = {
@@ -81,7 +82,8 @@ export function buildPlannerPrompt(
   context: PlannerContext,
   adaptiveDirectives: string[],
   plannerRoleDefinition: string,
-  availableSkills: { name: string; description: string }[] = []
+  availableSkills: { name: string; description: string }[] = [],
+  workspaceRoot = process.cwd()
 ): string {
   const skillsContext = availableSkills.length > 0
     ? [
@@ -94,6 +96,13 @@ export function buildPlannerPrompt(
     "You are the AILoop Planner agent.",
     "Project-specific Planner Role Definition:",
     plannerRoleDefinition.trim(),
+    "",
+    `Repository root: ${workspaceRoot}`,
+    "",
+    "Runtime execution notes:",
+    "- This internal runtime session is intentionally isolated from repository-local AGENTS.md files and development-assistant skill workflows.",
+    "- If you inspect repository files, use absolute paths under the repository root or explicitly `cd` into the repository root first.",
+    "- Do not use external development-assistant skills, collaborative brainstorming workflows, or human question-asking patterns.",
     "",
     "Return one atomic SubTask JSON that strictly matches the output schema.",
     "Rules:",
@@ -217,16 +226,18 @@ function normalizeSubTask(candidate: SubTask): SubTask {
 }
 
 export class PlannerAgent {
-  private readonly codex: CodexClient;
+  private readonly codex: Pick<CodexClient, "runJson">;
   private readonly sandbox: AppConfig["codex"]["plannerSandbox"];
   private readonly homeDir: string;
   private readonly tools: ToolRegistry;
+  private readonly workspaceRoot: string;
 
-  constructor(tools: ToolRegistry, config: AppConfig) {
+  constructor(tools: ToolRegistry, config: AppConfig, codexClient?: Pick<CodexClient, "runJson">) {
     this.tools = tools;
-    this.codex = new CodexClient(config.codex);
+    this.codex = codexClient ?? new CodexClient(config.codex);
     this.sandbox = config.codex.plannerSandbox;
     this.homeDir = config.homeDir;
+    this.workspaceRoot = process.cwd();
   }
 
   async plan(
@@ -254,7 +265,13 @@ export class PlannerAgent {
     
     await this.tools.initialize();
     const availableSkills = this.tools.getSkillManager().getAvailableSkills();
-    const prompt = buildPlannerPrompt(context, adaptiveDirectives, plannerRoleDefinition, availableSkills);
+    const prompt = buildPlannerPrompt(
+      context,
+      adaptiveDirectives,
+      plannerRoleDefinition,
+      availableSkills,
+      this.workspaceRoot
+    );
 
     emitLog("ProjectPlanner started Codex planning.");
     const heartbeatStartedAt = Date.now();
@@ -267,8 +284,14 @@ export class PlannerAgent {
       .runJson<SubTask>({
         prompt,
         schema: SUBTASK_SCHEMA,
-        cwd: process.cwd(),
+        cwd: this.workspaceRoot,
         sandbox: this.sandbox,
+        sessionIsolation: {
+          enabled: true,
+          agentsGuide: buildInternalRuntimeSessionGuide("ProjectPlanner", [
+            "If repository inspection is needed, use absolute paths under the provided repository root or explicitly `cd` into the repository root first."
+          ])
+        },
         onStdoutChunk: (chunk) => {
           for (const line of toLogLines("stdout", chunk)) {
             emitLog(line);

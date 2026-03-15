@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import type { AppConfig } from "../../config/env";
 import type { DimensionAssessment, RoundEvaluationContext } from "../../types/contracts";
@@ -83,6 +86,22 @@ function makeLlmConfig(dimensions: AppConfig["codex"]["llmEvaluatorDimensions"] 
     }
   };
 }
+
+describe("buildDimensionPrompt", () => {
+  test("adds runtime isolation guidance for evaluator sessions", () => {
+    const prompt = buildDimensionPrompt(
+      "constraint_compliance",
+      makeRoundContext(),
+      "# Evaluator Role\n\nProject-specific evaluator guidance."
+    );
+
+    expect(prompt).toContain("Project-specific Evaluator Role Definition");
+    expect(prompt).toContain("Project-specific evaluator guidance.");
+    expect(prompt).toContain("This internal runtime session is intentionally isolated");
+    expect(prompt).toContain("Do not inspect repository files");
+    expect(prompt).toContain("use external development-assistant skills");
+  });
+});
 
 describe("aggregateDimensionAssessments", () => {
   test("fails immediately when constraint_compliance fails", () => {
@@ -345,6 +364,74 @@ describe("aggregateDimensionAssessments", () => {
     expect(result.aggregateScore).toBeGreaterThanOrEqual(90);
     expect(result.evidence.some(e => e.includes("score=100.0"))).toBe(true);
     expect(result.evidence.some(e => e.includes("score=90.0"))).toBe(true);
+  });
+});
+
+describe("LLMJudgeEvaluator", () => {
+  test("runs dimension checks in an isolated runtime session", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-evaluator-agent-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(path.join(homeDir, "EVALUATOR_ROLE.md"), "# Evaluator Role\n\nCustom evaluator guidance.\n", "utf8");
+
+    let capturedPrompt = "";
+    let capturedCwd = "";
+    let capturedIsolationEnabled = false;
+    let capturedIsolationGuide = "";
+    const mockCodex = {
+      async runJson<T>(options?: {
+        prompt?: string;
+        cwd?: string;
+        sessionIsolation?: {
+          enabled?: boolean;
+          agentsGuide?: string;
+        };
+      }) {
+        capturedPrompt = options?.prompt ?? "";
+        capturedCwd = options?.cwd ?? "";
+        capturedIsolationEnabled = options?.sessionIsolation?.enabled === true;
+        capturedIsolationGuide = options?.sessionIsolation?.agentsGuide ?? "";
+        return {
+          ok: true,
+          data: {
+            dimension: "constraint_compliance",
+            decision: "pass",
+            score: 90,
+            confidence: 0.8,
+            justification: "Evidence is sufficient.",
+            evidence: ["round context is self-consistent"],
+            blocking_issues: [],
+            recommended_next_action: "continue"
+          } as T,
+          rawMessage: "{}",
+          stdout: "",
+          stderr: ""
+        };
+      }
+    };
+
+    const originalCwd = process.cwd();
+    process.chdir(workspaceRoot);
+
+    try {
+      const realWorkspaceRoot = await fs.realpath(process.cwd());
+      const config = {
+        ...makeLlmConfig(["constraint_compliance"]),
+        homeDir
+      };
+      const evaluator = new LLMJudgeEvaluator(config, mockCodex as never);
+      const result = await evaluator.evaluate(makeRoundContext());
+
+      expect(result.decision).toBe("pass");
+      expect(capturedPrompt).toContain("Custom evaluator guidance.");
+      expect(capturedIsolationEnabled).toBe(true);
+      expect(capturedIsolationGuide).toContain("Internal Runtime Agent Session");
+      expect(capturedIsolationGuide).toContain("Judge only from the provided prompt context");
+      expect(capturedCwd).toBe(realWorkspaceRoot);
+    } finally {
+      process.chdir(originalCwd);
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
   });
 });
 
