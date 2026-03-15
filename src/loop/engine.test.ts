@@ -6,6 +6,7 @@ import { loadConfig } from "../config/env";
 import type { ActionRecord, EvaluationResult, ProductManagerContext, SubTask, ToolResult } from "../types/contracts";
 import { ensureLoopHome, readLoopState, type LoopPaths, writeLoopState } from "./state";
 import { writeActiveRequirementArtifact } from "../product/requirements";
+import { WorkspaceManager } from "../environment/workspace";
 import {
   LoopEngine,
   buildEvaluatorReworkInstructions,
@@ -1385,6 +1386,49 @@ describe("LoopEngine time budget guard", () => {
 });
 
 describe("LoopEngine round error handling", () => {
+  test("uses the persisted goal in round-error summaries instead of rendering an empty goal", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-round-error-goal-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+    await fs.writeFile(
+      paths.taskPath,
+      [
+        "# Goal",
+        "",
+        "Keep rollback failures reviewable for the operator."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+    mutable.planner = {
+      plan: async () => {
+        throw new Error("planner exploded before execution");
+      }
+    };
+
+    const outcome = await mutable.runRound(1);
+    expect(outcome.success).toBe(false);
+
+    const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+    const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
+    expect(summaryFile).toBeDefined();
+
+    const summaryText = await fs.readFile(path.join(homeDir, "runs", summaryFile as string), "utf8");
+    expect(summaryText).toContain("# Goal");
+    expect(summaryText).toContain("Keep rollback failures reviewable for the operator.");
+    expect(summaryText).not.toContain("Goal was empty.");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
   test("preserves seeded evaluator failure count on pre-evaluation execution errors", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-round-error-test-"));
     const config = loadConfig({
@@ -1423,6 +1467,83 @@ describe("LoopEngine round error handling", () => {
     expect(state.consecutive_evaluator_failures).toBe(9);
 
     await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("pauses and records rollback failure when automatic rollback cannot complete", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-rollback-failure-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const plan: SubTask = {
+      assignee: "executor",
+      rationale: "test rationale",
+      objective: "Trigger a round error after a snapshot exists",
+      expected_outcome: "rollback failure is recorded and the loop pauses",
+      impacted_files: ["src/loop/engine.ts"],
+      recommended_tools: ["read_file", "write_file"]
+    };
+
+    const originalCreateSnapshot = WorkspaceManager.prototype.createSnapshot;
+    const originalRollback = WorkspaceManager.prototype.rollback;
+
+    WorkspaceManager.prototype.createSnapshot = async function createSnapshotStub() {
+      return {
+        type: "stub"
+      } as any;
+    };
+    WorkspaceManager.prototype.rollback = async function rollbackStub() {
+      throw new Error("git restore failed");
+    };
+
+    try {
+      const mutable = engine as unknown as {
+        planner: { plan: () => Promise<SubTask> };
+        executor: {
+          execute: () => Promise<{
+            actions: ActionRecord[];
+            toolResult: ToolResult;
+          }>;
+        };
+        runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+      };
+      mutable.planner = { plan: async () => plan };
+      mutable.executor = {
+        execute: async () => {
+          throw new Error("executor exploded");
+        }
+      };
+
+      const outcome = await mutable.runRound(1);
+      expect(outcome.success).toBe(false);
+      expect(outcome.errorMessage).toContain("executor exploded");
+      expect(outcome.errorMessage).toContain("Rollback failed after round error: git restore failed");
+
+      const state = await readLoopState(paths);
+      expect(state.state).toBe("paused");
+      expect(state.last_error).toContain("Rollback failed after round error: git restore failed");
+
+      const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+      const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
+      const stateChangeFile = runArtifacts.find((entry) => entry.endsWith(".round.state_change.txt"));
+      expect(summaryFile).toBeDefined();
+      expect(stateChangeFile).toBeDefined();
+
+      const summaryText = await fs.readFile(path.join(homeDir, "runs", summaryFile as string), "utf8");
+      expect(summaryText).toContain("Rollback failed after round error: git restore failed");
+      expect(summaryText).toContain("pause");
+
+      const stateChangeText = await fs.readFile(path.join(homeDir, "runs", stateChangeFile as string), "utf8");
+      expect(stateChangeText).toContain("Rollback: failed to restore workspace snapshot after round error (git restore failed).");
+      expect(stateChangeText).not.toContain("Rollback: workspace snapshot restored after round error.");
+    } finally {
+      WorkspaceManager.prototype.createSnapshot = originalCreateSnapshot;
+      WorkspaceManager.prototype.rollback = originalRollback;
+      await fs.rm(homeDir, { recursive: true, force: true });
+    }
   });
 });
 

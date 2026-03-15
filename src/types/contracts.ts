@@ -187,6 +187,11 @@ export interface RequirementArtifactSnapshot {
   updated_at: string | null;
 }
 
+export interface GoalReference {
+  title: string;
+  summary: string;
+}
+
 export interface LeaderContext {
   goal: string;
   lastError: string | null;
@@ -245,6 +250,7 @@ export interface LoopStateData {
   round: number;
   updated_at: string;
   pid: number | null;
+  goal_reference?: GoalReference | null;
   last_error: string | null;
   consecutive_evaluator_failures: number;
   previous_tool_result: ToolResult | null;

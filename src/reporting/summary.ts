@@ -3,7 +3,7 @@ import path from "node:path";
 import type { ActionRecord, EvaluationResult, RoundArtifacts, SubTask, ToolResult } from "../types/contracts";
 import type { RoundMetrics } from "./metrics";
 import { ensureDir, readTextFile } from "../utils/fs";
-import { SecretRedactor } from "../utils/redaction";
+import { redactJsonStrings, SecretRedactor } from "../utils/redaction";
 
 export interface SummaryInput {
   goal: string;
@@ -165,8 +165,9 @@ export async function writeStateChangeFile(stateChangePath: string, content: str
 
 export async function writeEvaluationFile(evaluationPath: string, evaluation: EvaluationResult): Promise<void> {
   await ensureDir(path.dirname(evaluationPath));
-  const payload = `${JSON.stringify(evaluation, null, 2)}\n`;
-  await fs.writeFile(evaluationPath, redactArtifactText(payload), "utf8");
+  const redactor = new SecretRedactor(process.env);
+  const payload = `${JSON.stringify(redactJsonStrings(evaluation, redactor), null, 2)}\n`;
+  await fs.writeFile(evaluationPath, payload, "utf8");
 }
 
 export async function writeSummaryFile(summaryPath: string, input: SummaryInput): Promise<void> {

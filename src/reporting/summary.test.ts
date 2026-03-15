@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import type { ActionRecord } from "../types/contracts";
 import type { SummaryInput } from "./summary";
-import { appendLogLine, writeLogFile, writeStateChangeFile, writeSummaryFile } from "./summary";
+import { appendLogLine, writeEvaluationFile, writeLogFile, writeStateChangeFile, writeSummaryFile } from "./summary";
 
 async function withSecretEnv<T>(run: () => Promise<T>): Promise<T> {
   const previousOpenAiApiKey = process.env.OPENAI_API_KEY;
@@ -306,6 +306,38 @@ describe("writeSummaryFile auto rework section", () => {
       expect(summaryText).toContain("Used [REDACTED] while collecting evidence");
       expect(summaryText).toContain("SESSION_SECRET=[REDACTED]");
       expect(summaryText).toContain("OPENAI_API_KEY=[REDACTED] should be masked");
+
+      await fs.rm(dir, { recursive: true, force: true });
+    });
+  });
+
+  test("keeps evaluation artifacts as valid JSON after redaction", async () => {
+    await withSecretEnv(async () => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-summary-test-"));
+      const evaluationPath = path.join(dir, "round.evaluation.json");
+
+      await writeEvaluationFile(evaluationPath, {
+        decision: "pass",
+        justification: 'OPENAI_API_KEY=sk-test-secret and SESSION_SECRET="super-secret-value" should be masked',
+        evidence: [
+          "OPENAI_API_KEY=sk-test-secret",
+          'const sessionSecret = "super-secret-value"'
+        ],
+        recommended_next_action: "continue"
+      });
+
+      const raw = await fs.readFile(evaluationPath, "utf8");
+      const parsed = JSON.parse(raw) as {
+        justification: string;
+        evidence: string[];
+      };
+
+      expect(parsed.justification).toContain("OPENAI_API_KEY=[REDACTED]");
+      expect(parsed.justification).toContain("SESSION_SECRET=[REDACTED]");
+      expect(parsed.evidence).toEqual([
+        "OPENAI_API_KEY=[REDACTED]",
+        'const sessionSecret = "[REDACTED]"'
+      ]);
 
       await fs.rm(dir, { recursive: true, force: true });
     });

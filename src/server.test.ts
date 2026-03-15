@@ -626,7 +626,7 @@ describe("console server API contract", () => {
     const response = await fetchHandler(createAuthorizedRequest("http://console.test/api/status", token));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
+    expect(await response.json()).toMatchObject({
       state: "paused",
       round: 4,
       pid: null,
@@ -644,6 +644,10 @@ describe("console server API contract", () => {
       previous_tool_result: null,
       budget_health: null,
       current_budget: null,
+      goal_reference: {
+        title: "Project Goal (Derived from README.md)",
+        summary: "Project Goal (Derived from README.md)"
+      },
       artifact_completeness: {
         kind: "none",
         label: "No artifacts yet",

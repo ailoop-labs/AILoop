@@ -28,9 +28,11 @@ export class DatabaseManager {
         consecutive_evaluator_failures INTEGER NOT NULL DEFAULT 0,
         previous_tool_result_json TEXT,
         previous_evaluation_dimensions_json TEXT,
-        current_budget_json TEXT
+        current_budget_json TEXT,
+        goal_reference_json TEXT
       )
     `);
+    this.ensureColumn("system_state", "goal_reference_json", "TEXT");
 
     // Historical Rounds & Metrics
     this.db.run(`
@@ -102,6 +104,15 @@ export class DatabaseManager {
     `);
   }
 
+  private ensureColumn(table: string, column: string, definition: string) {
+    const rows = this.db.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (rows.some((row) => row.name === column)) {
+      return;
+    }
+
+    this.db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+
   async getLoopState(): Promise<Partial<LoopStateData> | null> {
     const row = this.db.query("SELECT * FROM system_state WHERE id = 1").get() as any;
     if (!row) return null;
@@ -112,6 +123,7 @@ export class DatabaseManager {
       updated_at: row.updated_at,
       pid: row.pid,
       last_error: row.last_error,
+      goal_reference: row.goal_reference_json ? JSON.parse(row.goal_reference_json) : null,
       consecutive_evaluator_failures: row.consecutive_evaluator_failures,
       previous_tool_result: row.previous_tool_result_json ? JSON.parse(row.previous_tool_result_json) : null,
       previous_evaluation_dimensions: row.previous_evaluation_dimensions_json ? JSON.parse(row.previous_evaluation_dimensions_json) : undefined,
@@ -124,8 +136,8 @@ export class DatabaseManager {
       INSERT INTO system_state (
         id, state, round, updated_at, pid, last_error, 
         consecutive_evaluator_failures, previous_tool_result_json, 
-        previous_evaluation_dimensions_json, current_budget_json
-      ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        previous_evaluation_dimensions_json, current_budget_json, goal_reference_json
+      ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         state = excluded.state,
         round = excluded.round,
@@ -135,7 +147,8 @@ export class DatabaseManager {
         consecutive_evaluator_failures = excluded.consecutive_evaluator_failures,
         previous_tool_result_json = excluded.previous_tool_result_json,
         previous_evaluation_dimensions_json = excluded.previous_evaluation_dimensions_json,
-        current_budget_json = excluded.current_budget_json
+        current_budget_json = excluded.current_budget_json,
+        goal_reference_json = excluded.goal_reference_json
     `);
 
     query.run(
@@ -147,7 +160,8 @@ export class DatabaseManager {
       state.consecutive_evaluator_failures,
       state.previous_tool_result ? JSON.stringify(state.previous_tool_result) : null,
       state.previous_evaluation_dimensions ? JSON.stringify(state.previous_evaluation_dimensions) : null,
-      state.current_budget ? JSON.stringify(state.current_budget) : null
+      state.current_budget ? JSON.stringify(state.current_budget) : null,
+      state.goal_reference ? JSON.stringify(state.goal_reference) : null
     );
 
     // Also sync to rounds history for metrics

@@ -28,18 +28,7 @@ import type {
 } from "../types/contracts";
 import { fileExists, readJsonFile, readTextFile } from "../utils/fs";
 import { redactJsonStrings, SecretRedactor } from "../utils/redaction";
-
-export async function buildDeterministicGoal(workspaceRoot: string = process.cwd()): Promise<string> {
-  const goalMd = await readTextFile(path.join(workspaceRoot, "GOAL.md"), "");
-  if (goalMd.trim()) {
-    return goalMd;
-  }
-  const readmeMd = await readTextFile(path.join(workspaceRoot, "README.md"), "");
-  if (readmeMd.trim()) {
-    return `# Project Goal (Derived from README.md)\n\n${readmeMd}`;
-  }
-  return "# AILoop Goal\n\nDescribe the top-level goal this autonomous loop should pursue. Keep it outcome-focused and measurable.\n";
-}
+import { buildDeterministicGoal, readGoalFile, resolveWorkspaceRootFromHome } from "./goal";
 
 import {
   appendInstruction,
@@ -977,7 +966,8 @@ export async function tailLatestLog(config: AppConfig, lines = 200): Promise<str
 }
 
 export async function readGoal(_config: AppConfig): Promise<string> {
-  return buildDeterministicGoal(process.cwd());
+  const paths = await ensureLoopHomeAndGetPaths(_config);
+  return readGoalFile(paths.taskPath, resolveWorkspaceRootFromHome(paths.homeDir));
 }
 
 export function resolveWebDistPath(): string {

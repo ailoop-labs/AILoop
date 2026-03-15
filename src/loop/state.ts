@@ -4,6 +4,7 @@ import { DatabaseManager } from "../utils/db";
 import type { CrashRecoveryRecoveredBy, CrashRecoveryStatus, LoopPaths, LoopStateData, LoopStateName } from "../types/contracts";
 export type { LoopPaths, LoopStateData };
 import { ensureDir, ensureRegularFile, fileExists, readJsonFile, readTextFile, writeJsonFile } from "../utils/fs";
+import { ensureGoalFile, extractGoalReference, readGoalFile, resolveWorkspaceRootFromHome } from "./goal";
 
 const INTERRUPTED_LOOP_STATES = new Set<LoopStateName>(["starting", "running", "cooldown", "stopping"]);
 const CRASH_RECOVERY_NEXT_ACTION = "Inspect the run state and resume explicitly when safe.";
@@ -69,6 +70,14 @@ async function syncCanonicalLoopStateFile(paths: LoopPaths, state: LoopStateData
   await writeJsonFile(paths.statePath, state);
 }
 
+async function attachGoalReference(paths: LoopPaths, state: LoopStateData): Promise<LoopStateData> {
+  const goalMarkdown = await readGoalFile(paths.taskPath, resolveWorkspaceRootFromHome(paths.homeDir));
+  return {
+    ...state,
+    goal_reference: extractGoalReference(goalMarkdown)
+  };
+}
+
 async function migrateLegacyLoopState(paths: LoopPaths): Promise<LoopStateData | null> {
   const db = new DatabaseManager({ dbPath: paths.dbPath });
   let finalState = await db.getLoopState();
@@ -91,9 +100,10 @@ async function migrateLegacyLoopState(paths: LoopPaths): Promise<LoopStateData |
   db.close();
 
   if (finalState) {
-    await syncCanonicalLoopStateFile(paths, normalizeLoopState(finalState));
+    const normalizedState = await attachGoalReference(paths, normalizeLoopState(finalState));
+    await syncCanonicalLoopStateFile(paths, normalizedState);
     if (await fileExists(paths.legacyStatePath)) await fs.unlink(paths.legacyStatePath).catch(() => {});
-    return normalizeLoopState(finalState);
+    return normalizedState;
   }
 
   return null;
@@ -104,6 +114,7 @@ export async function ensureLoopHome(paths: LoopPaths): Promise<void> {
   await ensureDir(paths.runsDir);
 
   await ensureRegularFile(paths.taskPath, "# AILoop Task Log\n");
+  await ensureGoalFile(paths.taskPath, resolveWorkspaceRootFromHome(paths.homeDir));
   await ensureRegularFile(paths.instructionsPath, "[]\n");
   await writeInstructionQueue(paths, await readMergedInstructionQueue(paths));
   const state = await migrateLegacyLoopState(paths);
@@ -118,6 +129,7 @@ export function defaultLoopState(pid: number | null = null): LoopStateData {
     round: 0,
     updated_at: new Date().toISOString(),
     pid,
+    goal_reference: null,
     last_error: null,
     consecutive_evaluator_failures: 0,
     previous_tool_result: null,
@@ -139,6 +151,7 @@ function normalizeLoopState(raw: Partial<LoopStateData> | null | undefined): Loo
     ...fallback,
     ...raw,
     pid: normalizePersistedPid(raw.pid),
+    goal_reference: raw.goal_reference ?? null,
     previous_tool_result: raw.previous_tool_result ?? null,
     previous_evaluation_dimensions: raw.previous_evaluation_dimensions,
     current_budget: raw.current_budget ?? null
@@ -158,16 +171,16 @@ export async function readLoopState(paths: LoopPaths): Promise<LoopStateData> {
   }
   db.close();
 
-  const normalized = normalizeLoopState(raw);
+  const normalized = await attachGoalReference(paths, normalizeLoopState(raw));
   await syncCanonicalLoopStateFile(paths, normalized);
   return normalized;
 }
 
 export async function writeLoopState(paths: LoopPaths, state: LoopStateData): Promise<void> {
-  const nextState: LoopStateData = {
+  const nextState = await attachGoalReference(paths, {
     ...state,
     updated_at: new Date().toISOString()
-  };
+  });
   
   const db = new DatabaseManager({ dbPath: paths.dbPath });
   await db.setLoopState(nextState);

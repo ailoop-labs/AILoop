@@ -88,6 +88,38 @@ describe("loop state persistence", () => {
     await fs.rm(homeDir, { recursive: true, force: true });
   });
 
+  test("writeLoopState persists a goal reference derived from goal.md", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-state-goal-reference-test-"));
+    const paths = buildLoopPaths(homeDir);
+
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(
+      paths.taskPath,
+      [
+        "# Goal",
+        "",
+        "Make lifecycle pause reasons and rollback status reviewable."
+      ].join("\n"),
+      "utf8"
+    );
+
+    await writeLoopState(paths, defaultLoopState());
+
+    const persisted = await readLoopState(paths);
+    expect(persisted.goal_reference).toEqual({
+      title: "Goal",
+      summary: "Make lifecycle pause reasons and rollback status reviewable."
+    });
+    expect(JSON.parse(await fs.readFile(paths.statePath, "utf8"))).toMatchObject({
+      goal_reference: {
+        title: "Goal",
+        summary: "Make lifecycle pause reasons and rollback status reviewable."
+      }
+    });
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
   test("ensureLoopHome heals instructions.queue.json when it is a directory", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-state-heal-instructions-"));
     const paths = buildLoopPaths(homeDir);
@@ -262,9 +294,12 @@ describe("loop state persistence", () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-state-default-canonical-state-"));
     const paths = buildLoopPaths(homeDir);
 
+    await fs.writeFile(path.join(homeDir, "README.md"), "# Workspace Goal\n\nKeep the operator-visible goal in sync.\n", "utf8");
+
     await ensureLoopHome(paths);
 
     const persisted = await readLoopState(paths);
+    expect(await fs.readFile(paths.taskPath, "utf8")).toContain("# Project Goal (Derived from README.md)");
     expect(JSON.parse(await fs.readFile(paths.statePath, "utf8"))).toMatchObject({
       state: persisted.state,
       round: persisted.round,
@@ -272,7 +307,8 @@ describe("loop state persistence", () => {
       last_error: persisted.last_error,
       consecutive_evaluator_failures: persisted.consecutive_evaluator_failures,
       previous_tool_result: persisted.previous_tool_result,
-      current_budget: persisted.current_budget
+      current_budget: persisted.current_budget,
+      goal_reference: persisted.goal_reference
     });
 
     await fs.rm(homeDir, { recursive: true, force: true });

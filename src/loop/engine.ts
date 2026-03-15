@@ -42,7 +42,7 @@ import { fileExists, readTextFile } from "../utils/fs";
 import { runShellCommand } from "../utils/exec";
 import { SecretRedactor } from "../utils/redaction";
 import { runTimestamp } from "../utils/time";
-import { buildDeterministicGoal } from "./control";
+import { readGoalFile, resolveWorkspaceRootFromHome } from "./goal";
 import { cooldownWithControlChecks, waitWhilePaused } from "./scheduler";
 import {
   buildLoopPaths,
@@ -622,10 +622,10 @@ export class LoopEngine {
     };
     let stateChange = "No state changes detected.\n";
     let snapshot: any = null;
+    let goal = await readGoalFile(this.paths.taskPath, resolveWorkspaceRootFromHome(this.paths.homeDir));
 
     try {
       await enforceBudgetBeforeAction("round.bootstrap");
-      const goal = await buildDeterministicGoal(process.cwd());
       const instructions = await drainInstructions(this.paths);
       const priorState = await readLoopState(this.paths);
       const tacticalReworkLimit = Math.max(0, this.config.evaluatorReworkMaxAttempts);
@@ -851,6 +851,8 @@ export class LoopEngine {
     } catch (error) {
       const message = error instanceof BudgetBreachError ? error.message : (error as Error).message;
       const errorType = error instanceof BudgetBreachError ? "BudgetBreach" : "RoundExecutionError";
+      let failureMessage = message;
+      let rollbackRecordedPause = error instanceof BudgetBreachError;
       const failureToolResult: ToolResult = {
         status: "failure",
         summary: "Round failed before evaluation completed.",
@@ -860,15 +862,29 @@ export class LoopEngine {
         },
         error: {
           type: errorType,
-          message
+          message: failureMessage
         },
-        next_state_hint: error instanceof BudgetBreachError ? "pause" : "continue"
+        next_state_hint: rollbackRecordedPause ? "pause" : "continue"
       };
 
       if (snapshot) {
-        await workspace.rollback(snapshot);
+        try {
+          await workspace.rollback(snapshot);
+          stateChange = `${stateChange}\nRollback: workspace snapshot restored after round error.\n`;
+        } catch (rollbackError) {
+          const rollbackMessage = (rollbackError as Error).message;
+          failureMessage = `${message} | Rollback failed after round error: ${rollbackMessage}`;
+          rollbackRecordedPause = true;
+          failureToolResult.error = {
+            type: errorType,
+            message: failureMessage
+          };
+          failureToolResult.next_state_hint = "pause";
+          stateChange = `${stateChange}\nRollback: failed to restore workspace snapshot after round error (${rollbackMessage}).\n`;
+        }
+      } else {
+        stateChange = `${stateChange}\nRollback: not needed because no workspace snapshot was captured before the round error.\n`;
       }
-      stateChange = `${stateChange}\nRollback: workspace snapshot restored after round error.\n`;
 
       const usage = guardrails.usage();
       const metrics: RoundMetrics = {
@@ -892,21 +908,21 @@ export class LoopEngine {
       await writeLogFile(artifacts.logPath, logLines);
       await writeMetricsFile(artifacts.metricsPath, metrics);
       await writeSummaryFile(artifacts.summaryPath, {
-        goal: "",
+        goal,
         subTask,
         actions: [],
         toolResult: failureToolResult,
         evaluation: {
           decision: "fail",
-          justification: message,
-          evidence: [message],
+          justification: failureMessage,
+          evidence: [failureMessage],
           recommended_next_action: "pause and inspect round error"
         },
         metrics,
         stateChange,
-        risks: [message],
+        risks: [failureMessage],
         autoReworkAttempts: [],
-        nextRecommendation: error instanceof BudgetBreachError ? "pause" : "continue",
+        nextRecommendation: rollbackRecordedPause ? "pause" : "continue",
         artifacts: {
           logPath: artifacts.logPath,
           summaryPath: artifacts.summaryPath,
@@ -916,18 +932,18 @@ export class LoopEngine {
         }
       });
 
-      if (error instanceof BudgetBreachError) {
+      if (rollbackRecordedPause) {
         await setFlag(this.paths.pauseFlagPath);
       }
 
-      const nextState = error instanceof BudgetBreachError ? "paused" : "running";
+      const nextState = rollbackRecordedPause ? "paused" : "running";
 
       await updateLoopState(this.paths, (current) => ({
         ...current,
         round,
         state: nextState,
         pid: process.pid,
-        last_error: message,
+        last_error: failureMessage,
         consecutive_evaluator_failures: current.consecutive_evaluator_failures,
         previous_tool_result: failureToolResult,
         current_budget: {
@@ -936,7 +952,7 @@ export class LoopEngine {
         }
       }));
 
-      return { success: false, errorMessage: message };
+      return { success: false, errorMessage: failureMessage };
     }
   }
 
