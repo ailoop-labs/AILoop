@@ -3,10 +3,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   ArtifactCompletenessPanel,
   BudgetHealthPanel,
+  ControlErrorPanel,
   CrashRecoveryPanel,
   LifecycleStatusGrid,
   OperatorReasonPanel,
   RunArtifactEvidenceGrid,
+  deriveControlAvailability,
+  postControlAndRefresh,
   summarizeApiError
 } from "./App";
 import type { RoundReport } from "./run-history";
@@ -336,6 +339,67 @@ describe("LifecycleStatusGrid", () => {
     expect(html).toContain("Pause reason: None active");
     expect(html).toContain("Process: alive");
     expect(html).toContain("Pending instructions: 0 queued");
+  });
+});
+
+describe("deriveControlAvailability", () => {
+  test("matches the persisted lifecycle contract for operator controls", () => {
+    expect(deriveControlAvailability("starting")).toEqual({
+      canStart: false,
+      canPause: true,
+      canResume: false,
+      canStop: true
+    });
+
+    expect(deriveControlAvailability("paused")).toEqual({
+      canStart: false,
+      canPause: false,
+      canResume: true,
+      canStop: true
+    });
+
+    expect(deriveControlAvailability("idle")).toEqual({
+      canStart: true,
+      canPause: false,
+      canResume: false,
+      canStop: false
+    });
+  });
+});
+
+describe("ControlErrorPanel", () => {
+  test("surfaces rejected lifecycle controls with the persisted state context", () => {
+    const html = renderToStaticMarkup(
+      <ControlErrorPanel
+        message="Invalid control transition: resume is only allowed from paused."
+        state="running"
+      />
+    );
+
+    expect(html).toContain("Control rejected");
+    expect(html).toContain("Invalid control transition: resume is only allowed from paused.");
+    expect(html).toContain("Persisted state: running");
+    expect(html).toContain("The request did not mutate the backend lifecycle state.");
+  });
+});
+
+describe("postControlAndRefresh", () => {
+  test("refreshes persisted status after a rejected lifecycle control before rethrowing", async () => {
+    const calls: string[] = [];
+
+    await expect(
+      postControlAndRefresh(
+        async () => {
+          calls.push("request");
+          throw new Error("Invalid control transition: pause is only allowed from starting, running, or cooldown.");
+        },
+        async () => {
+          calls.push("refresh");
+        }
+      )
+    ).rejects.toThrow("Invalid control transition: pause is only allowed from starting, running, or cooldown.");
+
+    expect(calls).toEqual(["request", "refresh"]);
   });
 });
 

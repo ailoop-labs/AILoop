@@ -184,6 +184,15 @@ const stateLabel: Record<LoopStateName, string> = {
   error: "error"
 };
 
+interface ControlAvailability {
+  canStart: boolean;
+  canPause: boolean;
+  canResume: boolean;
+  canStop: boolean;
+}
+
+type LifecycleControlPath = "/api/loop/start" | "/api/loop/pause" | "/api/loop/resume" | "/api/loop/stop";
+
 const operatorReasonTone: Record<OperatorStatusReason["severity"], string> = {
   info: "border-white/10 bg-ink/60 text-mist/80",
   warning: "border-warning/40 bg-warning/10 text-warning",
@@ -287,6 +296,45 @@ async function api<T>(url: string, init?: RequestInit, token?: string): Promise<
 
 function isUnauthorizedError(message: string): boolean {
   return message.includes("Unauthorized");
+}
+
+function isLifecycleControlRejection(message: string): boolean {
+  return message.startsWith("Invalid control transition:");
+}
+
+export function deriveControlAvailability(state?: LoopStateName | null): ControlAvailability {
+  if (!state) {
+    return {
+      canStart: false,
+      canPause: false,
+      canResume: false,
+      canStop: false
+    };
+  }
+
+  return {
+    canStart: state === "idle" || state === "error",
+    canPause: state === "starting" || state === "running" || state === "cooldown",
+    canResume: state === "paused",
+    canStop: state === "starting" || state === "running" || state === "cooldown" || state === "paused"
+  };
+}
+
+export async function postControlAndRefresh(
+  request: () => Promise<void>,
+  refresh: () => Promise<void>
+): Promise<void> {
+  try {
+    await request();
+    await refresh();
+  } catch (error) {
+    try {
+      await refresh();
+    } catch {
+      // Keep the original control error visible to the operator.
+    }
+    throw error;
+  }
 }
 
 function formatMs(ms: number): string {
@@ -541,6 +589,34 @@ export function OperatorReasonPanel({ operatorReason }: { operatorReason: Operat
   );
 }
 
+export function ControlErrorPanel({
+  message,
+  state
+}: {
+  message: string | null;
+  state?: LoopStateName | null;
+}) {
+  if (!message) {
+    return null;
+  }
+
+  return (
+    <div className="mt-4 rounded-2xl border border-ember/40 bg-ember/10 p-4 shadow-[0_0_0_1px_rgba(255,122,82,0.08)]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-ember">Control rejected</p>
+          <h2 className="mt-2 text-xl font-semibold text-mist">Lifecycle state unchanged</h2>
+          <p className="mt-2 text-sm leading-6 text-mist/85">{message}</p>
+        </div>
+        <span className="rounded-full border border-ember/30 bg-ink/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-ember">
+          Persisted state: {state ?? "unknown"}
+        </span>
+      </div>
+      <p className="mt-4 text-sm text-mist/70">The request did not mutate the backend lifecycle state.</p>
+    </div>
+  );
+}
+
 function formatArtifactKindLabel(kind: ArtifactCompletenessStatus["present"][number]): string {
   if (kind === "state_change") {
     return "state change";
@@ -757,6 +833,7 @@ export default function App() {
   const [instruction, setInstruction] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [configBusy, setConfigBusy] = useState(false);
+  const [controlError, setControlError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const isAuthenticated = tokenRequired === false || (tokenRequired === true && authToken.trim().length > 0);
   const displayLogText = useMemo(() => buildLogViewerText(logs), [logs]);
@@ -882,24 +959,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [isAuthenticated, authToken]);
 
-  const controlAvailability = useMemo(() => {
-    const state = status?.state;
-    if (!state) {
-      return {
-        canStart: false,
-        canPause: false,
-        canResume: false,
-        canStop: false
-      };
-    }
-
-    return {
-      canStart: state === "idle" || state === "error",
-      canPause: state === "running" || state === "cooldown",
-      canResume: state === "paused",
-      canStop: state === "starting" || state === "running" || state === "cooldown" || state === "paused"
-    };
-  }, [status?.state]);
+  const controlAvailability = useMemo(() => deriveControlAvailability(status?.state), [status?.state]);
 
   const browserTimeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "Local", []);
   const runHistoryPagination = useMemo(
@@ -925,23 +985,31 @@ export default function App() {
     }
   }, [runHistoryPage, runHistoryPagination.currentPage]);
 
-  const sendControl = async (path: string, body?: Record<string, unknown>): Promise<void> => {
+  const sendLifecycleControl = async (path: LifecycleControlPath): Promise<void> => {
     try {
       setBusy(path);
-      await api(path, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: body ? JSON.stringify(body) : undefined
-      }, authToken);
-      await refresh();
+      setControlError(null);
+      await postControlAndRefresh(
+        () =>
+          api(path, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json"
+            }
+          }, authToken),
+        () => refresh()
+      );
     } catch (requestError) {
-      handleRequestError(requestError, "控制操作失败：请先重新登录。");
-    } finally {
-      if (busy === path || busy === null || true) {
-        setBusy(null);
+      const message = requestError instanceof Error ? requestError.message : String(requestError);
+      if (isUnauthorizedError(message)) {
+        handleRequestError(requestError, "控制操作失败：请先重新登录。");
+      } else if (isLifecycleControlRejection(message)) {
+        setControlError(message);
+      } else {
+        handleRequestError(requestError, "控制操作失败：请稍后重试。");
       }
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -998,8 +1066,23 @@ export default function App() {
     if (!trimmed) {
       return;
     }
-    await sendControl("/api/loop/instruct", { message: trimmed });
-    setInstruction("");
+    try {
+      setBusy("/api/loop/instruct");
+      await api("/api/loop/instruct", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ message: trimmed })
+      }, authToken);
+      await refresh();
+      setInstruction("");
+      setError(null);
+    } catch (requestError) {
+      handleRequestError(requestError, "控制操作失败：请先重新登录。");
+    } finally {
+      setBusy(null);
+    }
   };
 
   const updateTopLevelNumber = (key: "intervalSeconds" | "maxCycles", raw: string): void => {
@@ -1256,7 +1339,7 @@ export default function App() {
         <div className="mt-6 grid gap-2 md:grid-cols-4">
           <button
             className="rounded-xl flex items-center justify-center gap-2 bg-accent px-4 py-2 font-semibold text-ink transition hover:bg-accent/80 disabled:cursor-not-allowed disabled:bg-accent/40"
-            onClick={() => void sendControl("/api/loop/start")}
+            onClick={() => void sendLifecycleControl("/api/loop/start")}
             disabled={busy !== null || configBusy || !controlAvailability.canStart}
           >
             {busy === "/api/loop/start" && (
@@ -1269,26 +1352,27 @@ export default function App() {
           </button>
           <button
             className="rounded-xl bg-warning px-4 py-2 font-semibold text-ink transition hover:bg-warning/80 disabled:cursor-not-allowed disabled:bg-warning/40"
-            onClick={() => void sendControl("/api/loop/pause")}
+            onClick={() => void sendLifecycleControl("/api/loop/pause")}
             disabled={busy !== null || configBusy || !controlAvailability.canPause}
           >
             Pause
           </button>
           <button
             className="rounded-xl bg-sky-300 px-4 py-2 font-semibold text-ink transition hover:bg-sky-200 disabled:cursor-not-allowed disabled:bg-sky-200/50"
-            onClick={() => void sendControl("/api/loop/resume")}
+            onClick={() => void sendLifecycleControl("/api/loop/resume")}
             disabled={busy !== null || configBusy || !controlAvailability.canResume}
           >
             Resume
           </button>
           <button
             className="rounded-xl bg-ember px-4 py-2 font-semibold text-ink transition hover:bg-ember/80 disabled:cursor-not-allowed disabled:bg-ember/40"
-            onClick={() => void sendControl("/api/loop/stop")}
+            onClick={() => void sendLifecycleControl("/api/loop/stop")}
             disabled={busy !== null || configBusy || !controlAvailability.canStop}
           >
             Stop
           </button>
         </div>
+        <ControlErrorPanel message={controlError} state={status?.state} />
       </section>
 
       <section className="reveal rounded-3xl border border-white/10 bg-panel/70 p-5 backdrop-blur" style={{ animationDelay: "80ms" }}>
