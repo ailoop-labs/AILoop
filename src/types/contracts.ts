@@ -251,6 +251,7 @@ export interface LoopStateData {
   updated_at: string;
   pid: number | null;
   goal_reference?: GoalReference | null;
+  pause_reason: string | null;
   last_error: string | null;
   consecutive_evaluator_failures: number;
   previous_tool_result: ToolResult | null;

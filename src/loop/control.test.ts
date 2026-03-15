@@ -1019,6 +1019,26 @@ describe("getLoopStatus", () => {
     await fs.rm(homeDir, { recursive: true, force: true });
   });
 
+  test("returns the persisted active pause reason in the status payload", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-pause-reason-test-"));
+    const paths = buildLoopPaths(homeDir);
+    await fs.mkdir(homeDir, { recursive: true });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "paused",
+      round: 7,
+      pause_reason: "Budget breach",
+      last_error: "BudgetBreach: action budget exceeded"
+    });
+
+    const status = await getLoopStatus(makeTestConfig(homeDir));
+
+    expect(status.pause_reason).toBe("Budget breach");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
   test("derives log-only completeness from the latest persisted round artifacts", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-artifact-log-only-test-"));
     const paths = buildLoopPaths(homeDir);

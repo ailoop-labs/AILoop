@@ -244,15 +244,16 @@ describe("BudgetHealthPanel", () => {
 });
 
 describe("LifecycleStatusGrid", () => {
-  test("renders the queued operator instruction count alongside the lifecycle status cards", () => {
+  test("renders the queued operator instruction count and active pause reason alongside the lifecycle status cards", () => {
     const html = renderToStaticMarkup(
       <LifecycleStatusGrid
         status={{
-          state: "running",
+          state: "paused",
           round: 12,
           pid: 4312,
           pid_alive: true,
           pending_instruction_count: 4,
+          pause_reason: "Budget breach",
           crash_recovery: null,
           operator_reason: null,
           artifact_completeness: {
@@ -286,6 +287,7 @@ describe("LifecycleStatusGrid", () => {
 
     expect(html).toContain("Pending instructions");
     expect(html).toContain("4 queued");
+    expect(html).toContain("Pause reason: Budget breach");
     expect(html).toContain("Round: 12");
     expect(html).toContain("PID: 4312");
   });

@@ -527,6 +527,7 @@ describe("console server API contract", () => {
       round: 7,
       pid: null,
       pid_alive: false,
+      pause_reason: "Manual pause",
       crash_recovery: null,
       operator_reason: {
         kind: "manual_pause",
@@ -737,6 +738,7 @@ describe("console server API contract", () => {
     expect(await response.json()).toMatchObject({
       state: "paused",
       round: 12,
+      pause_reason: "Budget breach",
       operator_reason: {
         kind: "budget_breach",
         title: "Budget breach",

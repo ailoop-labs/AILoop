@@ -24,6 +24,7 @@ export class DatabaseManager {
         round INTEGER NOT NULL DEFAULT 0,
         updated_at TEXT NOT NULL,
         pid INTEGER,
+        pause_reason TEXT,
         last_error TEXT,
         consecutive_evaluator_failures INTEGER NOT NULL DEFAULT 0,
         previous_tool_result_json TEXT,
@@ -32,6 +33,7 @@ export class DatabaseManager {
         goal_reference_json TEXT
       )
     `);
+    this.ensureColumn("system_state", "pause_reason", "TEXT");
     this.ensureColumn("system_state", "goal_reference_json", "TEXT");
 
     // Historical Rounds & Metrics
@@ -122,6 +124,7 @@ export class DatabaseManager {
       round: row.round,
       updated_at: row.updated_at,
       pid: row.pid,
+      pause_reason: row.pause_reason,
       last_error: row.last_error,
       goal_reference: row.goal_reference_json ? JSON.parse(row.goal_reference_json) : null,
       consecutive_evaluator_failures: row.consecutive_evaluator_failures,
@@ -134,15 +137,16 @@ export class DatabaseManager {
   async setLoopState(state: LoopStateData) {
     const query = this.db.prepare(`
       INSERT INTO system_state (
-        id, state, round, updated_at, pid, last_error, 
+        id, state, round, updated_at, pid, pause_reason, last_error, 
         consecutive_evaluator_failures, previous_tool_result_json, 
         previous_evaluation_dimensions_json, current_budget_json, goal_reference_json
-      ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         state = excluded.state,
         round = excluded.round,
         updated_at = excluded.updated_at,
         pid = excluded.pid,
+        pause_reason = excluded.pause_reason,
         last_error = excluded.last_error,
         consecutive_evaluator_failures = excluded.consecutive_evaluator_failures,
         previous_tool_result_json = excluded.previous_tool_result_json,
@@ -156,6 +160,7 @@ export class DatabaseManager {
       state.round,
       state.updated_at,
       state.pid,
+      state.pause_reason,
       state.last_error,
       state.consecutive_evaluator_failures,
       state.previous_tool_result ? JSON.stringify(state.previous_tool_result) : null,

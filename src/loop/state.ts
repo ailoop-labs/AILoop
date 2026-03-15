@@ -9,6 +9,31 @@ import { ensureGoalFile, extractGoalReference, readGoalFile, resolveWorkspaceRoo
 const INTERRUPTED_LOOP_STATES = new Set<LoopStateName>(["starting", "running", "cooldown", "stopping"]);
 const CRASH_RECOVERY_NEXT_ACTION = "Inspect the run state and resume explicitly when safe.";
 
+export function derivePauseReasonLabel(message: string | null | undefined): string {
+  const normalized = message?.trim() ?? "";
+
+  if (/^Crash recovery:/i.test(normalized)) {
+    return "Crash recovery";
+  }
+  if (/BudgetBreach:/i.test(normalized)) {
+    return "Budget breach";
+  }
+  if (/EvaluatorFailureLimit:/i.test(normalized)) {
+    return "Evaluator failure threshold";
+  }
+  if (/rollback (failed|unsupported|incomplete)/i.test(normalized)) {
+    return "Rollback incomplete";
+  }
+  if (/guardrail|unsafe/i.test(normalized)) {
+    return "Guardrail block";
+  }
+  if (/^(Fatal error|Governance failed):/i.test(normalized)) {
+    return "Engine error";
+  }
+
+  return "Manual pause";
+}
+
 export function buildLoopPaths(homeDir: string): LoopPaths {
   return {
     homeDir,
@@ -130,6 +155,7 @@ export function defaultLoopState(pid: number | null = null): LoopStateData {
     updated_at: new Date().toISOString(),
     pid,
     goal_reference: null,
+    pause_reason: null,
     last_error: null,
     consecutive_evaluator_failures: 0,
     previous_tool_result: null,
@@ -152,6 +178,8 @@ function normalizeLoopState(raw: Partial<LoopStateData> | null | undefined): Loo
     ...raw,
     pid: normalizePersistedPid(raw.pid),
     goal_reference: raw.goal_reference ?? null,
+    pause_reason:
+      raw.state === "paused" ? raw.pause_reason ?? derivePauseReasonLabel(raw.last_error) : null,
     previous_tool_result: raw.previous_tool_result ?? null,
     previous_evaluation_dimensions: raw.previous_evaluation_dimensions,
     current_budget: raw.current_budget ?? null
@@ -179,6 +207,7 @@ export async function readLoopState(paths: LoopPaths): Promise<LoopStateData> {
 export async function writeLoopState(paths: LoopPaths, state: LoopStateData): Promise<void> {
   const nextState = await attachGoalReference(paths, {
     ...state,
+    pause_reason: state.state === "paused" ? state.pause_reason ?? derivePauseReasonLabel(state.last_error) : null,
     updated_at: new Date().toISOString()
   });
   
@@ -371,6 +400,7 @@ export async function recoverInterruptedLoopState(
     ...state,
     state: "paused" as const,
     pid: null,
+    pause_reason: "Crash recovery",
     last_error: buildInterruptedRecoveryMessage(state.state, pid ?? null, source)
   };
 
