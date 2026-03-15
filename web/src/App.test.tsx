@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   ArtifactCompletenessPanel,
+  BudgetHealthPanel,
   CrashRecoveryPanel,
   OperatorReasonPanel,
   RunArtifactEvidenceGrid,
@@ -178,6 +179,66 @@ describe("ArtifactCompletenessPanel", () => {
 
     expect(html).toContain("Full evidence bundle");
     expect(html).toContain("All required evidence artifacts are present for the latest round.");
+  });
+});
+
+describe("BudgetHealthPanel", () => {
+  test("renders per-dimension health labels and the breached dimension from the persisted snapshot", () => {
+    const html = renderToStaticMarkup(
+      <BudgetHealthPanel
+        budgetHealth={{
+          overall: "breached",
+          breached_dimension: "actions",
+          dimensions: [
+            {
+              dimension: "cost",
+              label: "USD",
+              health: "warning",
+              used: 0.9,
+              limit: 1,
+              ratio: 0.9
+            },
+            {
+              dimension: "actions",
+              label: "Actions",
+              health: "breached",
+              used: 11,
+              limit: 10,
+              ratio: 1.1
+            },
+            {
+              dimension: "time",
+              label: "Time",
+              health: "healthy",
+              used: 30_000,
+              limit: 120_000,
+              ratio: 0.25
+            }
+          ]
+        }}
+        currentBudget={{
+          limits: {
+            usdPerRound: 1,
+            timeMinutes: 2,
+            actions: 10
+          },
+          usage: {
+            usdUsed: 0.9,
+            elapsedMs: 30_000,
+            actionsUsed: 11
+          }
+        }}
+      />
+    );
+
+    expect(html).toContain("Budget Health");
+    expect(html).toContain("Breached Dimension: Actions");
+    expect(html).toContain("USD health: warning");
+    expect(html).toContain("Actions health: breached");
+    expect(html).toContain("Time health: healthy");
+    expect(html).toContain("0.9000 / 1");
+    expect(html).toContain("11 / 10");
+    expect(html).toContain("30s / 2m");
   });
 });
 

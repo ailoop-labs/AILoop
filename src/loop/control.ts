@@ -14,6 +14,9 @@ import { readActiveRequirementSnapshot } from "../product/requirements";
 import { buildRoundArtifactPaths, listRunRecords, readLastLogTail } from "../reporting/summary";
 import type {
   ArtifactCompletenessStatus,
+  BudgetDimension,
+  BudgetDimensionHealth,
+  BudgetHealthStatus,
   BudgetLimits,
   CrashRecoveryStatus,
   EvaluationResult,
@@ -287,6 +290,7 @@ export interface LoopStatusView extends LoopStateData {
   pid_alive: boolean;
   crash_recovery: CrashRecoveryStatus | null;
   operator_reason: OperatorStatusReason | null;
+  budget_health: BudgetHealthStatus | null;
   artifact_completeness: ArtifactCompletenessStatus;
   active_requirement: RequirementArtifactSnapshot;
 }
@@ -450,29 +454,122 @@ function deriveCrashRecoveryStatus(state: LoopStateData, statusCheckFinalized: b
 }
 
 const DEFAULT_REVIEW_ACTION = "Inspect the run state and resume explicitly when safe.";
+const BUDGET_WARNING_RATIO = 0.8;
+
+function formatBudgetDimensionLabel(dimension: BudgetDimension): string {
+  if (dimension === "cost") {
+    return "USD";
+  }
+  if (dimension === "time") {
+    return "Time";
+  }
+  return "Actions";
+}
+
+function parseBudgetBreachDimension(message: string): BudgetDimension | null {
+  if (/USD budget exceeded/i.test(message)) {
+    return "cost";
+  }
+  if (/time budget exceeded/i.test(message)) {
+    return "time";
+  }
+  if (/action budget exceeded/i.test(message)) {
+    return "actions";
+  }
+  return null;
+}
+
+function normalizeBudgetRatio(used: number, limit: number): number {
+  if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) {
+    return 0;
+  }
+  return Number((used / limit).toFixed(4));
+}
+
+function classifyBudgetHealth(ratio: number): BudgetDimensionHealth["health"] {
+  if (ratio > 1) {
+    return "breached";
+  }
+  if (ratio >= BUDGET_WARNING_RATIO) {
+    return "warning";
+  }
+  return "healthy";
+}
+
+function buildBudgetDimensionHealth(
+  dimension: BudgetDimension,
+  used: number,
+  limit: number
+): BudgetDimensionHealth {
+  const ratio = normalizeBudgetRatio(used, limit);
+  return {
+    dimension,
+    label: formatBudgetDimensionLabel(dimension),
+    used,
+    limit,
+    ratio,
+    health: classifyBudgetHealth(ratio)
+  };
+}
+
+function deriveBudgetHealth(state: LoopStateData): BudgetHealthStatus | null {
+  if (!state.current_budget) {
+    return null;
+  }
+
+  const { limits, usage } = state.current_budget;
+  const dimensions: BudgetDimensionHealth[] = [
+    buildBudgetDimensionHealth("cost", usage.usdUsed, limits.usdPerRound),
+    buildBudgetDimensionHealth("actions", usage.actionsUsed, limits.actions),
+    buildBudgetDimensionHealth("time", usage.elapsedMs, limits.timeMinutes * 60_000)
+  ];
+
+  const breachedFromPauseContext = parseBudgetBreachDimension(state.last_error ?? "");
+  const normalizedDimensions = breachedFromPauseContext
+    ? dimensions.map((dimension) =>
+        dimension.dimension === breachedFromPauseContext
+          ? { ...dimension, health: "breached" as const }
+          : dimension
+      )
+    : dimensions;
+  const breachedDimension =
+    breachedFromPauseContext ?? normalizedDimensions.find((dimension) => dimension.health === "breached")?.dimension ?? null;
+  const overall = breachedDimension
+    ? "breached"
+    : normalizedDimensions.some((dimension) => dimension.health === "warning")
+      ? "warning"
+      : "healthy";
+
+  return {
+    overall,
+    breached_dimension: breachedDimension,
+    dimensions: normalizedDimensions
+  };
+}
 
 function formatBudgetBreachSummary(state: LoopStateData, message: string): string {
-  let label = "configured budget";
-  if (/USD budget exceeded/i.test(message)) {
-    label = "USD budget";
-  } else if (/time budget exceeded/i.test(message)) {
-    label = "time budget";
-  } else if (/action budget exceeded/i.test(message)) {
-    label = "action budget";
-  }
+  const breachedDimension = parseBudgetBreachDimension(message);
+  const label =
+    breachedDimension === "cost"
+      ? "USD budget"
+      : breachedDimension === "time"
+        ? "time budget"
+        : breachedDimension === "actions"
+          ? "action budget"
+          : "configured budget";
 
   if (!state.current_budget) {
     return `Paused because the ${label} was exceeded.`;
   }
 
   const { limits, usage } = state.current_budget;
-  if (label === "USD budget") {
+  if (breachedDimension === "cost") {
     return `Paused because the USD budget was exceeded (${usage.usdUsed.toFixed(4)} / ${limits.usdPerRound}).`;
   }
-  if (label === "time budget") {
+  if (breachedDimension === "time") {
     return `Paused because the time budget was exceeded (${Math.round(usage.elapsedMs / 1000)}s / ${limits.timeMinutes}m).`;
   }
-  if (label === "action budget") {
+  if (breachedDimension === "actions") {
     return `Paused because the action budget was exceeded (${usage.actionsUsed} / ${limits.actions}).`;
   }
   return `Paused because a configured budget was exceeded.`;
@@ -604,6 +701,7 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
         crashRecovery,
         pauseRequested: true
       }),
+      budget_health: deriveBudgetHealth(recovered),
       artifact_completeness: artifactCompleteness,
       active_requirement: activeRequirement
     };
@@ -627,6 +725,7 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
       pid_alive: false,
       crash_recovery: null,
       operator_reason: null,
+      budget_health: null,
       artifact_completeness: artifactCompleteness,
       active_requirement: activeRequirement
     };
@@ -643,6 +742,7 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
       crashRecovery,
       pauseRequested
     }),
+    budget_health: deriveBudgetHealth(state),
     artifact_completeness: artifactCompleteness,
     active_requirement: activeRequirement
   };
@@ -683,6 +783,18 @@ export function renderCliStatus(status: CliStatusPayload): string {
     lines.push(`Pause / risk reason: ${status.state.operator_reason.title}`);
     lines.push(`Reason summary: ${status.state.operator_reason.summary}`);
     lines.push(`Next safe action: ${status.state.operator_reason.next_action}`);
+  }
+
+  if (status.state.budget_health) {
+    lines.push(`Budget health: ${status.state.budget_health.overall}`);
+    lines.push(
+      `Budget dimension health: ${status.state.budget_health.dimensions
+        .map((dimension) => `${dimension.label}=${dimension.health}`)
+        .join(", ")}`
+    );
+    if (status.state.budget_health.breached_dimension) {
+      lines.push(`Breached dimension: ${formatBudgetDimensionLabel(status.state.budget_health.breached_dimension)}`);
+    }
   }
 
   lines.push(`Artifact completeness: ${status.state.artifact_completeness.label}`);

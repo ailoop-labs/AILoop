@@ -642,6 +642,7 @@ describe("console server API contract", () => {
       last_error: null,
       consecutive_evaluator_failures: 0,
       previous_tool_result: null,
+      budget_health: null,
       current_budget: null,
       artifact_completeness: {
         kind: "none",
@@ -697,6 +698,89 @@ describe("console server API contract", () => {
         latest_artifact_at: expect.any(String),
         present: ["log", "summary", "metrics"],
         missing: ["state_change", "evaluation"]
+      }
+    });
+  });
+
+  test("serializes budget health and breached dimension in authenticated status responses", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "paused",
+      round: 12,
+      last_error: "BudgetBreach: action budget exceeded",
+      current_budget: {
+        limits: {
+          usdPerRound: 1,
+          timeMinutes: 2,
+          actions: 10
+        },
+        usage: {
+          usdUsed: 0.9,
+          actionsUsed: 11,
+          elapsedMs: 30_000
+        }
+      }
+    });
+
+    const response = await fetchHandler(createAuthorizedRequest("http://console.test/api/status", token));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      state: "paused",
+      round: 12,
+      operator_reason: {
+        kind: "budget_breach",
+        title: "Budget breach",
+        summary: "Paused because the action budget was exceeded (11 / 10).",
+        next_action: "Review the last budget snapshot and reduce scope or raise budgets before resuming.",
+        severity: "critical"
+      },
+      budget_health: {
+        overall: "breached",
+        breached_dimension: "actions",
+        dimensions: [
+          {
+            dimension: "cost",
+            label: "USD",
+            health: "warning",
+            used: 0.9,
+            limit: 1,
+            ratio: 0.9
+          },
+          {
+            dimension: "actions",
+            label: "Actions",
+            health: "breached",
+            used: 11,
+            limit: 10,
+            ratio: 1.1
+          },
+          {
+            dimension: "time",
+            label: "Time",
+            health: "healthy",
+            used: 30_000,
+            limit: 120_000,
+            ratio: 0.25
+          }
+        ]
+      },
+      current_budget: {
+        limits: {
+          usdPerRound: 1,
+          timeMinutes: 2,
+          actions: 10
+        },
+        usage: {
+          usdUsed: 0.9,
+          actionsUsed: 11,
+          elapsedMs: 30_000
+        }
       }
     });
   });

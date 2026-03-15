@@ -18,6 +18,8 @@ import {
 import { paginateRunHistory, RUN_HISTORY_PAGE_SIZE } from "./run-history-pagination";
 
 type LoopStateName = "idle" | "starting" | "running" | "cooldown" | "paused" | "stopping" | "error";
+type BudgetDimension = "cost" | "time" | "actions";
+type BudgetHealth = "healthy" | "warning" | "breached";
 
 interface LoopStatus {
   state: LoopStateName;
@@ -30,6 +32,7 @@ interface LoopStatus {
   last_error: string | null;
   updated_at: string;
   consecutive_evaluator_failures: number;
+  budget_health: BudgetHealthStatus | null;
   current_budget: {
     limits: {
       usdPerRound: number;
@@ -43,6 +46,21 @@ interface LoopStatus {
     };
   } | null;
   active_requirement: RequirementArtifactView;
+}
+
+interface BudgetDimensionHealth {
+  dimension: BudgetDimension;
+  label: string;
+  health: BudgetHealth;
+  used: number;
+  limit: number;
+  ratio: number;
+}
+
+interface BudgetHealthStatus {
+  overall: BudgetHealth;
+  breached_dimension: BudgetDimension | null;
+  dimensions: BudgetDimensionHealth[];
 }
 
 interface OperatorStatusReason {
@@ -177,6 +195,18 @@ const artifactCompletenessTone: Record<ArtifactCompletenessStatus["kind"], strin
   full_bundle: "border-accent/30 bg-accent/10 text-accent"
 };
 
+const budgetHealthTone: Record<BudgetHealth, string> = {
+  healthy: "border-accent/30 bg-accent/10 text-accent",
+  warning: "border-warning/40 bg-warning/10 text-warning",
+  breached: "border-ember/40 bg-ember/10 text-ember"
+};
+
+const budgetBarTone: Record<BudgetHealth, string> = {
+  healthy: "bg-accent",
+  warning: "bg-warning",
+  breached: "bg-ember"
+};
+
 const TOKEN_STORAGE_KEY = "ailoop-console-admin-token";
 
 function readStoredToken(): string {
@@ -262,6 +292,30 @@ function formatMs(ms: number): string {
     return "0s";
   }
   return `${Math.round(ms / 1000)}s`;
+}
+
+function formatBudgetValue(dimension: BudgetDimension, used: number, limit: number): string {
+  if (dimension === "cost") {
+    return `${used.toFixed(4)} / ${limit}`;
+  }
+  if (dimension === "time") {
+    return `${formatMs(used)} / ${Math.round(limit / 60_000)}m`;
+  }
+  return `${used} / ${limit}`;
+}
+
+function formatBudgetHealthLabel(health: BudgetHealth): string {
+  return health;
+}
+
+function formatBudgetDimensionName(dimension: BudgetDimension): string {
+  if (dimension === "cost") {
+    return "USD";
+  }
+  if (dimension === "time") {
+    return "Time";
+  }
+  return "Actions";
 }
 
 type StepStatus = "done" | "current" | "pending";
@@ -554,6 +608,80 @@ export function ArtifactCompletenessPanel({
   );
 }
 
+export function BudgetHealthPanel({
+  budgetHealth,
+  currentBudget
+}: {
+  budgetHealth: BudgetHealthStatus | null;
+  currentBudget: LoopStatus["current_budget"];
+}) {
+  if (!budgetHealth || !currentBudget) {
+    return <p className="text-sm text-mist/70">No budget usage yet.</p>;
+  }
+
+  const breachedDimensionLabel = budgetHealth.breached_dimension
+    ? formatBudgetDimensionName(budgetHealth.breached_dimension)
+    : null;
+
+  return (
+    <div className="space-y-4">
+      <div className={`rounded-2xl border p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.04)] ${budgetHealthTone[budgetHealth.overall]}`}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-mist/70">Budget Health</p>
+            <h2 className="mt-2 text-xl font-semibold text-mist">{formatBudgetHealthLabel(budgetHealth.overall)}</h2>
+            <p className="mt-2 text-sm leading-6 text-mist/85">
+              {breachedDimensionLabel
+                ? `Budget pause is pinned to ${breachedDimensionLabel}. The last persisted budget snapshot is preserved for review.`
+                : "Current budget health is derived from the last persisted usage snapshot."}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.16em]">
+            <span className="rounded-full border border-current/20 bg-ink/70 px-3 py-1 text-current">
+              {formatBudgetHealthLabel(budgetHealth.overall)}
+            </span>
+            {breachedDimensionLabel ? (
+              <span className="rounded-full border border-current/20 bg-ink/70 px-3 py-1 text-current">
+                Breached Dimension: {breachedDimensionLabel}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        {budgetHealth.dimensions.map((dimension) => {
+          const ratio = Math.max(0, Math.min(100, dimension.ratio * 100));
+          return (
+            <div key={dimension.dimension} className="rounded-2xl border border-white/10 bg-ink/70 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-mist/65">{dimension.label}</p>
+                <span
+                  className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${budgetHealthTone[dimension.health]}`}
+                >
+                  {formatBudgetHealthLabel(dimension.health)}
+                </span>
+              </div>
+              <p className="mt-3 text-xl font-semibold text-mist">
+                {formatBudgetValue(dimension.dimension, dimension.used, dimension.limit)}
+              </p>
+              <div className="mt-3 h-2 rounded-full bg-panel/80">
+                <div
+                  className={`h-2 rounded-full ${budgetBarTone[dimension.health]}`}
+                  style={{ width: `${ratio}%` }}
+                />
+              </div>
+              <p className="mt-2 text-xs text-mist/60">
+                {formatBudgetDimensionName(dimension.dimension)} health: {formatBudgetHealthLabel(dimension.health)}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function ArtifactPresenceCard({ artifacts }: { artifacts: RunArtifactPresence }) {
   const tone =
     artifacts.kind === "full_bundle"
@@ -731,34 +859,6 @@ export default function App() {
     }, 4000);
     return () => clearInterval(timer);
   }, [isAuthenticated, authToken]);
-
-  const budgetBars = useMemo(() => {
-    if (!status?.current_budget) {
-      return [];
-    }
-
-    const { limits, usage } = status.current_budget;
-    return [
-      {
-        label: "USD",
-        used: usage.usdUsed,
-        limit: limits.usdPerRound,
-        display: `${usage.usdUsed.toFixed(4)} / ${limits.usdPerRound}`
-      },
-      {
-        label: "Actions",
-        used: usage.actionsUsed,
-        limit: limits.actions,
-        display: `${usage.actionsUsed} / ${limits.actions}`
-      },
-      {
-        label: "Time",
-        used: usage.elapsedMs,
-        limit: limits.timeMinutes * 60_000,
-        display: `${formatMs(usage.elapsedMs)} / ${limits.timeMinutes}m`
-      }
-    ];
-  }, [status]);
 
   const controlAvailability = useMemo(() => {
     const state = status?.state;
@@ -1444,30 +1544,10 @@ export default function App() {
         </article>
 
         <article className="rounded-3xl border border-white/10 bg-panel/70 p-5 backdrop-blur">
-          <h2 className="text-lg font-semibold text-mist">Budgets</h2>
-          <div className="mt-4 space-y-4">
-            {budgetBars.length === 0 ? (
-              <p className="text-sm text-mist/70">No budget usage yet.</p>
-            ) : (
-              budgetBars.map((bar) => {
-                const ratio = bar.limit > 0 ? Math.min(100, (bar.used / bar.limit) * 100) : 0;
-                return (
-                  <div key={bar.label}>
-                    <div className="mb-1 flex items-center justify-between text-xs uppercase tracking-[0.2em] text-mist/70">
-                      <span>{bar.label}</span>
-                      <span>{bar.display}</span>
-                    </div>
-                    <div className="h-2 rounded-full bg-ink/70">
-                      <div
-                        className="h-2 rounded-full bg-gradient-to-r from-accent via-warning to-ember"
-                        style={{ width: `${ratio}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
+          <BudgetHealthPanel
+            budgetHealth={status?.budget_health ?? null}
+            currentBudget={status?.current_budget ?? null}
+          />
 
           <h2 className="mt-7 text-lg font-semibold text-mist">Instruction Feed</h2>
           <div className="mt-3 flex flex-col gap-3 md:flex-row">

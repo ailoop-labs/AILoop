@@ -63,6 +63,25 @@ export interface ArtifactCompletenessStatus {
   missing: RoundArtifactKind[];
 }
 
+export type BudgetDimension = "cost" | "time" | "actions";
+
+export type BudgetHealth = "healthy" | "warning" | "breached";
+
+export interface BudgetDimensionHealth {
+  dimension: BudgetDimension;
+  label: string;
+  health: BudgetHealth;
+  used: number;
+  limit: number;
+  ratio: number;
+}
+
+export interface BudgetHealthStatus {
+  overall: BudgetHealth;
+  breached_dimension: BudgetDimension | null;
+  dimensions: BudgetDimensionHealth[];
+}
+
 export interface ActionRecord {
   tool: string;
   input?: any;

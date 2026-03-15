@@ -1143,7 +1143,7 @@ describe("getLoopStatus", () => {
           actions: 5
         },
         usage: {
-          usdUsed: 0.6,
+          usdUsed: 0.9,
           actionsUsed: 7,
           elapsedMs: 30_000
         }
@@ -1158,6 +1158,36 @@ describe("getLoopStatus", () => {
       summary: "Paused because the action budget was exceeded (7 / 5).",
       next_action: "Review the last budget snapshot and reduce scope or raise budgets before resuming.",
       severity: "critical"
+    });
+    expect(status.budget_health).toEqual({
+      overall: "breached",
+      breached_dimension: "actions",
+      dimensions: [
+        {
+          dimension: "cost",
+          label: "USD",
+          health: "warning",
+          used: 0.9,
+          limit: 1,
+          ratio: 0.9
+        },
+        {
+          dimension: "actions",
+          label: "Actions",
+          health: "breached",
+          used: 7,
+          limit: 5,
+          ratio: 1.4
+        },
+        {
+          dimension: "time",
+          label: "Time",
+          health: "healthy",
+          used: 30_000,
+          limit: 120_000,
+          ratio: 0.25
+        }
+      ]
     });
 
     await fs.rm(homeDir, { recursive: true, force: true });
@@ -1407,6 +1437,7 @@ describe("getCliStatus", () => {
           next_action: "Inspect the run state and resume explicitly when safe.",
           severity: "critical"
         },
+        budget_health: null,
         artifact_completeness: {
           kind: "none",
           label: "No artifacts yet",
@@ -1466,6 +1497,36 @@ describe("getCliStatus", () => {
           next_action: "Review the last budget snapshot and reduce scope or raise budgets before resuming.",
           severity: "critical"
         },
+        budget_health: {
+          overall: "breached",
+          breached_dimension: "actions",
+          dimensions: [
+            {
+              dimension: "cost",
+              label: "USD",
+              health: "healthy",
+              used: 0.3,
+              limit: 1,
+              ratio: 0.3
+            },
+            {
+              dimension: "actions",
+              label: "Actions",
+              health: "breached",
+              used: 11,
+              limit: 10,
+              ratio: 1.1
+            },
+            {
+              dimension: "time",
+              label: "Time",
+              health: "healthy",
+              used: 12_000,
+              limit: 60_000,
+              ratio: 0.2
+            }
+          ]
+        },
         last_error: "BudgetBreach: action budget exceeded",
         crash_recovery: null,
         artifact_completeness: {
@@ -1508,6 +1569,9 @@ describe("getCliStatus", () => {
     expect(output).toContain(
       "Next safe action: Review the last budget snapshot and reduce scope or raise budgets before resuming."
     );
+    expect(output).toContain("Budget health: breached");
+    expect(output).toContain("Budget dimension health: USD=healthy, Actions=breached, Time=healthy");
+    expect(output).toContain("Breached dimension: Actions");
     expect(output).toContain("Artifact completeness: Full evidence bundle");
     expect(output).toContain("Latest artifact timestamp: 2026-03-15T02:16:11.000Z");
     expect(output).toContain("Last error: BudgetBreach: action budget exceeded");
