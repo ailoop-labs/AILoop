@@ -16,6 +16,7 @@ import {
   renderCliStatus,
   resumeLoop,
   startBackgroundLoop,
+  stopLoop,
   tailLatestLog
 } from "./control";
 import type { AppConfig } from "../config/env";
@@ -921,6 +922,57 @@ describe("resumeLoop", () => {
     await fs.rm(homeDir, { recursive: true, force: true });
   });
 
+  test("clears stale pause metadata when a paused loop resumes on a live pid", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-resume-clear-pause-metadata-test-"));
+    const paths = buildLoopPaths(homeDir);
+    const config = makeTestConfig(homeDir);
+    await fs.mkdir(homeDir, { recursive: true });
+
+    await setFlag(paths.pauseFlagPath);
+    await writeLoopState(paths, {
+      ...defaultLoopState(process.pid),
+      state: "paused",
+      pid: process.pid,
+      pause_reason: "Budget breach",
+      last_error: "BudgetBreach: action budget exceeded",
+      current_budget: {
+        limits: {
+          usdPerRound: 1,
+          timeMinutes: 1,
+          actions: 5
+        },
+        usage: {
+          usdUsed: 0.8,
+          actionsUsed: 6,
+          elapsedMs: 20_000
+        }
+      }
+    });
+
+    await resumeLoop(config);
+
+    const state = await readLoopState(paths);
+    expect(state).toMatchObject({
+      state: "running",
+      pid: process.pid,
+      pause_reason: null,
+      last_error: null,
+      current_budget: null
+    });
+
+    const status = await getCliStatus(config);
+    expect(status.state.pause_reason).toBeNull();
+    expect(status.state.operator_reason).toBeNull();
+    expect(status.state.last_error).toBeNull();
+    expect(status.state.current_budget).toBeNull();
+
+    const output = renderCliStatus(status);
+    expect(output).not.toContain("Pause / risk reason:");
+    expect(output).not.toContain("Last error:");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
   test("restarts a paused loop when no live pid exists", async () => {
     const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-resume-restart-test-"));
     const homeDir = path.join(workspaceRoot, ".ailoop");
@@ -995,6 +1047,59 @@ describe("resumeLoop", () => {
       mock.restore();
       await fs.rm(workspaceRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe("stopLoop", () => {
+  test("clears stale pause metadata when stopping a paused loop without a live pid", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-stop-clear-pause-metadata-test-"));
+    const paths = buildLoopPaths(homeDir);
+    const config = makeTestConfig(homeDir);
+    await fs.mkdir(homeDir, { recursive: true });
+
+    await setFlag(paths.pauseFlagPath);
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "paused",
+      pid: null,
+      pause_reason: "Manual pause",
+      last_error: "Waiting for review",
+      current_budget: {
+        limits: {
+          usdPerRound: 1,
+          timeMinutes: 1,
+          actions: 5
+        },
+        usage: {
+          usdUsed: 0.2,
+          actionsUsed: 2,
+          elapsedMs: 10_000
+        }
+      }
+    });
+
+    await stopLoop(config);
+
+    const state = await readLoopState(paths);
+    expect(state).toMatchObject({
+      state: "idle",
+      pid: null,
+      pause_reason: null,
+      last_error: null,
+      current_budget: null
+    });
+
+    const status = await getCliStatus(config);
+    expect(status.state.pause_reason).toBeNull();
+    expect(status.state.operator_reason).toBeNull();
+    expect(status.state.last_error).toBeNull();
+    expect(status.state.current_budget).toBeNull();
+
+    const output = renderCliStatus(status);
+    expect(output).not.toContain("Pause / risk reason:");
+    expect(output).not.toContain("Last error:");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
   });
 });
 

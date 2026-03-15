@@ -291,6 +291,52 @@ describe("LifecycleStatusGrid", () => {
     expect(html).toContain("Round: 12");
     expect(html).toContain("PID: 4312");
   });
+
+  test("renders cleared pause metadata as none active after a paused run resumes", () => {
+    const html = renderToStaticMarkup(
+      <LifecycleStatusGrid
+        status={{
+          state: "running",
+          round: 13,
+          pid: 4312,
+          pid_alive: true,
+          pending_instruction_count: 0,
+          pause_reason: null,
+          crash_recovery: null,
+          operator_reason: null,
+          artifact_completeness: {
+            kind: "none",
+            label: "No artifacts yet",
+            latest_round_timestamp: null,
+            latest_artifact_at: null,
+            present: [],
+            missing: ["log", "summary", "metrics", "state_change", "evaluation"]
+          },
+          last_error: null,
+          updated_at: "2026-03-15T03:20:00.000Z",
+          consecutive_evaluator_failures: 0,
+          budget_health: null,
+          current_budget: null,
+          active_requirement: {
+            path: "",
+            exists: false,
+            artifact_status: "missing",
+            lifecycle_status: "active",
+            title: null,
+            summary: null,
+            acceptance_criteria_total: 0,
+            acceptance_criteria_completed: 0,
+            markdown: null,
+            updated_at: null
+          }
+        }}
+      />
+    );
+
+    expect(html).toContain("Pause reason: None active");
+    expect(html).toContain("Process: alive");
+    expect(html).toContain("Pending instructions: 0 queued");
+  });
 });
 
 describe("summarizeApiError", () => {

@@ -201,6 +201,15 @@ export async function prepareStartFlags(paths: LoopPaths): Promise<void> {
   await clearFlag(paths.pauseFlagPath);
 }
 
+function clearPausedOperatorState(state: LoopStateData): LoopStateData {
+  return {
+    ...state,
+    pause_reason: null,
+    last_error: null,
+    current_budget: null
+  };
+}
+
 export async function stopLoop(config: AppConfig): Promise<void> {
   const paths = await ensureLoopHomeAndGetPaths(config);
   await setFlag(paths.stopFlagPath);
@@ -213,10 +222,9 @@ export async function stopLoop(config: AppConfig): Promise<void> {
 
   if (!pidAlive) {
     await writeLoopState(paths, {
-      ...state,
+      ...clearPausedOperatorState(state),
       state: "idle",
-      pid: null,
-      current_budget: null
+      pid: null
     });
     await clearFlag(paths.pauseFlagPath);
   }
@@ -246,7 +254,7 @@ export async function resumeLoop(config: AppConfig): Promise<void> {
 
     if (pid && isPidAlive(pid)) {
       await writeLoopState(paths, {
-        ...state,
+        ...clearPausedOperatorState(state),
         state: "running",
         pid
       });

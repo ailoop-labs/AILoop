@@ -1168,6 +1168,57 @@ describe("console server API contract", () => {
     expect(state.pid).toBe(process.pid);
   });
 
+  test("clears stale pause metadata from authenticated status responses after resume", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    await fs.writeFile(paths.pauseFlagPath, "1\n", "utf8");
+    await writeLoopState(paths, {
+      ...defaultLoopState(process.pid),
+      state: "paused",
+      pid: process.pid,
+      pause_reason: "Budget breach",
+      last_error: "BudgetBreach: action budget exceeded",
+      current_budget: {
+        limits: {
+          usdPerRound: 1,
+          timeMinutes: 2,
+          actions: 10
+        },
+        usage: {
+          usdUsed: 0.9,
+          actionsUsed: 11,
+          elapsedMs: 30_000
+        }
+      }
+    });
+
+    const resumeResponse = await fetchHandler(
+      createAuthorizedRequest("http://console.test/api/loop/resume", token, {
+        method: "POST"
+      })
+    );
+
+    expect(resumeResponse.status).toBe(200);
+    expect(await resumeResponse.json()).toEqual({ ok: true });
+
+    const statusResponse = await fetchHandler(createAuthorizedRequest("http://console.test/api/status", token));
+
+    expect(statusResponse.status).toBe(200);
+    expect(await statusResponse.json()).toMatchObject({
+      state: "running",
+      pid: process.pid,
+      pid_alive: true,
+      pause_reason: null,
+      operator_reason: null,
+      last_error: null,
+      budget_health: null,
+      current_budget: null
+    });
+  });
+
   test("restarts a paused loop without a live pid for authenticated resume requests", async () => {
     const token = "test-token";
     const { fetchHandler, paths, workspaceRoot } = await createFixture({
@@ -1223,6 +1274,57 @@ describe("console server API contract", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
     expect(await fs.readFile(paths.stopFlagPath, "utf8")).toBe("1\n");
+  });
+
+  test("clears stale pause metadata from authenticated status responses after stop without a live pid", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    await fs.writeFile(paths.pauseFlagPath, "1\n", "utf8");
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "paused",
+      pid: null,
+      pause_reason: "Manual pause",
+      last_error: "Waiting for review",
+      current_budget: {
+        limits: {
+          usdPerRound: 0.5,
+          timeMinutes: 15,
+          actions: 30
+        },
+        usage: {
+          usdUsed: 0.2,
+          actionsUsed: 4,
+          elapsedMs: 12_000
+        }
+      }
+    });
+
+    const stopResponse = await fetchHandler(
+      createAuthorizedRequest("http://console.test/api/loop/stop", token, {
+        method: "POST"
+      })
+    );
+
+    expect(stopResponse.status).toBe(200);
+    expect(await stopResponse.json()).toEqual({ ok: true });
+
+    const statusResponse = await fetchHandler(createAuthorizedRequest("http://console.test/api/status", token));
+
+    expect(statusResponse.status).toBe(200);
+    expect(await statusResponse.json()).toMatchObject({
+      state: "idle",
+      pid: null,
+      pid_alive: false,
+      pause_reason: null,
+      operator_reason: null,
+      last_error: null,
+      budget_health: null,
+      current_budget: null
+    });
   });
 
   test("appends operator instructions for authenticated requests", async () => {
