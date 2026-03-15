@@ -40,12 +40,20 @@ export interface GovernanceDetails {
   } | null;
 }
 
+export interface RunArtifactPresence {
+  kind: "none" | "log_only" | "partial_bundle" | "full_bundle";
+  label: string;
+  present: Array<"log" | "summary" | "metrics" | "state_change" | "evaluation">;
+  missing: Array<"log" | "summary" | "metrics" | "state_change" | "evaluation">;
+}
+
 export interface RunHistoryItem {
   timestamp: string;
   round?: number;
   summary: string;
   metrics: Record<string, unknown> | null;
   evaluation: RunEvaluation | null;
+  artifacts?: RunArtifactPresence;
   has_governance?: boolean;
 }
 

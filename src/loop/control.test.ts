@@ -410,7 +410,13 @@ describe("listRuns", () => {
           round: 2,
           status: "success"
         },
-        evaluation: null
+        evaluation: null,
+        artifacts: {
+          kind: "partial_bundle",
+          label: "Partial bundle",
+          present: ["log", "summary", "metrics", "state_change"],
+          missing: ["evaluation"]
+        }
       }
     ]);
 
@@ -471,11 +477,11 @@ describe("listRuns", () => {
           timestamp,
           round: 4,
           summary: "summary\n",
-          metrics: {
-            round: 4,
-            status: "success"
-          },
-          evaluation: {
+        metrics: {
+          round: 4,
+          status: "success"
+        },
+        evaluation: {
             decision: "pass",
             justification: "Structured evaluation payload from artifact.",
             evidence: ["bun test src/loop/control.test.ts"],
@@ -491,11 +497,17 @@ describe("listRuns", () => {
                 evidence: ["artifact evidence"],
                 blocking_issues: [],
                 recommended_next_action: "continue"
-              }
-            ]
-          }
+            }
+          ]
+        },
+        artifacts: {
+          kind: "full_bundle",
+          label: "Full evidence bundle",
+          present: ["log", "summary", "metrics", "state_change", "evaluation"],
+          missing: []
         }
-      ]);
+      }
+    ]);
     } finally {
       await fs.rm(homeDir, { recursive: true, force: true });
     }
@@ -538,11 +550,11 @@ describe("listRuns", () => {
           timestamp,
           round: 5,
           summary: "summary sessionSecret=[REDACTED]\n",
-          metrics: {
-            round: 5,
-            status: "success"
-          },
-          evaluation: {
+        metrics: {
+          round: 5,
+          status: "success"
+        },
+        evaluation: {
             decision: "pass",
             justification: "Validated apiToken=[REDACTED].",
             evidence: ["sessionSecret=[REDACTED]"],
@@ -556,8 +568,46 @@ describe("listRuns", () => {
                 evidence: ["sessionSecret=[REDACTED]"],
                 blocking_issues: [],
                 recommended_next_action: "continue"
-              }
-            ]
+            }
+          ]
+        },
+        artifacts: {
+          kind: "full_bundle",
+          label: "Full evidence bundle",
+          present: ["log", "summary", "metrics", "state_change", "evaluation"],
+          missing: []
+        }
+      }
+    ]);
+    } finally {
+      await fs.rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  test("includes log-only runs in history with explicit artifact metadata", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-list-runs-log-only-test-"));
+    const runsDir = path.join(homeDir, "runs");
+    const timestamp = "2026-03-01T05-00-00-000Z";
+
+    await writeRunArtifacts(runsDir, timestamp, {
+      log: "log only\n"
+    });
+
+    try {
+      const runs = await listRuns(makeTestConfig(homeDir));
+
+      expect(runs).toEqual([
+        {
+          timestamp,
+          round: 0,
+          summary: "",
+          metrics: null,
+          evaluation: null,
+          artifacts: {
+            kind: "log_only",
+            label: "Log only",
+            present: ["log"],
+            missing: ["summary", "metrics", "state_change", "evaluation"]
           }
         }
       ]);
@@ -602,6 +652,12 @@ describe("getRunArtifacts", () => {
       },
       log: "OPENAI_API_KEY=[REDACTED]\n",
       state_change: "+ SESSION_SECRET=[REDACTED]\n",
+      artifacts: {
+        kind: "full_bundle",
+        label: "Full evidence bundle",
+        present: ["log", "summary", "metrics", "state_change", "evaluation"],
+        missing: []
+      },
       active_requirement: {
         path: paths.activeRequirementPath,
         exists: false,
@@ -672,6 +728,12 @@ describe("getRunArtifacts", () => {
       },
       log: "round log\n",
       state_change: "state diff\n",
+      artifacts: {
+        kind: "full_bundle",
+        label: "Full evidence bundle",
+        present: ["log", "summary", "metrics", "state_change", "evaluation"],
+        missing: []
+      },
       active_requirement: {
         path: paths.activeRequirementPath,
         exists: true,
@@ -724,6 +786,12 @@ describe("getRunArtifacts", () => {
         },
         log: "sessionSecret=[REDACTED]\n",
         state_change: "+ apiToken=[REDACTED]\n",
+        artifacts: {
+          kind: "full_bundle",
+          label: "Full evidence bundle",
+          present: ["log", "summary", "metrics", "state_change", "evaluation"],
+          missing: []
+        },
         active_requirement: {
           path: paths.activeRequirementPath,
           exists: false,
@@ -742,8 +810,9 @@ describe("getRunArtifacts", () => {
     }
   });
 
-  test("returns null for timestamps without a complete artifact bundle", async () => {
+  test("returns a partial bundle with missing-artifact metadata when evaluation is absent", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-run-artifacts-missing-test-"));
+    const paths = buildLoopPaths(homeDir);
     const runsDir = path.join(homeDir, "runs");
     const timestamp = "2026-03-01T02-00-00-000Z";
 
@@ -754,7 +823,75 @@ describe("getRunArtifacts", () => {
       stateChange: "diff\n"
     });
 
-    expect(await getRunArtifacts(makeTestConfig(homeDir), timestamp)).toBeNull();
+    expect(await getRunArtifacts(makeTestConfig(homeDir), timestamp)).toEqual({
+      timestamp,
+      summary: "summary\n",
+      metrics: {
+        round: 2,
+        status: "success"
+      },
+      evaluation: null,
+      log: "log\n",
+      state_change: "diff\n",
+      artifacts: {
+        kind: "partial_bundle",
+        label: "Partial bundle",
+        present: ["log", "summary", "metrics", "state_change"],
+        missing: ["evaluation"]
+      },
+      active_requirement: {
+        path: paths.activeRequirementPath,
+        exists: false,
+        artifact_status: "missing",
+        lifecycle_status: "active",
+        title: null,
+        summary: null,
+        acceptance_criteria_total: 0,
+        acceptance_criteria_completed: 0,
+        markdown: null,
+        updated_at: null
+      }
+    });
+    expect(await getRunArtifacts(makeTestConfig(homeDir), "../outside")).toBeNull();
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("returns log-only bundles with explicit missing-artifact metadata", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-run-artifacts-log-only-test-"));
+    const paths = buildLoopPaths(homeDir);
+    const timestamp = "2026-03-01T02-30-00-000Z";
+
+    await writeRunArtifacts(paths.runsDir, timestamp, {
+      log: "log only\n"
+    });
+
+    expect(await getRunArtifacts(makeTestConfig(homeDir), timestamp)).toEqual({
+      timestamp,
+      summary: null,
+      metrics: null,
+      evaluation: null,
+      log: "log only\n",
+      state_change: null,
+      artifacts: {
+        kind: "log_only",
+        label: "Log only",
+        present: ["log"],
+        missing: ["summary", "metrics", "state_change", "evaluation"]
+      },
+      active_requirement: {
+        path: paths.activeRequirementPath,
+        exists: false,
+        artifact_status: "missing",
+        lifecycle_status: "active",
+        title: null,
+        summary: null,
+        acceptance_criteria_total: 0,
+        acceptance_criteria_completed: 0,
+        markdown: null,
+        updated_at: null
+      }
+    });
     expect(await getRunArtifacts(makeTestConfig(homeDir), "../outside")).toBeNull();
 
     await fs.rm(homeDir, { recursive: true, force: true });

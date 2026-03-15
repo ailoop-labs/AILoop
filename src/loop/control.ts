@@ -19,6 +19,7 @@ import type {
   EvaluationResult,
   LoopStateData,
   OperatorStatusReason,
+  RoundArtifactPresence,
   RoundArtifactKind,
   RequirementArtifactSnapshot
 } from "../types/contracts";
@@ -337,6 +338,42 @@ function labelArtifactCompleteness(kind: ArtifactCompletenessStatus["kind"]): st
   return "No artifacts yet";
 }
 
+function buildRoundArtifactPresence(present: RoundArtifactKind[]): RoundArtifactPresence {
+  const missing = ROUND_ARTIFACT_KINDS.filter((kind) => !present.includes(kind));
+  const kind = classifyArtifactCompleteness(present);
+
+  return {
+    kind,
+    label: labelArtifactCompleteness(kind),
+    present,
+    missing
+  };
+}
+
+function derivePresentArtifactKinds(record: {
+  summaryPath?: string;
+  metricsPath?: string;
+  logPath?: string;
+  stateChangePath?: string;
+  evaluationPath?: string;
+}): RoundArtifactKind[] {
+  return ROUND_ARTIFACT_KINDS.filter((kind) => {
+    if (kind === "summary") {
+      return Boolean(record.summaryPath);
+    }
+    if (kind === "metrics") {
+      return Boolean(record.metricsPath);
+    }
+    if (kind === "log") {
+      return Boolean(record.logPath);
+    }
+    if (kind === "state_change") {
+      return Boolean(record.stateChangePath);
+    }
+    return Boolean(record.evaluationPath);
+  });
+}
+
 async function deriveArtifactCompleteness(paths: LoopPaths): Promise<ArtifactCompletenessStatus> {
   await fs.mkdir(paths.runsDir, { recursive: true });
   const entries = await fs.readdir(paths.runsDir, { withFileTypes: true });
@@ -384,16 +421,15 @@ async function deriveArtifactCompleteness(paths: LoopPaths): Promise<ArtifactCom
   }
 
   const present = ROUND_ARTIFACT_KINDS.filter((kind) => record.present.has(kind));
-  const missing = ROUND_ARTIFACT_KINDS.filter((kind) => !record.present.has(kind));
-  const kind = classifyArtifactCompleteness(present);
+  const presence = buildRoundArtifactPresence(present);
 
   return {
-    kind,
-    label: labelArtifactCompleteness(kind),
+    kind: presence.kind,
+    label: presence.label,
     latest_round_timestamp: latestRoundTimestamp,
     latest_artifact_at: record.latestArtifactAt > 0 ? new Date(record.latestArtifactAt).toISOString() : null,
-    present,
-    missing
+    present: presence.present,
+    missing: presence.missing
   };
 }
 
@@ -696,6 +732,7 @@ export async function listRuns(config: AppConfig, limit = 20): Promise<
     summary: string;
     metrics: Record<string, unknown> | null;
     evaluation: EvaluationResult | null;
+    artifacts: RoundArtifactPresence;
   }>
 > {
   const paths = await ensureLoopHomeAndGetPaths(config);
@@ -711,19 +748,21 @@ export async function listRuns(config: AppConfig, limit = 20): Promise<
   return await Promise.all(
     records.map(async (record) => {
       const [summary, metrics, evaluation] = await Promise.all([
-        readTextFile(record.summaryPath, ""),
-        readJsonFile<Record<string, unknown> | null>(record.metricsPath, null),
+        record.summaryPath ? readTextFile(record.summaryPath, "") : Promise.resolve(""),
+        record.metricsPath ? readJsonFile<Record<string, unknown> | null>(record.metricsPath, null) : Promise.resolve(null),
         record.evaluationPath ? readJsonFile<EvaluationResult | null>(record.evaluationPath, null) : Promise.resolve(null)
       ]);
       const metricsRound = typeof metrics?.round === "number" ? metrics.round : null;
       const round = roundsByTimestamp.get(record.timestamp) ?? metricsRound ?? 0;
+      const artifacts = buildRoundArtifactPresence(derivePresentArtifactKinds(record));
 
       return {
         timestamp: record.timestamp,
         round,
         summary: redactor.redact(summary),
         metrics,
-        evaluation: evaluation ? redactJsonStrings(evaluation, redactor) : null
+        evaluation: evaluation ? redactJsonStrings(evaluation, redactor) : null,
+        artifacts
       };
     })
   );
@@ -731,11 +770,12 @@ export async function listRuns(config: AppConfig, limit = 20): Promise<
 
 export interface RunArtifactBundle {
   timestamp: string;
-  summary: string;
-  metrics: Record<string, unknown>;
-  log: string;
-  state_change: string;
+  summary: string | null;
+  metrics: Record<string, unknown> | null;
+  log: string | null;
+  state_change: string | null;
   evaluation: EvaluationResult | null;
+  artifacts: RoundArtifactPresence;
   active_requirement: RequirementArtifactSnapshot;
 }
 
@@ -754,40 +794,53 @@ export async function getRunArtifacts(config: AppConfig, timestamp: string): Pro
   const paths = await ensureLoopHomeAndGetPaths(config);
   const activeRequirement = await readActiveRequirementSnapshot(paths);
   const artifactPaths = buildRoundArtifactPaths(paths.runsDir, normalizedTimestamp);
-  const requiredArtifactsExist = await Promise.all([
+  const [summaryExists, metricsExists, logExists, stateChangeExists, evaluationExists] = await Promise.all([
     fileExists(artifactPaths.summaryPath),
     fileExists(artifactPaths.metricsPath),
     fileExists(artifactPaths.logPath),
     fileExists(artifactPaths.stateChangePath),
     fileExists(artifactPaths.evaluationPath)
   ]);
+  const present = ROUND_ARTIFACT_KINDS.filter((kind) => {
+    if (kind === "summary") {
+      return summaryExists;
+    }
+    if (kind === "metrics") {
+      return metricsExists;
+    }
+    if (kind === "log") {
+      return logExists;
+    }
+    if (kind === "state_change") {
+      return stateChangeExists;
+    }
+    return evaluationExists;
+  });
+  const artifacts = buildRoundArtifactPresence(present);
 
-  if (requiredArtifactsExist.some((exists) => !exists)) {
+  if (artifacts.present.length === 0) {
     return null;
   }
 
   const [summary, metrics, log, stateChange, evaluation] = await Promise.all([
-    readTextFile(artifactPaths.summaryPath, ""),
-    readJsonFile<Record<string, unknown> | null>(artifactPaths.metricsPath, null),
-    readTextFile(artifactPaths.logPath, ""),
-    readTextFile(artifactPaths.stateChangePath, ""),
-    readJsonFile<EvaluationResult | null>(artifactPaths.evaluationPath, null)
+    summaryExists ? readTextFile(artifactPaths.summaryPath, "") : Promise.resolve(null),
+    metricsExists ? readJsonFile<Record<string, unknown> | null>(artifactPaths.metricsPath, null) : Promise.resolve(null),
+    logExists ? readTextFile(artifactPaths.logPath, "") : Promise.resolve(null),
+    stateChangeExists ? readTextFile(artifactPaths.stateChangePath, "") : Promise.resolve(null),
+    evaluationExists ? readJsonFile<EvaluationResult | null>(artifactPaths.evaluationPath, null) : Promise.resolve(null)
   ]);
-
-  if (!metrics) {
-    return null;
-  }
 
   const redactor = new SecretRedactor(process.env);
   const redact = (text: string) => redactor.redact(text);
 
   return {
     timestamp: normalizedTimestamp,
-    summary: redact(summary),
+    summary: summary === null ? null : redact(summary),
     metrics,
-    log: redact(log),
-    state_change: redact(stateChange),
+    log: log === null ? null : redact(log),
+    state_change: stateChange === null ? null : redact(stateChange),
     evaluation: evaluation ? redactJsonStrings(evaluation, redactor) : null,
+    artifacts,
     active_requirement: {
       ...activeRequirement,
       markdown: activeRequirement.markdown ? redact(activeRequirement.markdown) : null,

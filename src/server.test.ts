@@ -1234,10 +1234,24 @@ describe("console server API contract", () => {
       rootCause: "db_only_summary"
     });
 
-    const response = await fetchHandler(createAuthorizedRequest("http://console.test/api/runs?limit=1", token));
+    const response = await fetchHandler(createAuthorizedRequest("http://console.test/api/runs?limit=2", token));
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual([
+      {
+        timestamp: "2026-03-10T11-00-00-000Z",
+        round: 0,
+        summary: "Incomplete summary\n",
+        metrics: null,
+        evaluation: null,
+        artifacts: {
+          kind: "partial_bundle",
+          label: "Partial bundle",
+          present: ["log", "summary"],
+          missing: ["metrics", "state_change", "evaluation"]
+        },
+        has_governance: false
+      },
       {
         timestamp: "2026-03-10T10-00-00-000Z",
         round: 2,
@@ -1263,6 +1277,12 @@ describe("console server API contract", () => {
               blocking_issues: []
             }
           ]
+        },
+        artifacts: {
+          kind: "full_bundle",
+          label: "Full evidence bundle",
+          present: ["log", "summary", "metrics", "state_change", "evaluation"],
+          missing: []
         },
         has_governance: false
       }
@@ -1344,6 +1364,12 @@ describe("console server API contract", () => {
             }
           ]
         },
+        artifacts: {
+          kind: "full_bundle",
+          label: "Full evidence bundle",
+          present: ["log", "summary", "metrics", "state_change", "evaluation"],
+          missing: []
+        },
         has_governance: false
       }
     ]);
@@ -1402,6 +1428,12 @@ describe("console server API contract", () => {
       },
       log: "OPENAI_API_KEY=[REDACTED]\n",
       state_change: "+SESSION_SECRET=[REDACTED]\n",
+      artifacts: {
+        kind: "full_bundle",
+        label: "Full evidence bundle",
+        present: ["log", "summary", "metrics", "state_change", "evaluation"],
+        missing: []
+      },
       active_requirement: {
         path: paths.activeRequirementPath,
         exists: true,
@@ -1493,6 +1525,12 @@ describe("console server API contract", () => {
       },
       log: "round log\n",
       state_change: "+state change\n",
+      artifacts: {
+        kind: "full_bundle",
+        label: "Full evidence bundle",
+        present: ["log", "summary", "metrics", "state_change", "evaluation"],
+        missing: []
+      },
       active_requirement: {
         path: paths.activeRequirementPath,
         exists: false,
@@ -1573,6 +1611,115 @@ describe("console server API contract", () => {
       },
       log: "sessionSecret=[REDACTED]\n",
       state_change: "+apiToken=[REDACTED]\n",
+      artifacts: {
+        kind: "full_bundle",
+        label: "Full evidence bundle",
+        present: ["log", "summary", "metrics", "state_change", "evaluation"],
+        missing: []
+      },
+      active_requirement: {
+        path: paths.activeRequirementPath,
+        exists: false,
+        artifact_status: "missing",
+        lifecycle_status: "active",
+        title: null,
+        summary: null,
+        acceptance_criteria_total: 0,
+        acceptance_criteria_completed: 0,
+        markdown: null,
+        updated_at: null
+      },
+      governance: {
+        leader: null,
+        ccb: null
+      }
+    });
+  });
+
+  test("returns partial run artifact bundles with explicit missing-artifact metadata", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    const timestamp = "2026-03-10T10-45-00-000Z";
+
+    await writeRunArtifacts(paths.runsDir, timestamp, {
+      summary: "Partial summary\n",
+      metrics: { round: 4, status: "running" },
+      log: "partial log\n"
+    });
+
+    const response = await fetchHandler(
+      createAuthorizedRequest(`http://console.test/api/runs/${timestamp}/artifacts`, token)
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      timestamp,
+      summary: "Partial summary\n",
+      metrics: {
+        round: 4,
+        status: "running"
+      },
+      evaluation: null,
+      log: "partial log\n",
+      state_change: null,
+      artifacts: {
+        kind: "partial_bundle",
+        label: "Partial bundle",
+        present: ["log", "summary", "metrics"],
+        missing: ["state_change", "evaluation"]
+      },
+      active_requirement: {
+        path: paths.activeRequirementPath,
+        exists: false,
+        artifact_status: "missing",
+        lifecycle_status: "active",
+        title: null,
+        summary: null,
+        acceptance_criteria_total: 0,
+        acceptance_criteria_completed: 0,
+        markdown: null,
+        updated_at: null
+      },
+      governance: {
+        leader: null,
+        ccb: null
+      }
+    });
+  });
+
+  test("returns log-only run artifact bundles instead of 404", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    const timestamp = "2026-03-10T10-50-00-000Z";
+
+    await writeRunArtifacts(paths.runsDir, timestamp, {
+      log: "log only\n"
+    });
+
+    const response = await fetchHandler(
+      createAuthorizedRequest(`http://console.test/api/runs/${timestamp}/artifacts`, token)
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      timestamp,
+      summary: null,
+      metrics: null,
+      evaluation: null,
+      log: "log only\n",
+      state_change: null,
+      artifacts: {
+        kind: "log_only",
+        label: "Log only",
+        present: ["log"],
+        missing: ["summary", "metrics", "state_change", "evaluation"]
+      },
       active_requirement: {
         path: paths.activeRequirementPath,
         exists: false,

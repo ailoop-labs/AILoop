@@ -47,6 +47,13 @@ export type ArtifactCompletenessKind = "none" | "log_only" | "partial_bundle" | 
 
 export type RoundArtifactKind = "log" | "summary" | "metrics" | "state_change" | "evaluation";
 
+export interface RoundArtifactPresence {
+  kind: ArtifactCompletenessKind;
+  label: string;
+  present: RoundArtifactKind[];
+  missing: RoundArtifactKind[];
+}
+
 export interface ArtifactCompletenessStatus {
   kind: ArtifactCompletenessKind;
   label: string;

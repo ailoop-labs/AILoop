@@ -21,10 +21,10 @@ export interface SummaryInput {
 
 export interface RunRecord {
   timestamp: string;
-  summaryPath: string;
-  metricsPath: string;
-  logPath: string;
-  stateChangePath: string;
+  summaryPath?: string;
+  metricsPath?: string;
+  logPath?: string;
+  stateChangePath?: string;
   evaluationPath?: string;
 }
 
@@ -267,8 +267,8 @@ export async function listRunRecords(runsDir: string, limit = 20): Promise<RunRe
   }
 
   return Array.from(grouped.values())
-    .filter((item): item is RunRecord => 
-      Boolean(item.timestamp && item.summaryPath && item.metricsPath && item.logPath && item.stateChangePath)
+    .filter((item): item is RunRecord =>
+      Boolean(item.timestamp && (item.summaryPath || item.metricsPath || item.logPath || item.stateChangePath || item.evaluationPath))
     )
     .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
     .slice(0, limit);
@@ -299,10 +299,10 @@ export async function trimOldRuns(runsDir: string, keepLimit: number): Promise<v
   const extra = all.slice(keepLimit);
   for (const item of extra) {
     await Promise.all([
-      fs.rm(item.logPath, { force: true }),
-      fs.rm(item.summaryPath, { force: true }),
-      fs.rm(item.metricsPath, { force: true }),
-      fs.rm(item.stateChangePath, { force: true }),
+      item.logPath ? fs.rm(item.logPath, { force: true }) : Promise.resolve(),
+      item.summaryPath ? fs.rm(item.summaryPath, { force: true }) : Promise.resolve(),
+      item.metricsPath ? fs.rm(item.metricsPath, { force: true }) : Promise.resolve(),
+      item.stateChangePath ? fs.rm(item.stateChangePath, { force: true }) : Promise.resolve(),
       item.evaluationPath ? fs.rm(item.evaluationPath, { force: true }) : Promise.resolve()
     ]);
   }

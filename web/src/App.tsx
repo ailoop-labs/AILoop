@@ -7,7 +7,14 @@ import { resolveLogTailFollowBehavior } from "./log-follow";
 import { GoalMarkdown } from "./goal-markdown";
 import { deriveRoundProgress } from "./round-progress";
 import { RequirementSnapshotCard, type RequirementArtifactView } from "./requirement-snapshot";
-import { projectRunHistoryReport, type RunHistoryItem, type GovernanceDetails, type ExpertOpinion, type RoundReport } from "./run-history";
+import {
+  projectRunHistoryReport,
+  type RunArtifactPresence,
+  type RunHistoryItem,
+  type GovernanceDetails,
+  type ExpertOpinion,
+  type RoundReport
+} from "./run-history";
 import { paginateRunHistory, RUN_HISTORY_PAGE_SIZE } from "./run-history-pagination";
 
 type LoopStateName = "idle" | "starting" | "running" | "cooldown" | "paused" | "stopping" | "error";
@@ -311,10 +318,11 @@ function resolveRoleRuntimeCurrentIndex(phase: ReturnType<typeof deriveRoundProg
 
 interface RunArtifactBundle {
   timestamp: string;
-  summary: string;
+  summary: string | null;
   metrics: Record<string, unknown> | null;
-  log: string;
-  state_change: string;
+  log: string | null;
+  state_change: string | null;
+  artifacts: RunArtifactPresence;
   active_requirement: RequirementArtifactView;
   evaluation: {
     decision: "pass" | "fail";
@@ -484,6 +492,23 @@ function formatArtifactKindLabel(kind: ArtifactCompletenessStatus["present"][num
   return kind;
 }
 
+function fallbackRunArtifactPresence(): RunArtifactPresence {
+  return {
+    kind: "full_bundle",
+    label: "Full evidence bundle",
+    present: ["log", "summary", "metrics", "state_change", "evaluation"],
+    missing: []
+  };
+}
+
+function resolveRunArtifactPresence(run: Pick<RunHistoryItem, "artifacts">): RunArtifactPresence {
+  return run.artifacts ?? fallbackRunArtifactPresence();
+}
+
+function formatArtifactPresenceList(items: RunArtifactPresence["present"]): string {
+  return items.length > 0 ? items.map(formatArtifactKindLabel).join(", ") : "none";
+}
+
 export function ArtifactCompletenessPanel({
   artifactCompleteness
 }: {
@@ -524,6 +549,35 @@ export function ArtifactCompletenessPanel({
           <p className="text-[11px] uppercase tracking-[0.18em] text-mist/60">Latest Round</p>
           <p className="mt-2 text-sm font-semibold text-mist">{artifactCompleteness.latest_round_timestamp ?? "No round artifacts yet"}</p>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ArtifactPresenceCard({ artifacts }: { artifacts: RunArtifactPresence }) {
+  const tone =
+    artifacts.kind === "full_bundle"
+      ? "border-accent/30 bg-accent/10"
+      : artifacts.kind === "none"
+        ? "border-white/10 bg-ink/60"
+        : "border-warning/40 bg-warning/10";
+
+  return (
+    <div className={`rounded-2xl border p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.04)] ${tone}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-mist/70">Evidence Availability</p>
+          <h2 className="mt-2 text-xl font-semibold text-mist">{artifacts.label}</h2>
+          <p className="mt-2 text-sm leading-6 text-mist/85">
+            Present: {formatArtifactPresenceList(artifacts.present)}
+          </p>
+          <p className="mt-1 text-sm leading-6 text-mist/70">
+            Missing: {artifacts.missing.length > 0 ? formatArtifactPresenceList(artifacts.missing) : "none"}
+          </p>
+        </div>
+        <span className="rounded-full border border-current/20 bg-ink/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-current">
+          {artifacts.kind.replace("_", " ")}
+        </span>
       </div>
     </div>
   );
@@ -737,7 +791,7 @@ export default function App() {
 
     return projectRunHistoryReport({
       timestamp: selectedArtifacts.timestamp,
-      summary: selectedArtifacts.summary,
+      summary: selectedArtifacts.summary ?? "",
       metrics: selectedArtifacts.metrics,
       evaluation: selectedArtifacts.evaluation
     });
@@ -911,9 +965,10 @@ export default function App() {
       setSelectedArtifacts({
         ...bundle,
         timestamp: run.timestamp,
-        summary: run.summary,
-        metrics: run.metrics,
-        evaluation: run.evaluation
+        summary: bundle.summary ?? run.summary,
+        metrics: bundle.metrics ?? run.metrics,
+        evaluation: bundle.evaluation ?? run.evaluation,
+        artifacts: bundle.artifacts ?? resolveRunArtifactPresence(run)
       });
       setSelectedGovernance(bundle.governance);
       setError(null);
@@ -1494,6 +1549,8 @@ export default function App() {
           ) : (
             runHistoryPagination.items.map((run, index) => {
               const report = projectRunHistoryReport(run);
+              const artifacts = resolveRunArtifactPresence(run);
+              const incompleteEvidence = artifacts.kind !== "full_bundle";
               const parsedTimestamp = parseRunTimestamp(run.timestamp);
               const displayTimestamp = formatRunTimestamp(run.timestamp);
               return (
@@ -1509,78 +1566,106 @@ export default function App() {
                       <p className="mt-1 text-xs text-mist/55">Raw ID: {run.timestamp}</p>
                     </div>
                     <span
-                      className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] ${report.decision === "pass"
-                        ? "bg-accent/20 text-accent"
-                        : report.decision === "fail"
-                          ? "bg-ember/20 text-ember"
-                          : "bg-slate/70 text-mist/80"
-                        }`}
+                      className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] ${
+                        incompleteEvidence
+                          ? "bg-warning/20 text-warning"
+                          : report.decision === "pass"
+                            ? "bg-accent/20 text-accent"
+                            : report.decision === "fail"
+                              ? "bg-ember/20 text-ember"
+                              : "bg-slate/70 text-mist/80"
+                      }`}
                     >
-                      Evaluator {report.decision}
+                      {incompleteEvidence ? "Incomplete evidence" : `Evaluator ${report.decision}`}
                     </span>
                   </div>
 
-                  <p className="mt-3 text-sm text-mist/90">
-                    <span className="text-mist/60">Objective: </span>
-                    {report.objective}
-                  </p>
-                  <p className="mt-2 text-sm text-mist/90">
-                    <span className="text-mist/60">Expected: </span>
-                    {report.expectedOutcome}
-                  </p>
-                  <p className="mt-2 text-sm text-mist/90">
-                    <span className="text-mist/60">Summary: </span>
-                    {report.workSummary}
-                  </p>
-                  <p className="mt-3 text-xs text-mist/75">
-                    Tool: {report.toolStatus} | Error: {report.error}
-                  </p>
-                  <p className="mt-2 text-xs text-mist/65">Score: {report.aggregateScore}</p>
-                  <p className="mt-2 text-xs text-mist/65">Why: {report.justification}</p>
-                  {report.decision === "fail" && report.rootCause !== "none" ? (
-                    <p className="mt-2 text-xs font-semibold text-ember">Root Cause: {report.rootCause}</p>
-                  ) : null}
-                  <p className="mt-2 text-xs text-mist/65">Evidence: {report.evidence}</p>
-                  {report.dimensionBreakdown.length > 0 ? (
-                    <div className="mt-3 grid gap-2 lg:grid-cols-2">
-                      {report.dimensionBreakdown.map((dimension) => (
-                        <div key={`${run.timestamp}-${dimension.label}`} className="rounded-xl border border-white/10 bg-ink/70 p-3">
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-mist/70">{dimension.label}</p>
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] ${dimension.decision === "pass"
-                                ? "bg-accent/20 text-accent"
-                                : dimension.decision === "fail"
-                                  ? "bg-ember/20 text-ember"
-                                  : "bg-slate/70 text-mist/80"
-                                }`}
-                            >
-                              {dimension.decision}
-                            </span>
-                          </div>
-                          <p className="mt-2 text-xs text-mist/65">
-                            Score: {dimension.score} | Confidence: {dimension.confidence}
-                          </p>
-                          <p className="mt-2 text-xs text-mist/65">Why: {dimension.justification}</p>
-                          <p className="mt-2 text-xs text-mist/60">Evidence: {dimension.evidence}</p>
-                          <p className="mt-2 text-xs text-mist/60">Blocking: {dimension.blockingIssues}</p>
-                          <p className="mt-2 text-xs text-mist/60">Next: {dimension.nextRecommendation}</p>
+                  {incompleteEvidence ? (
+                    <>
+                      <p className="mt-3 text-sm text-mist/90">
+                        This round left reviewable evidence on disk before the full five-file bundle was completed.
+                      </p>
+                      <div className="mt-3 grid gap-2 text-xs text-mist/70 sm:grid-cols-2">
+                        <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">
+                          Present: {formatArtifactPresenceList(artifacts.present)}
+                        </p>
+                        <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">
+                          Missing: {artifacts.missing.length > 0 ? formatArtifactPresenceList(artifacts.missing) : "none"}
+                        </p>
+                      </div>
+                      <p className="mt-3 text-xs text-mist/65">
+                        Available summary: {run.summary.trim() ? "yes" : "no"} | Metrics: {run.metrics ? "yes" : "no"} | Evaluation: {run.evaluation ? "yes" : "no"}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="mt-3 text-sm text-mist/90">
+                        <span className="text-mist/60">Objective: </span>
+                        {report.objective}
+                      </p>
+                      <p className="mt-2 text-sm text-mist/90">
+                        <span className="text-mist/60">Expected: </span>
+                        {report.expectedOutcome}
+                      </p>
+                      <p className="mt-2 text-sm text-mist/90">
+                        <span className="text-mist/60">Summary: </span>
+                        {report.workSummary}
+                      </p>
+                      <p className="mt-3 text-xs text-mist/75">
+                        Tool: {report.toolStatus} | Error: {report.error}
+                      </p>
+                      <p className="mt-2 text-xs text-mist/65">Score: {report.aggregateScore}</p>
+                      <p className="mt-2 text-xs text-mist/65">Why: {report.justification}</p>
+                      {report.decision === "fail" && report.rootCause !== "none" ? (
+                        <p className="mt-2 text-xs font-semibold text-ember">Root Cause: {report.rootCause}</p>
+                      ) : null}
+                      <p className="mt-2 text-xs text-mist/65">Evidence: {report.evidence}</p>
+                      {report.dimensionBreakdown.length > 0 ? (
+                        <div className="mt-3 grid gap-2 lg:grid-cols-2">
+                          {report.dimensionBreakdown.map((dimension) => (
+                            <div key={`${run.timestamp}-${dimension.label}`} className="rounded-xl border border-white/10 bg-ink/70 p-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-mist/70">{dimension.label}</p>
+                                <span
+                                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] ${dimension.decision === "pass"
+                                    ? "bg-accent/20 text-accent"
+                                    : dimension.decision === "fail"
+                                      ? "bg-ember/20 text-ember"
+                                      : "bg-slate/70 text-mist/80"
+                                    }`}
+                                >
+                                  {dimension.decision}
+                                </span>
+                              </div>
+                              <p className="mt-2 text-xs text-mist/65">
+                                Score: {dimension.score} | Confidence: {dimension.confidence}
+                              </p>
+                              <p className="mt-2 text-xs text-mist/65">Why: {dimension.justification}</p>
+                              <p className="mt-2 text-xs text-mist/60">Evidence: {dimension.evidence}</p>
+                              <p className="mt-2 text-xs text-mist/60">Blocking: {dimension.blockingIssues}</p>
+                              <p className="mt-2 text-xs text-mist/60">Next: {dimension.nextRecommendation}</p>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  ) : null}
-                  <p className="mt-2 text-xs text-mist/65">Next: {report.nextRecommendation}</p>
-                  <div className="mt-3 grid gap-2 text-xs text-mist/70 sm:grid-cols-3">
-                    <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">Cost: {report.budgetCost}</p>
-                    <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">Time: {report.budgetTime}</p>
-                    <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">Actions: {report.budgetActions}</p>
-                  </div>
+                      ) : null}
+                      <p className="mt-2 text-xs text-mist/65">Next: {report.nextRecommendation}</p>
+                      <div className="mt-3 grid gap-2 text-xs text-mist/70 sm:grid-cols-3">
+                        <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">Cost: {report.budgetCost}</p>
+                        <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">Time: {report.budgetTime}</p>
+                        <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">Actions: {report.budgetActions}</p>
+                      </div>
+                    </>
+                  )}
                   <button
                     onClick={() => void fetchArtifacts(run)}
                     disabled={artifactsBusy}
                     className="mt-4 rounded-lg border border-white/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-mist/70 transition hover:border-accent hover:text-accent disabled:opacity-50"
                   >
-                    {artifactsBusy && selectedArtifacts?.timestamp === run.timestamp ? "Loading..." : "Full Report"}
+                    {artifactsBusy && selectedArtifacts?.timestamp === run.timestamp
+                      ? "Loading..."
+                      : incompleteEvidence
+                        ? "Review Evidence"
+                        : "Full Report"}
                   </button>
                 </article>
               );
@@ -1736,15 +1821,21 @@ export default function App() {
             </div>
             <div className="flex-1 overflow-auto p-6">
               <div className="grid gap-6">
+                <ArtifactPresenceCard artifacts={selectedArtifacts.artifacts} />
+
                 <section>
                   <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">Summary Markdown</h4>
                   <div className="rounded-2xl border border-white/10 bg-ink/60 p-5 shadow-inner">
-                    <div className="markdown-body">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedArtifacts.summary}</ReactMarkdown>
-                    </div>
+                    {selectedArtifacts.summary ? (
+                      <div className="markdown-body">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedArtifacts.summary}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-mist/70">Summary artifact is missing for this round.</p>
+                    )}
                   </div>
                 </section>
-                {selectedArtifactsReport ? (
+                {selectedArtifacts.evaluation && selectedArtifactsReport ? (
                   <section>
                     <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">Evaluation</h4>
                     <div className="rounded-2xl border border-white/10 bg-ink/60 p-5 shadow-inner">
@@ -1919,13 +2010,21 @@ export default function App() {
                   <section>
                     <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">Round Log</h4>
                     <div className="h-[30rem] overflow-auto rounded-2xl border border-white/10 bg-ink/80 p-4 font-mono text-xs leading-relaxed text-mist/80 shadow-inner">
-                      <pre className="whitespace-pre-wrap">{selectedArtifacts.log}</pre>
+                      {selectedArtifacts.log ? (
+                        <pre className="whitespace-pre-wrap">{selectedArtifacts.log}</pre>
+                      ) : (
+                        <p className="text-sm text-mist/60">Log artifact is missing for this round.</p>
+                      )}
                     </div>
                   </section>
                   <section>
                     <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">State Change</h4>
                     <div className="h-[30rem] overflow-auto rounded-2xl border border-white/10 bg-ink/80 p-4 font-mono text-xs leading-relaxed text-mist/80 shadow-inner">
-                      <pre className="whitespace-pre-wrap">{selectedArtifacts.state_change}</pre>
+                      {selectedArtifacts.state_change ? (
+                        <pre className="whitespace-pre-wrap">{selectedArtifacts.state_change}</pre>
+                      ) : (
+                        <p className="text-sm text-mist/60">State change artifact is missing for this round.</p>
+                      )}
                     </div>
                   </section>
                 </div>
