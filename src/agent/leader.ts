@@ -2,6 +2,7 @@ import type { AppConfig } from "../config/env";
 import type { LeaderContext, LeaderDecision } from "../types/contracts";
 import { CodexClient, type JsonSchema } from "./codex-client";
 import { loadProjectRoleDefinition } from "./role-definitions";
+import { buildInternalRuntimeSessionGuide } from "./runtime-policy";
 
 const LEADER_DECISION_SCHEMA: JsonSchema = {
   type: "object",
@@ -69,7 +70,13 @@ export class LeaderAgent {
         prompt,
         schema: LEADER_DECISION_SCHEMA,
         cwd: process.cwd(),
-        sandbox: this.sandbox
+        sandbox: this.sandbox,
+        sessionIsolation: {
+          enabled: true,
+          agentsGuide: buildInternalRuntimeSessionGuide("Leader", [
+            "Keep reasoning anchored to the supplied failure, evaluation, and governance context unless the runtime prompt explicitly broadens scope."
+          ])
+        }
       });
 
       if (!result.ok || !result.data) {
