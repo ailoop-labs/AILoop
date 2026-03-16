@@ -48,8 +48,8 @@ import {
   buildLoopPaths,
   clearFlag,
   clearPid,
+  consumeNextInstruction,
   defaultLoopState,
-  drainInstructions,
   ensureLoopHome,
   hasFlag,
   readLoopState,
@@ -626,7 +626,7 @@ export class LoopEngine {
 
     try {
       await enforceBudgetBeforeAction("round.bootstrap");
-      const instructions = await drainInstructions(this.paths);
+      const instructions = await consumeNextInstruction(this.paths);
       const priorState = await readLoopState(this.paths);
       const tacticalReworkLimit = Math.max(0, this.config.evaluatorReworkMaxAttempts);
       let requirementMarkdown = await readActiveRequirementArtifact(this.paths);

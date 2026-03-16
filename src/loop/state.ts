@@ -414,6 +414,18 @@ export async function appendInstruction(paths: LoopPaths, message: string): Prom
   await writeInstructionQueue(paths, current);
 }
 
+export async function consumeNextInstruction(paths: LoopPaths): Promise<string[]> {
+  const current = await readMergedInstructionQueue(paths);
+  if (current.length === 0) {
+    await writeInstructionQueue(paths, []);
+    return [];
+  }
+
+  const [nextInstruction, ...remaining] = current;
+  await writeInstructionQueue(paths, remaining);
+  return nextInstruction ? [nextInstruction] : [];
+}
+
 export async function drainInstructions(paths: LoopPaths): Promise<string[]> {
   const current = await readMergedInstructionQueue(paths);
   await writeInstructionQueue(paths, []);

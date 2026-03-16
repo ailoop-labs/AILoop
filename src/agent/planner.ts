@@ -40,6 +40,51 @@ function hasNoDiffSignal(previousRoundError: string | null): boolean {
   return error.includes("no observable file creation or content diff") || error.includes("insufficient evidence");
 }
 
+function isDocumentationPath(pathToken: string): boolean {
+  const normalized = pathToken.trim().replace(/\\/g, "/");
+  return (
+    normalized.startsWith(".ailoop/") ||
+    normalized.startsWith("docs/") ||
+    normalized === "README.md" ||
+    normalized === "ARCHITECTURE.md" ||
+    normalized === "AILOOP_ENGINE_WORKFLOW.md" ||
+    normalized.endsWith(".md")
+  );
+}
+
+function isDocumentationOnlySubTask(subTask: SubTask): boolean {
+  const impactedFiles = subTask.impacted_files.map((item) => item.trim()).filter(Boolean);
+  const touchesOnlyDocumentation = impactedFiles.length === 0 || impactedFiles.every(isDocumentationPath);
+  if (!touchesOnlyDocumentation) {
+    return false;
+  }
+
+  const combined = `${subTask.rationale} ${subTask.objective} ${subTask.expected_outcome}`.toLowerCase();
+  return /(readme|docs?|文档|report|checklist|audit|markdown|requirement|requirements|current\.md|\.ailoop)/.test(
+    combined
+  );
+}
+
+function shouldForceImplementationForReadyRequirement(context: PlannerContext, subTask: SubTask): boolean {
+  return (
+    resolvePlannerRequirementMode(context) === "normal_execution" &&
+    !hasExplicitDocumentationRequest(context.instructions) &&
+    isDocumentationOnlySubTask(subTask)
+  );
+}
+
+function buildImplementationFirstSubTask(reason: string): SubTask {
+  return {
+    rationale: `${reason} The active requirement is already implementation-ready, so this round must advance the product with a minimal code or test change instead of refreshing documentation again.`,
+    assignee: "executor",
+    objective: "Implement one minimal code or test change that advances the active requirement.",
+    expected_outcome:
+      "At least one file under src/, scripts/, or web/src/ changes and one re-runnable verification command confirms progress.",
+    impacted_files: ["src/", "scripts/", "web/src/"],
+    recommended_tools: ["read_file", "write_file", "run_shell"]
+  };
+}
+
 export function resolvePlannerRequirementMode(
   context: PlannerContext
 ): "create_requirement" | "refresh_requirement" | "normal_execution" {
@@ -315,6 +360,12 @@ export class PlannerAgent {
     const normalized = normalizeSubTask(result.data);
     if (!normalized.objective || !normalized.expected_outcome || normalized.recommended_tools.length === 0) {
       return fallbackPlan(context);
+    }
+
+    if (shouldForceImplementationForReadyRequirement(context, normalized)) {
+      return buildImplementationFirstSubTask(
+        "Planner proposed a documentation-only subtask while the active requirement slice was already ready."
+      );
     }
 
     return normalized;
