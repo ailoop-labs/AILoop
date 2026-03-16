@@ -162,6 +162,10 @@ describe("ProductManagerAgent", () => {
     expect(capturedPrompt).toContain("AGENTS.md");
     expect(capturedIsolationEnabled).toBe(true);
     expect(capturedIsolationGuide).toContain("Internal Runtime Agent Session");
+    expect(capturedIsolationGuide).toContain("You are the internal ProductManager agent inside the AILoop product.");
+    expect(capturedIsolationGuide).toContain(
+      "use absolute paths under the provided repository root or explicitly `cd` into the repository root first"
+    );
     expect(capturedCwd).toBe(process.cwd());
     expect(markdown).toBe("# Requirement Slice: Console Health\n\n## Problem\nOperators need a clear health view.\n");
 

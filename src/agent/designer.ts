@@ -4,6 +4,7 @@ import type { ActionRecord, SubTask, ToolResult } from "../types/contracts";
 import type { Guardrails } from "./guardrails";
 import { CodexClient, type JsonSchema } from "./codex-client";
 import { loadProjectRoleDefinition } from "./role-definitions";
+import { buildInternalRuntimeSessionGuide, REPOSITORY_ROOT_SESSION_INSTRUCTION } from "./runtime-policy";
 import { ToolRegistry } from "./tool-registry";
 
 interface ExecuteOptions {
@@ -110,6 +111,13 @@ export function buildDesignerPrompt(input: DesignerPromptInput, designerRoleDefi
     "Project-specific Designer Role Definition:",
     designerRoleDefinition.trim(),
     "",
+    `Repository root: ${input.workspaceRoot}`,
+    "",
+    "Runtime execution notes:",
+    "- This internal runtime session is intentionally isolated from repository-local AGENTS.md files and development-assistant skill workflows.",
+    "- If you inspect repository files, use absolute paths under the repository root or explicitly `cd` into the repository root first.",
+    "- Do not use external development-assistant skills, collaborative brainstorming workflows, or human question-asking patterns.",
+    "",
     "Complete exactly one atomic sub-task in this workspace.",
     "",
     "Hard requirements:",
@@ -156,17 +164,20 @@ export function buildDesignerPrompt(input: DesignerPromptInput, designerRoleDefi
 }
 
 export class DesignerAgent {
-  private readonly codex: CodexClient;
+  private readonly codex: Pick<CodexClient, "runJson">;
   private readonly sandbox: AppConfig["codex"]["executorSandbox"]; // Reusing executor sandbox for now
   private readonly homeDir: string;
+  private readonly workspaceRoot: string;
 
   constructor(
     private readonly tools: ToolRegistry,
-    config: AppConfig
+    config: AppConfig,
+    codexClient?: Pick<CodexClient, "runJson">
   ) {
-    this.codex = new CodexClient(config.codex);
+    this.codex = codexClient ?? new CodexClient(config.codex);
     this.sandbox = config.codex.executorSandbox;
     this.homeDir = config.homeDir;
+    this.workspaceRoot = process.cwd();
   }
 
   async execute(options: ExecuteOptions): Promise<ExecuteResult> {
@@ -187,7 +198,7 @@ export class DesignerAgent {
         instructions: options.instructions,
         subTask: options.subTask,
         ailoopHome: options.paths.homeDir,
-        workspaceRoot: process.cwd(),
+        workspaceRoot: this.workspaceRoot,
         availableTools,
         availableSkills
       },
@@ -205,8 +216,12 @@ export class DesignerAgent {
       .runJson<CodexDesignerResponse>({
         prompt,
         schema: DESIGNER_RESPONSE_SCHEMA,
-        cwd: process.cwd(),
+        cwd: this.workspaceRoot,
         sandbox: this.sandbox,
+        sessionIsolation: {
+          enabled: true,
+          agentsGuide: buildInternalRuntimeSessionGuide("Designer", [REPOSITORY_ROOT_SESSION_INSTRUCTION])
+        },
         onStdoutChunk: (chunk) => {
           for (const line of toLogLines("stdout", chunk)) {
             emitLog(options, line);

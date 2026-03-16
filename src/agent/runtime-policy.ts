@@ -1,5 +1,8 @@
 import type { ContextSourceManifest } from "../types/contracts";
 
+export const REPOSITORY_ROOT_SESSION_INSTRUCTION =
+  "If repository inspection or mutation is needed, use absolute paths under the provided repository root or explicitly `cd` into the repository root first.";
+
 function includeIfPresent(markdown: string, pattern: RegExp, line: string, output: string[]): void {
   if (pattern.test(markdown)) {
     output.push(line);

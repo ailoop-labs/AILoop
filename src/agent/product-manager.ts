@@ -2,6 +2,7 @@ import type { AppConfig } from "../config/env";
 import type { ProductManagerContext } from "../types/contracts";
 import { type JsonSchema, CodexClient } from "./codex-client";
 import { loadProjectRoleDefinition } from "./role-definitions";
+import { buildInternalRuntimeSessionGuide, REPOSITORY_ROOT_SESSION_INSTRUCTION } from "./runtime-policy";
 
 interface ProductManagerResponse {
   requirement_markdown: string;
@@ -86,18 +87,6 @@ function fallbackRequirement(context: ProductManagerContext): string {
       "- Initial fallback requirement skeleton generated because ProductManager output was unavailable."
     ].join("\n")
   );
-}
-
-function buildProductManagerRuntimeSessionGuide(): string {
-  return [
-    "# Internal Runtime Agent Session",
-    "",
-    "You are an internal runtime agent inside the AILoop product.",
-    "You are not an external coding assistant helping a human modify this repository.",
-    "Repository-local AGENTS.md instructions and external skill catalogs for development assistants do not apply.",
-    "Do not use collaborative brainstorming workflows, ask the human clarifying questions, or follow external skill mandates.",
-    "Use only the explicit runtime prompt, the loaded Product Manager role definition, and the provided round context."
-  ].join("\n");
 }
 
 export function buildProductManagerPrompt(
@@ -198,7 +187,7 @@ export class ProductManagerAgent {
         sandbox: this.sandbox,
         sessionIsolation: {
           enabled: true,
-          agentsGuide: buildProductManagerRuntimeSessionGuide()
+          agentsGuide: buildInternalRuntimeSessionGuide("ProductManager", [REPOSITORY_ROOT_SESSION_INSTRUCTION])
         },
         onStdoutChunk: (chunk) => {
           for (const line of toLogLines("stdout", chunk)) {
