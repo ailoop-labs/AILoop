@@ -87,6 +87,16 @@ function makeLlmConfig(dimensions: AppConfig["codex"]["llmEvaluatorDimensions"] 
   };
 }
 
+function extractPromptRoundContext(prompt: string): Record<string, unknown> {
+  const marker = "Round context:\n";
+  const start = prompt.indexOf(marker);
+  if (start < 0) {
+    throw new Error("Round context marker not found in prompt.");
+  }
+
+  return JSON.parse(prompt.slice(start + marker.length)) as Record<string, unknown>;
+}
+
 describe("buildDimensionPrompt", () => {
   test("adds runtime isolation guidance for evaluator sessions", () => {
     const prompt = buildDimensionPrompt(
@@ -462,6 +472,10 @@ describe("buildDimensionPrompt", () => {
 
   test("uses a compact evidence brief instead of embedding the full raw state change", () => {
     const context = makeRoundContext();
+    context.toolResult.operational_evidence = [
+      "Test: bun test src/evaluation/strategies/llm-judge.test.ts -> 12 passed",
+      "Assertion: prompt contains validation_summary and targeted_excerpts"
+    ];
     context.stateChange = [
       "### Snapshot File Diffs",
       "```diff",
@@ -480,15 +494,52 @@ describe("buildDimensionPrompt", () => {
     context.logLines = Array.from({ length: 60 }, (_, index) => `log line ${index + 1}`);
 
     const prompt = buildDimensionPrompt("goal_alignment", context);
+    const roundContext = extractPromptRoundContext(prompt);
 
     expect(prompt).toContain("\"artifact_manifest\"");
     expect(prompt).toContain("\"state_change_summary\"");
     expect(prompt).toContain("src/loop/engine.state-json-contract.test.ts");
     expect(prompt).not.toContain("very large log body line 1");
     expect(prompt).not.toContain("\"state_change\":");
-    expect(prompt).not.toContain("log line 1");
-    expect(prompt).toContain("log line 21");
-    expect(prompt).toContain("log line 60");
+    expect(prompt).not.toContain("log line 21");
+    expect(prompt).not.toContain("log line 60");
+    expect(roundContext).toHaveProperty("executor_summary");
+    expect(roundContext).toHaveProperty("validation_summary");
+    expect(roundContext).toHaveProperty("targeted_excerpts");
+    expect(roundContext).not.toHaveProperty("recent_logs");
+  });
+
+  test("includes a distinct validation summary and reasoned targeted excerpts", () => {
+    const context = makeRoundContext();
+    context.toolResult.operational_evidence = [
+      "Test: bun test src/evaluation/strategies/llm-judge.test.ts -> 12 passed",
+      "Health Check: GET /api/health -> 200 OK"
+    ];
+    context.stateChange = [
+      "### Operational Follow-up",
+      "### Snapshot File Diffs",
+      "```diff",
+      "+++ src/evaluation/strategies/llm-judge.ts",
+      "```"
+    ].join("\n");
+    context.logLines = [
+      "executor started",
+      "validation: targeted prompt excerpt selected from log",
+      "executor finished"
+    ];
+
+    const roundContext = extractPromptRoundContext(buildDimensionPrompt("goal_alignment", context));
+    const validationSummary = roundContext.validation_summary as Record<string, unknown>;
+    const targetedExcerpts = roundContext.targeted_excerpts as Array<Record<string, string>>;
+
+    expect(validationSummary.status).toBe("recorded");
+    expect(String(validationSummary.summary)).toContain("Executor recorded 2 concise validation signal");
+    expect(validationSummary.primary_sources).toEqual(["tool_result.operational_evidence"]);
+    expect(targetedExcerpts.length).toBeGreaterThan(0);
+    expect(targetedExcerpts[0]?.source).toBe("tool_result.operational_evidence");
+    expect(targetedExcerpts[0]?.selection_reason).toContain("shortest direct verification claim");
+    expect(targetedExcerpts[0]?.artifact_path).toBe(".ailoop/runs/example.round.state_change.txt");
+    expect(targetedExcerpts.some((excerpt) => excerpt.source === "log_lines")).toBe(true);
   });
 });
 

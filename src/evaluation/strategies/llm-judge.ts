@@ -370,26 +370,210 @@ function buildArtifactManifest(context: RoundEvaluationContext): Record<string, 
   };
 }
 
+const MAX_VALIDATION_HIGHLIGHTS = 4;
+const MAX_TARGETED_EXCERPTS = 6;
+const MAX_EXCERPT_LENGTH = 220;
+
+const VALIDATION_SIGNAL_PATTERNS: RegExp[] = [
+  /\btest(?:s|ed|ing)?\b/i,
+  /\bassert(?:ion|ed)?\b/i,
+  /\bverif(?:y|ied|ication)\b/i,
+  /\bvalidat(?:e|ed|ion)\b/i,
+  /\bpass(?:ed)?\b/i,
+  /\bfail(?:ed|ure)?\b/i,
+  /\berror\b/i,
+  /\bexpected\b/i,
+  /\bobserved\b/i,
+  /\bhealth(?: check)?\b/i,
+  /\bexit code\b/i,
+  /\bok\b/i
+];
+
+const STATE_CHANGE_EVIDENCE_PATTERNS: RegExp[] = [
+  /\boperational\b/i,
+  /\bverification\b/i,
+  /\btest(?:s|ing)?\b/i,
+  /\bhealth\b/i,
+  /\bvalidat(?:e|ion)\b/i
+];
+
+function normalizePromptText(value: string): string {
+  return redactSecretLikeText(value.replace(/\s+/g, " ").trim());
+}
+
+function truncatePromptText(value: string, maxLength = MAX_EXCERPT_LENGTH): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
+function collectRelevantLogLines(logLines: string[]): string[] {
+  return logLines
+    .map((line) => normalizePromptText(line))
+    .filter(Boolean)
+    .filter((line) => hasPattern(VALIDATION_SIGNAL_PATTERNS, line));
+}
+
+function collectRelevantStateChangeNotes(notes: string[]): string[] {
+  return notes
+    .map((note) => normalizePromptText(note))
+    .filter(Boolean)
+    .filter((note) => hasPattern(STATE_CHANGE_EVIDENCE_PATTERNS, note));
+}
+
+function buildValidationSummary(
+  context: RoundEvaluationContext,
+  stateChangeSummary: ReturnType<typeof summarizeStateChangeForEvaluation>,
+  artifactManifest: Record<string, string>
+): Record<string, unknown> {
+  const operationalEvidence = (context.toolResult.operational_evidence ?? [])
+    .map((line) => normalizePromptText(line))
+    .filter(Boolean);
+  const logSignals = collectRelevantLogLines(context.logLines);
+  const stateChangeSignals = collectRelevantStateChangeNotes(stateChangeSummary.notes);
+  const errorSignal = context.toolResult.error
+    ? normalizePromptText(`${context.toolResult.error.type}: ${context.toolResult.error.message}`)
+    : "";
+
+  if (operationalEvidence.length > 0) {
+    return {
+      status: "recorded",
+      summary: `Executor recorded ${operationalEvidence.length} concise validation signal(s); rely on these before opening full artifacts.`,
+      primary_sources: ["tool_result.operational_evidence"],
+      highlighted_signals: operationalEvidence.slice(0, MAX_VALIDATION_HIGHLIGHTS),
+      full_detail_artifacts: [artifactManifest.state_change_path, artifactManifest.round_log_path].filter(Boolean)
+    };
+  }
+
+  if (errorSignal) {
+    return {
+      status: "error_only",
+      summary: "Executor reported a concrete error but did not attach separate validation evidence.",
+      primary_sources: ["tool_result.error", "artifact_manifest.round_log_path"],
+      highlighted_signals: [errorSignal],
+      full_detail_artifacts: [artifactManifest.round_log_path].filter(Boolean)
+    };
+  }
+
+  if (logSignals.length > 0 || stateChangeSignals.length > 0) {
+    const derivedSignals = [...logSignals, ...stateChangeSignals].slice(0, MAX_VALIDATION_HIGHLIGHTS);
+    return {
+      status: "derived",
+      summary: "No explicit validation summary was attached; use the smallest validation-like excerpts selected from logs or state-change notes.",
+      primary_sources: [
+        ...(logSignals.length > 0 ? ["artifact_manifest.round_log_path"] : []),
+        ...(stateChangeSignals.length > 0 ? ["artifact_manifest.state_change_path"] : [])
+      ],
+      highlighted_signals: derivedSignals,
+      full_detail_artifacts: [artifactManifest.round_log_path, artifactManifest.state_change_path].filter(Boolean)
+    };
+  }
+
+  return {
+    status: "missing",
+    summary: "No explicit validation evidence was recorded; judge from executor summary, artifact references, and compact state-change summary only.",
+    primary_sources: ["executor_summary", "artifact_manifest"],
+    highlighted_signals: [],
+    full_detail_artifacts: [artifactManifest.round_log_path, artifactManifest.state_change_path].filter(Boolean)
+  };
+}
+
+function buildTargetedExcerpts(
+  context: RoundEvaluationContext,
+  stateChangeSummary: ReturnType<typeof summarizeStateChangeForEvaluation>,
+  artifactManifest: Record<string, string>
+): Array<Record<string, string>> {
+  const targeted: Array<Record<string, string>> = [];
+  const seen = new Set<string>();
+
+  const addExcerpt = (input: { source: string; artifactPath: string; selectionReason: string; excerpt: string }): void => {
+    if (targeted.length >= MAX_TARGETED_EXCERPTS) {
+      return;
+    }
+
+    const excerpt = truncatePromptText(normalizePromptText(input.excerpt));
+    if (!excerpt || seen.has(`${input.source}:${excerpt}`)) {
+      return;
+    }
+
+    seen.add(`${input.source}:${excerpt}`);
+    targeted.push({
+      source: input.source,
+      artifact_path: input.artifactPath,
+      selection_reason: input.selectionReason,
+      excerpt
+    });
+  };
+
+  for (const line of context.toolResult.operational_evidence ?? []) {
+    addExcerpt({
+      source: "tool_result.operational_evidence",
+      artifactPath: artifactManifest.state_change_path || artifactManifest.round_log_path || "",
+      selectionReason:
+        "Executor marked this as operational/validation evidence; include the shortest direct verification claim instead of the full artifact body.",
+      excerpt: line
+    });
+  }
+
+  if (context.toolResult.error) {
+    addExcerpt({
+      source: "tool_result.error",
+      artifactPath: artifactManifest.round_log_path || "",
+      selectionReason:
+        "Executor reported a concrete failure signal; include the error itself without embedding the full round log.",
+      excerpt: `${context.toolResult.error.type}: ${context.toolResult.error.message}`
+    });
+  }
+
+  for (const note of collectRelevantStateChangeNotes(stateChangeSummary.notes)) {
+    addExcerpt({
+      source: "state_change_summary.notes",
+      artifactPath: artifactManifest.state_change_path || "",
+      selectionReason:
+        "State-change notes identify where verification or operational follow-up was recorded; include the note instead of the raw diff.",
+      excerpt: note
+    });
+  }
+
+  for (const line of collectRelevantLogLines(context.logLines)) {
+    addExcerpt({
+      source: "log_lines",
+      artifactPath: artifactManifest.round_log_path || "",
+      selectionReason:
+        "This log line contains a validation or failure keyword and is more probative than generic executor chatter.",
+      excerpt: line
+    });
+  }
+
+  return targeted;
+}
+
 function buildCompactEvaluationContext(context: RoundEvaluationContext): Record<string, unknown> {
+  const artifactManifest = buildArtifactManifest(context);
+  const stateChangeSummary = summarizeStateChangeForEvaluation(context.stateChange);
+
   return {
     objective: context.subTask.objective,
     expected_outcome: context.subTask.expected_outcome,
-    tool_result_summary: {
+    executor_summary: {
       status: context.toolResult.status,
-      summary: context.toolResult.summary,
+      summary: redactSecretLikeText(context.toolResult.summary),
       next_state_hint: context.toolResult.next_state_hint ?? "continue",
       error: context.toolResult.error
         ? {
-            type: context.toolResult.error.type,
-            message: context.toolResult.error.message
+            type: redactSecretLikeText(context.toolResult.error.type),
+            message: redactSecretLikeText(context.toolResult.error.message)
           }
         : null
     },
-    artifact_manifest: buildArtifactManifest(context),
+    validation_summary: buildValidationSummary(context, stateChangeSummary, artifactManifest),
+    artifact_manifest: artifactManifest,
     budget_limits: context.budgetLimits,
     budget_usage: context.budgetUsage,
-    state_change_summary: summarizeStateChangeForEvaluation(context.stateChange),
-    recent_logs: context.logLines.slice(-40)
+    state_change_summary: stateChangeSummary,
+    targeted_excerpts: buildTargetedExcerpts(context, stateChangeSummary, artifactManifest)
   };
 }
 
