@@ -227,4 +227,61 @@ describe("PlannerAgent", () => {
       await fs.rm(workspaceRoot, { recursive: true, force: true });
     }
   });
+
+  test("rewrites documentation-only subtasks into implementation-first work when the active requirement is already ready", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-planner-doc-only-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(path.join(homeDir, "PLANNER_ROLE.md"), "# Planner Role\n\nCustom planner guidance.\n", "utf8");
+
+    const mockCodex = {
+      async runJson<T>() {
+        return {
+          ok: true,
+          data: {
+            rationale: "Refresh the requirement wording before implementation.",
+            assignee: "executor",
+            objective: "Refresh .ailoop/product-requirements/current.md to clarify the next slice.",
+            expected_outcome: "The requirement markdown is updated with clearer acceptance criteria.",
+            impacted_files: [".ailoop/product-requirements/current.md"],
+            recommended_tools: ["read_file"]
+          } as T,
+          rawMessage: "{}",
+          stdout: "",
+          stderr: ""
+        };
+      }
+    };
+    const stubTools = {
+      async initialize() {},
+      getSkillManager() {
+        return {
+          getAvailableSkills() {
+            return [];
+          }
+        };
+      }
+    };
+
+    const originalCwd = process.cwd();
+    process.chdir(workspaceRoot);
+
+    try {
+      const agent = new PlannerAgent(stubTools as never, makeConfig(homeDir), mockCodex as never);
+      const result = await agent.plan(
+        createContext({
+          requirement_artifact_status: "ready"
+        }),
+        { onLog: async () => {} }
+      );
+
+      expect(result.objective).toContain("Implement one minimal code or test change");
+      expect(result.expected_outcome).toContain("At least one file under src/, scripts/, or web/src/ changes");
+      expect(result.impacted_files).toEqual(["src/", "scripts/", "web/src/"]);
+      expect(result.recommended_tools).toEqual(["read_file", "write_file", "run_shell"]);
+    } finally {
+      process.chdir(originalCwd);
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
 });

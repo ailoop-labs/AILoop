@@ -5,6 +5,7 @@ import { describe, expect, test } from "bun:test";
 import {
   appendInstruction,
   buildLoopPaths,
+  consumeNextInstruction,
   defaultLoopState,
   ensureLoopHome,
   readLoopState,
@@ -330,6 +331,31 @@ describe("loop state persistence", () => {
       "new instruction"
     ]);
     expect(JSON.parse(await fs.readFile(paths.legacyInstructionsPath, "utf8"))).toEqual([]);
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("consumeNextInstruction preserves later queued items for subsequent rounds", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-state-consume-instructions-"));
+    const paths = buildLoopPaths(homeDir);
+
+    await fs.mkdir(homeDir, { recursive: true });
+    await appendInstruction(paths, "first instruction");
+    await appendInstruction(paths, "second instruction");
+    await appendInstruction(paths, "third instruction");
+
+    expect(await consumeNextInstruction(paths)).toEqual(["first instruction"]);
+    expect(JSON.parse(await fs.readFile(paths.instructionsPath, "utf8"))).toEqual([
+      "second instruction",
+      "third instruction"
+    ]);
+
+    expect(await consumeNextInstruction(paths)).toEqual(["second instruction"]);
+    expect(JSON.parse(await fs.readFile(paths.instructionsPath, "utf8"))).toEqual(["third instruction"]);
+
+    expect(await consumeNextInstruction(paths)).toEqual(["third instruction"]);
+    expect(await consumeNextInstruction(paths)).toEqual([]);
+    expect(JSON.parse(await fs.readFile(paths.instructionsPath, "utf8"))).toEqual([]);
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
