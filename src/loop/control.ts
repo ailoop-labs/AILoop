@@ -498,6 +498,66 @@ function deriveCrashRecoveryStatus(state: LoopStateData, statusCheckFinalized: b
 
 const DEFAULT_REVIEW_ACTION = "Inspect the run state and resume explicitly when safe.";
 const BUDGET_WARNING_RATIO = 0.8;
+const LIVE_RUN_STALE_STATUS_MS = 15 * 60_000;
+
+function isActiveExecutionState(state: LoopStateName): boolean {
+  return state === "starting" || state === "running" || state === "cooldown" || state === "stopping";
+}
+
+function formatDurationForStatus(durationMs: number): string {
+  if (durationMs < 60_000) {
+    return `${Math.max(1, Math.round(durationMs / 1_000))}s`;
+  }
+
+  return `${Math.round(durationMs / 60_000)}m`;
+}
+
+async function deriveLiveRunInconsistencyReason(
+  paths: LoopPaths,
+  state: LoopStateData,
+  pidAlive: boolean
+): Promise<OperatorStatusReason | null> {
+  if (!pidAlive || !isActiveExecutionState(state.state)) {
+    return null;
+  }
+
+  const updatedAtMs = Date.parse(state.updated_at);
+  if (!Number.isFinite(updatedAtMs)) {
+    return null;
+  }
+
+  const ageMs = Date.now() - updatedAtMs;
+  if (ageMs < LIVE_RUN_STALE_STATUS_MS) {
+    return null;
+  }
+
+  const [pidFileExists, lockFileExists] = await Promise.all([
+    fileExists(paths.pidPath),
+    fileExists(paths.lockPath)
+  ]);
+  if (pidFileExists && lockFileExists) {
+    return null;
+  }
+
+  const missingMarkers: string[] = [];
+  if (!pidFileExists) {
+    missingMarkers.push("pid file");
+  }
+  if (!lockFileExists) {
+    missingMarkers.push("lock file");
+  }
+
+  return {
+    kind: "engine_error",
+    title: "Engine error",
+    summary: [
+      `The loop process is still alive, but lifecycle markers are inconsistent (${missingMarkers.join(" + ")} missing).`,
+      `The state heartbeat has not advanced for ${formatDurationForStatus(ageMs)} while the run remains ${state.state}.`
+    ].join(" "),
+    next_action: "Inspect the live PID, stop the loop if it remains idle, then resume explicitly when safe.",
+    severity: "critical"
+  };
+}
 
 function formatBudgetDimensionLabel(dimension: BudgetDimension): string {
   if (dimension === "cost") {
@@ -627,6 +687,7 @@ function deriveOperatorReason(
   options: {
     crashRecovery: CrashRecoveryStatus | null;
     pauseRequested: boolean;
+    liveRunInconsistency: OperatorStatusReason | null;
   }
 ): OperatorStatusReason | null {
   if (options.crashRecovery) {
@@ -649,6 +710,10 @@ function deriveOperatorReason(
       next_action: "Wait for the run to enter paused, then review and resume explicitly when safe.",
       severity: "warning"
     };
+  }
+
+  if (options.liveRunInconsistency) {
+    return options.liveRunInconsistency;
   }
 
   if (/BudgetBreach:/i.test(message)) {
@@ -757,6 +822,7 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
   const pid = state.pid ?? (await readPid(paths));
   const pidAlive = pid ? isPidAlive(pid) : false;
   const pauseRequested = await hasFlag(paths.pauseFlagPath);
+  const liveRunInconsistency = await deriveLiveRunInconsistencyReason(paths, state, pidAlive);
 
   // Ensure idle state doesn't have stale budget/PID
   if (state.state === "idle" && (state.current_budget || state.pid)) {
@@ -788,7 +854,8 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
     crash_recovery: crashRecovery,
     operator_reason: deriveOperatorReason(state, {
       crashRecovery,
-      pauseRequested
+      pauseRequested,
+      liveRunInconsistency
     }),
     budget_health: deriveBudgetHealth(state),
     artifact_completeness: artifactCompleteness,

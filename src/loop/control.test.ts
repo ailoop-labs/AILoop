@@ -1506,6 +1506,46 @@ describe("getLoopStatus", () => {
     await fs.rm(homeDir, { recursive: true, force: true });
   });
 
+  test("surfaces a critical risk when a live running process loses its lifecycle markers and stops updating state", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-stalled-live-process-test-"));
+    const paths = buildLoopPaths(homeDir);
+    await fs.mkdir(homeDir, { recursive: true });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      round: 17,
+      state: "running",
+      pid: process.pid
+    });
+
+    const db = new Database(paths.dbPath, { create: true });
+    db.run(
+      `
+        UPDATE system_state
+        SET updated_at = ?
+        WHERE id = 1
+      `,
+      [new Date(Date.now() - 20 * 60_000).toISOString()]
+    );
+    db.close();
+
+    const status = await getLoopStatus(makeTestConfig(homeDir));
+    expect(status.state).toBe("running");
+    expect(status.pid_alive).toBe(true);
+    expect(status.operator_reason).toEqual({
+      kind: "engine_error",
+      title: "Engine error",
+      summary: expect.stringContaining("lifecycle markers"),
+      next_action: "Inspect the live PID, stop the loop if it remains idle, then resume explicitly when safe.",
+      severity: "critical"
+    });
+    expect(status.operator_reason?.summary).toContain("state heartbeat");
+    expect(status.operator_reason?.summary).toContain("lock file");
+    expect(status.operator_reason?.summary).toContain("pid file");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
   test("clears stale budget snapshot when loop is idle", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-idle-budget-test-"));
     const paths = buildLoopPaths(homeDir);
