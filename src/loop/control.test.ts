@@ -1546,6 +1546,41 @@ describe("getLoopStatus", () => {
     await fs.rm(homeDir, { recursive: true, force: true });
   });
 
+  test("does not surface a lifecycle marker risk while the current round log is still advancing", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-live-log-activity-test-"));
+    const paths = buildLoopPaths(homeDir);
+    await fs.mkdir(homeDir, { recursive: true });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      round: 17,
+      state: "running",
+      pid: process.pid
+    });
+    await writeRunArtifacts(paths.runsDir, "2026-03-16T14-55-28-494Z", {
+      log: "still making progress\n"
+    });
+
+    const db = new Database(paths.dbPath, { create: true });
+    db.run(
+      `
+        UPDATE system_state
+        SET updated_at = ?
+        WHERE id = 1
+      `,
+      [new Date(Date.now() - 20 * 60_000).toISOString()]
+    );
+    db.close();
+
+    const status = await getLoopStatus(makeTestConfig(homeDir));
+    expect(status.state).toBe("running");
+    expect(status.pid_alive).toBe(true);
+    expect(status.artifact_completeness.kind).toBe("log_only");
+    expect(status.operator_reason).toBeNull();
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
   test("clears stale budget snapshot when loop is idle", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-idle-budget-test-"));
     const paths = buildLoopPaths(homeDir);

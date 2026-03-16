@@ -515,7 +515,8 @@ function formatDurationForStatus(durationMs: number): string {
 async function deriveLiveRunInconsistencyReason(
   paths: LoopPaths,
   state: LoopStateData,
-  pidAlive: boolean
+  pidAlive: boolean,
+  latestArtifactAt: string | null
 ): Promise<OperatorStatusReason | null> {
   if (!pidAlive || !isActiveExecutionState(state.state)) {
     return null;
@@ -528,6 +529,13 @@ async function deriveLiveRunInconsistencyReason(
 
   const ageMs = Date.now() - updatedAtMs;
   if (ageMs < LIVE_RUN_STALE_STATUS_MS) {
+    return null;
+  }
+
+  // Long-running rounds can keep streaming log/state-change artifacts without mutating the
+  // persisted lifecycle row. Treat recent artifact writes as an activity heartbeat.
+  const latestArtifactAtMs = latestArtifactAt ? Date.parse(latestArtifactAt) : Number.NaN;
+  if (Number.isFinite(latestArtifactAtMs) && Date.now() - latestArtifactAtMs < LIVE_RUN_STALE_STATUS_MS) {
     return null;
   }
 
@@ -822,7 +830,12 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
   const pid = state.pid ?? (await readPid(paths));
   const pidAlive = pid ? isPidAlive(pid) : false;
   const pauseRequested = await hasFlag(paths.pauseFlagPath);
-  const liveRunInconsistency = await deriveLiveRunInconsistencyReason(paths, state, pidAlive);
+  const liveRunInconsistency = await deriveLiveRunInconsistencyReason(
+    paths,
+    state,
+    pidAlive,
+    artifactCompleteness.latest_artifact_at
+  );
 
   // Ensure idle state doesn't have stale budget/PID
   if (state.state === "idle" && (state.current_budget || state.pid)) {
