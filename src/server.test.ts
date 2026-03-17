@@ -906,6 +906,36 @@ describe("console server API contract", () => {
     });
   });
 
+  test("does not mislabel ordinary evaluator failure limits as hot-file governance in authenticated status responses", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "paused",
+      round: 15,
+      last_error: "EvaluatorFailureLimit: repeated evaluator failures require operator review."
+    });
+
+    const response = await fetchHandler(createAuthorizedRequest("http://console.test/api/status", token));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      state: "paused",
+      round: 15,
+      hot_file_governance: null,
+      operator_reason: {
+        kind: "evaluator_failure_limit",
+        title: "Evaluator failure threshold",
+        summary: "repeated evaluator failures require operator review.",
+        next_action: "Inspect the evaluator findings and narrow the next sub-task before resuming.",
+        severity: "critical"
+      }
+    });
+  });
+
   test("keeps one persisted hot-file-governance payload aligned across authenticated status, run history, and artifact APIs", async () => {
     const token = "test-token";
     const { config, fetchHandler, paths } = await createFixture({
