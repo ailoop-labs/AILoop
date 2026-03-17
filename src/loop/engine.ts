@@ -564,6 +564,13 @@ export class LoopEngine {
         // --- GOVERNANCE STEP 2/3: Leader Diagnosis & CCB ---
         if (await hasFlag(this.paths.pauseFlagPath)) {
           await this.setState("paused");
+
+          // Check stop flag before invoking Leader to allow immediate shutdown
+          if (await hasFlag(this.paths.stopFlagPath)) {
+            await this.setState("stopping");
+            break;
+          }
+
           console.log(`[GOVERNANCE] Invoking Leader for diagnosis...`);
           try {
             const decision = await this.leader.execute({
@@ -594,7 +601,13 @@ export class LoopEngine {
               const ccbResult = await this.ccb.run(currentStateData.round, decision, readmeContent);
 
               await saveCCBSession(this.paths, currentStateData.round, ccbResult);
-              
+
+              // Check stop flag after CCB execution as it might take time
+              if (await hasFlag(this.paths.stopFlagPath)) {
+                await this.setState("stopping");
+                break;
+              }
+
               if (ccbResult.decision === "approve") {
                 console.log(`[CCB] CHANGE APPROVED. Applying Constitution modification...`);
                 // Leader modifies README.md
@@ -629,8 +642,26 @@ export class LoopEngine {
               break;
             }
           } catch (err) {
+            const errorMessage = (err as Error).message;
             console.error(`[GOVERNANCE] Error during Leader/CCB execution:`, err);
-            await this.setState("paused", `Governance failed: ${summarizeGovernanceFailureForState((err as Error).message)}`);
+
+            // Check if this is a network/upstream error (502, 503, timeout, etc.)
+            // For these errors, we should exit cleanly and let the operator restart
+            // rather than holding the lock indefinitely in waitWhilePaused
+            const isNetworkError = errorMessage.includes("502 Bad Gateway") ||
+                                   errorMessage.includes("503 Service Unavailable") ||
+                                   errorMessage.includes("Upstream request failed") ||
+                                   errorMessage.includes("ECONNREFUSED") ||
+                                   errorMessage.includes("ETIMEDOUT");
+
+            if (isNetworkError) {
+              await this.setState("paused", `Governance failed due to network error: ${summarizeGovernanceFailureForState(errorMessage)}. Please check network connectivity and restart.`);
+              console.log(`[GOVERNANCE] Network error detected. Exiting to release lock. Operator should restart when network is stable.`);
+              break;
+            }
+
+            // For other errors, pause and wait for operator intervention
+            await this.setState("paused", `Governance failed: ${summarizeGovernanceFailureForState(errorMessage)}`);
             const pausedResult = await waitWhilePaused(this.paths);
             if (pausedResult === "stopped") break;
             await this.setState("running");
