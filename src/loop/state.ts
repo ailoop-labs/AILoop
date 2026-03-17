@@ -18,6 +18,9 @@ export function derivePauseReasonLabel(message: string | null | undefined): stri
   if (/BudgetBreach:/i.test(normalized)) {
     return "Budget breach";
   }
+  if (/^EvaluatorStrategicBlock:/i.test(normalized)) {
+    return "Strategic evaluator block";
+  }
   if (/EvaluatorFailureLimit:/i.test(normalized)) {
     return "Evaluator failure threshold";
   }

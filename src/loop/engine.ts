@@ -64,8 +64,8 @@ import {
   saveCCBSession
 } from "./state";
 
-const CONSECUTIVE_EVALUATOR_FAILURE_LIMIT = 3;
 const LEADER_REWORK_LIMIT = 2;
+const STRATEGIC_EVALUATOR_BLOCK_PREFIX = "EvaluatorStrategicBlock:";
 
 interface OperationalEvidenceContext {
   round: number;
@@ -217,7 +217,19 @@ export function decideEvaluationFailureRecoveryPath(
   evaluation: EvaluationResult,
   toolResult: ToolResult
 ): "auto_rework" | "leader" {
-  if (evaluation.decision !== "fail" || toolResult.status !== "success") {
+  if (evaluation.decision !== "fail") {
+    return "auto_rework";
+  }
+
+  if (evaluation.recovery_path === "strategic_governance") {
+    return "leader";
+  }
+
+  if (evaluation.recovery_path === "tactical_rework") {
+    return "auto_rework";
+  }
+
+  if (toolResult.status !== "success") {
     return "auto_rework";
   }
 
@@ -263,6 +275,14 @@ export function decideEvaluationFailureRecoveryPath(
   }
 
   return "auto_rework";
+}
+
+function formatEvaluationFailurePauseMessage(evaluation: EvaluationResult): string {
+  if (decideEvaluationFailureRecoveryPath(evaluation, { status: "success", summary: "", artifacts: { log_path: "", state_change_path: "" } }) === "leader") {
+    return `${STRATEGIC_EVALUATOR_BLOCK_PREFIX} ${evaluation.justification}`;
+  }
+
+  return evaluation.justification;
 }
 
 export function resolveNextLastError(currentLastError: string | null, requestedLastError?: string | null): string | null {
@@ -618,13 +638,6 @@ export class LoopEngine {
           }
         }
 
-        if (currentStateData.consecutive_evaluator_failures >= CONSECUTIVE_EVALUATOR_FAILURE_LIMIT) {
-          const msg = `EvaluatorFailureLimit: The evaluation has failed ${CONSECUTIVE_EVALUATOR_FAILURE_LIMIT} consecutive times. Pausing the loop for human review.`;
-          await setFlag(this.paths.pauseFlagPath);
-          await this.setState("paused", msg);
-          continue;
-        }
-
         const roundOutcome = await this.runRound(currentStateData.round + 1);
         if (!roundOutcome.success) {
           await setFlag(this.paths.pauseFlagPath);
@@ -850,7 +863,7 @@ export class LoopEngine {
           if (evaluation.decision === "pass") break;
         }
       } else if (evaluation.decision === "fail" && failureRecoveryPath === "leader") {
-        await log("[GOVERNANCE] Routing evaluator failure directly to Leader (evidence handoff issue detected).");
+        await log("[GOVERNANCE] Routing evaluator failure directly to Leader (strategic recovery required).");
       }
 
       if (finalToolResult.status === "failure" && lastSuccessfulExecution) {
@@ -941,7 +954,10 @@ export class LoopEngine {
         autoReworkNotes
       );
       
-      return { success: evaluation.decision === "pass", errorMessage: evaluation.justification };
+      return {
+        success: evaluation.decision === "pass",
+        errorMessage: evaluation.decision === "fail" ? formatEvaluationFailurePauseMessage(evaluation) : evaluation.justification
+      };
     } catch (error) {
       const message = error instanceof BudgetBreachError ? error.message : (error as Error).message;
       const errorType = error instanceof BudgetBreachError ? "BudgetBreach" : "RoundExecutionError";

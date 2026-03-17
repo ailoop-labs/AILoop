@@ -21,6 +21,7 @@ import { paginateRunHistory, RUN_HISTORY_PAGE_SIZE } from "./run-history-paginat
 type LoopStateName = "idle" | "starting" | "running" | "cooldown" | "paused" | "stopping" | "error";
 type BudgetDimension = "cost" | "time" | "actions";
 type BudgetHealth = "healthy" | "warning" | "breached";
+type CliProvider = "codex" | "claude";
 
 interface LoopStatus {
   state: LoopStateName;
@@ -117,6 +118,7 @@ interface RuntimeLoopConfig {
     actions: number;
   };
   codex: {
+    bin: string;
     model: string;
     profile: string;
     plannerSandbox: SandboxMode;
@@ -243,6 +245,18 @@ function clearStoredToken(): void {
     return;
   }
   window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+}
+
+export function deriveCliProvider(bin: string): CliProvider {
+  const basename = bin
+    .trim()
+    .split(/[/\\]/)
+    .pop()
+    ?.toLowerCase() ?? "";
+  if (basename === "claude" || basename.startsWith("claude")) {
+    return "claude";
+  }
+  return "codex";
 }
 
 export function summarizeApiError(status: number, body: string, contentType?: string | null): string {
@@ -1562,7 +1576,27 @@ export default function App() {
               </select>
             </label>
             <label className="text-sm text-mist/80">
-              Codex Model
+              Execution Provider
+              <select
+                value={deriveCliProvider(runtimeConfig.codex.bin)}
+                onChange={(event) =>
+                  setRuntimeConfig({
+                    ...runtimeConfig,
+                    codex: {
+                      ...runtimeConfig.codex,
+                      bin: event.target.value === "claude" ? "claude" : "codex"
+                    }
+                  })
+                }
+                className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
+              >
+                <option value="codex">Codex CLI</option>
+                <option value="claude">Claude CLI</option>
+              </select>
+              <span className="mt-2 block text-xs text-mist/60">Uses the selected CLI from your PATH by default.</span>
+            </label>
+            <label className="text-sm text-mist/80">
+              CLI Model
               <input
                 value={runtimeConfig.codex.model}
                 onChange={(event) =>
@@ -1578,7 +1612,7 @@ export default function App() {
               />
             </label>
             <label className="text-sm text-mist/80">
-              Codex Profile
+              CLI Profile
               <input
                 value={runtimeConfig.codex.profile}
                 onChange={(event) =>
@@ -1654,7 +1688,7 @@ export default function App() {
               </select>
             </label>
             <label className="text-sm text-mist/80">
-              Codex Timeout (ms)
+              CLI Timeout (ms)
               <input
                 type="number"
                 min={10000}

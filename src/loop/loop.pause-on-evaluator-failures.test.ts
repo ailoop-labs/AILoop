@@ -4,9 +4,8 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../config/env";
 import { LoopEngine } from "./engine";
-import { ensureLoopHome, readLoopState, setFlag, type LoopPaths, writeLoopState } from "./state";
-
-const EVALUATOR_FAILURE_LIMIT = 3;
+import type { ActionRecord, EvaluationResult, SubTask, ToolResult } from "../types/contracts";
+import { ensureLoopHome, readLoopState, setFlag, type LoopPaths } from "./state";
 
 async function waitForPausedState(paths: LoopPaths, timeoutMs = 6_000): Promise<Awaited<ReturnType<typeof readLoopState>>> {
   const deadline = Date.now() + timeoutMs;
@@ -22,9 +21,43 @@ async function waitForPausedState(paths: LoopPaths, timeoutMs = 6_000): Promise<
   throw new Error("Timed out waiting for paused state.");
 }
 
-describe("LoopEngine evaluator failure threshold guard", () => {
-  test("pauses before starting a new round once failure limit is already reached", async () => {
-    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-failure-limit-test-"));
+async function waitForLeaderInvocation(counter: () => number, timeoutMs = 6_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    if (counter() > 0) {
+      return;
+    }
+    await Bun.sleep(25);
+  }
+
+  throw new Error("Timed out waiting for Leader invocation.");
+}
+
+function makeToolResult(summary: string): ToolResult {
+  return {
+    status: "success",
+    summary,
+    artifacts: {
+      log_path: "",
+      state_change_path: ""
+    },
+    next_state_hint: "continue"
+  };
+}
+
+function makeAction(tool: string): ActionRecord {
+  return {
+    tool,
+    args: {},
+    ok: true,
+    output: `${tool} ok`
+  };
+}
+
+describe("LoopEngine strategic evaluator pauses", () => {
+  test("pauses and routes to governance on the first strategic evaluator failure", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-strategic-evaluator-pause-test-"));
     const config = loadConfig({
       AILOOP_HOME: homeDir,
       AILOOP_MAX_CYCLES: "1"
@@ -33,32 +66,94 @@ describe("LoopEngine evaluator failure threshold guard", () => {
     const paths = (engine as unknown as { paths: LoopPaths }).paths;
     await ensureLoopHome(paths);
 
-    const seeded = await readLoopState(paths);
-    await writeLoopState(paths, {
-      ...seeded,
-      consecutive_evaluator_failures: EVALUATOR_FAILURE_LIMIT
-    });
+    const plan: SubTask = {
+      assignee: "executor",
+      rationale: "test rationale",
+      objective: "Add evidence for evaluator handoff",
+      expected_outcome: "The evaluator receives compact proof without needing another executor retry",
+      impacted_files: [],
+      recommended_tools: ["read_file", "write_file", "run_shell"]
+    };
 
-    let runRoundCalls = 0;
+    let leaderInvocations = 0;
+    let releaseLeader = () => {};
+    const leaderGate = new Promise<void>((resolve) => {
+      releaseLeader = resolve;
+    });
     const mutable = engine as unknown as {
-      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+      planner: { plan: () => Promise<SubTask> };
+      executor: {
+        execute: () => Promise<{
+          actions: ActionRecord[];
+          toolResult: ToolResult;
+        }>;
+      };
+      evaluator: { evaluate: () => Promise<EvaluationResult> };
+      leader: {
+        execute: () => Promise<{
+          rationale: string;
+          action: "stop";
+          diagnosis_type: "implementation_failure";
+          instructions: string[];
+        }>;
+      };
       run: () => Promise<void>;
     };
-    mutable.runRound = async () => {
-      runRoundCalls += 1;
-      return { success: true };
+    mutable.planner = { plan: async () => plan };
+    mutable.executor = {
+      execute: async () => ({
+        actions: [makeAction("write_file"), makeAction("run_shell")],
+        toolResult: makeToolResult("Executor reports the targeted bun test passed with 61 pass, 0 fail.")
+      })
+    };
+    mutable.evaluator = {
+      evaluate: async () => ({
+        decision: "fail",
+        justification: "Insufficient evidence for key dimensions: goal_alignment, causal_validity, constraint_compliance.",
+        root_cause: "insufficient_evidence:goal_alignment",
+        evidence: ["No behavioral verification excerpt was attached."],
+        recommended_next_action: "Attach minimal proof from the round artifacts.",
+        recovery_path: "strategic_governance",
+        dimensions: [
+          {
+            dimension: "goal_alignment",
+            decision: "unknown",
+            score: 58,
+            confidence: 0.94,
+            justification: "No compact verification excerpt proves the claimed behavior.",
+            evidence: ["The executor summary is not enough on its own."],
+            blocking_issues: ["Validation evidence is missing."],
+            recommended_next_action: "Attach minimal proof."
+          }
+        ]
+      })
+    };
+    mutable.leader = {
+      execute: async () => {
+        leaderInvocations += 1;
+        await leaderGate;
+        await setFlag(paths.stopFlagPath);
+        return {
+          rationale: "This is a strategic evidence-handoff problem.",
+          action: "stop",
+          diagnosis_type: "implementation_failure",
+          instructions: []
+        };
+      }
     };
 
     let runPromise: Promise<void> | null = null;
     try {
       runPromise = mutable.run();
       const pausedState = await waitForPausedState(paths);
+      await waitForLeaderInvocation(() => leaderInvocations);
 
-      expect(runRoundCalls).toBe(0);
-      expect(pausedState.last_error || "").toContain("EvaluatorFailureLimit");
-      expect(pausedState.last_error || "").toContain(`${EVALUATOR_FAILURE_LIMIT}`);
-      expect(pausedState.consecutive_evaluator_failures).toBe(EVALUATOR_FAILURE_LIMIT);
+      expect(leaderInvocations).toBe(1);
+      expect(pausedState.last_error || "").toContain("EvaluatorStrategicBlock:");
+      expect(pausedState.last_error || "").toContain("Insufficient evidence for key dimensions");
+      expect(pausedState.consecutive_evaluator_failures).toBe(1);
     } finally {
+      releaseLeader();
       await setFlag(paths.stopFlagPath);
       if (runPromise) {
         await Promise.race([

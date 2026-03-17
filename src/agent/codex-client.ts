@@ -54,6 +54,8 @@ type SleepFn = (ms: number) => Promise<void>;
 const INTERFACE_ERROR_RETRY_DELAY_MS = 60_000;
 const INTERFACE_ERROR_MAX_RETRIES = 5;
 
+type CliProvider = "codex" | "claude" | "gemini";
+
 function parseJsonSafely<T>(payload: string): T | null {
   try {
     return JSON.parse(payload) as T;
@@ -257,6 +259,27 @@ function emitChunkSafely(handler: ((chunk: string) => void) | undefined, message
   }
 }
 
+function detectCliProvider(bin: string): CliProvider {
+  const basename = path.basename(bin).toLowerCase();
+  if (basename === "gemini" || basename.endsWith("gemini")) {
+    return "gemini";
+  }
+  if (basename === "claude" || basename.startsWith("claude")) {
+    return "claude";
+  }
+  return "codex";
+}
+
+function claudePermissionModeForSandbox(sandbox: CodexSandboxMode): string {
+  if (sandbox === "read-only") {
+    return "plan";
+  }
+  if (sandbox === "workspace-write") {
+    return "acceptEdits";
+  }
+  return "bypassPermissions";
+}
+
 function buildRetryPrompt(basePrompt: string, attempt: number, reason: string): string {
   return [
     basePrompt,
@@ -309,7 +332,9 @@ function isTransientInterfaceFailure(errorMessage: string, stderr: string): bool
 }
 
 function buildArgs(config: CodexConfig, options: CodexJsonCallOptions, schemaPath: string, outputPath: string): string[] {
-  if (config.bin.endsWith("gemini")) {
+  const provider = detectCliProvider(config.bin);
+
+  if (provider === "gemini") {
     const args = [
       "--output-format",
       "json"
@@ -320,6 +345,23 @@ function buildArgs(config: CodexConfig, options: CodexJsonCallOptions, schemaPat
     }
 
     args.push(options.prompt);
+    return args;
+  }
+
+  if (provider === "claude") {
+    const args = [
+      "-p",
+      options.prompt,
+      "--permission-mode",
+      claudePermissionModeForSandbox(options.sandbox),
+      "--add-dir",
+      options.cwd
+    ];
+
+    if (config.model.trim()) {
+      args.push("--model", config.model.trim());
+    }
+
     return args;
   }
 
@@ -495,7 +537,8 @@ export class CodexClient {
             : basePrompt;
 
         let finalPrompt = prompt;
-        if (this.config.bin.endsWith("gemini")) {
+        const provider = detectCliProvider(this.config.bin);
+        if (provider === "gemini" || provider === "claude") {
           finalPrompt = `${prompt}\n\nIMPORTANT: You MUST return a single JSON object strictly matching this schema. Output ONLY the raw JSON object, no markdown formatting or backticks.\nSCHEMA:\n${JSON.stringify(options.schema, null, 2)}`;
         }
 

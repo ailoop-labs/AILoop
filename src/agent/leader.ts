@@ -3,7 +3,7 @@ import path from "node:path";
 import type { AppConfig } from "../config/env";
 import type { LeaderContext, LeaderDecision } from "../types/contracts";
 import { writeJsonFile } from "../utils/fs";
-import { SecretRedactor } from "../utils/redaction";
+import { redactJsonStrings, SecretRedactor } from "../utils/redaction";
 import { CodexClient, type CodexJsonCallResult, type JsonSchema } from "./codex-client";
 import { loadProjectRoleDefinition } from "./role-definitions";
 import { buildInternalRuntimeSessionGuide } from "./runtime-policy";
@@ -145,6 +145,11 @@ async function writeLeaderDiagnosticsArtifact(
       log_path: context.previousToolResult?.artifacts.log_path ?? null,
       state_change_path: context.previousToolResult?.artifacts.state_change_path ?? null
     },
+    ...(context.previousHotFileGovernance
+      ? {
+          previous_hot_file_governance: redactJsonStrings(context.previousHotFileGovernance, redactor)
+        }
+      : {}),
     stderr_tail: extractUsefulDiagnosticExcerpt(result.stderr, redactor),
     raw_tail: extractUsefulDiagnosticExcerpt(result.rawMessage, redactor),
     error: normalizeDiagnosticExcerpt(result.error, redactor)

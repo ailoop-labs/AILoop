@@ -349,9 +349,17 @@ Return a Markdown governance memo with:
       expect(diagnosticsLog).toBeTruthy();
       const diagnosticsPath = diagnosticsLog!.split("Leader diagnostics artifact: ")[1];
       const payload = await readJsonFile<Record<string, unknown>>(diagnosticsPath, {});
+      const hotFileGovernance = payload.previous_hot_file_governance as Record<string, unknown> | undefined;
 
       expect(payload.failure_classification).toBe("provider_rate_limit");
       expect(payload.prompt_chars).toBeGreaterThan(0);
+      expect(hotFileGovernance).toEqual({
+        file_path: sampleLeaderContext.previousHotFileGovernance?.file_path,
+        heuristic_labels: sampleLeaderContext.previousHotFileGovernance?.heuristic_labels,
+        result_class: sampleLeaderContext.previousHotFileGovernance?.result_class,
+        reason: sampleLeaderContext.previousHotFileGovernance?.reason,
+        recommended_next_action: sampleLeaderContext.previousHotFileGovernance?.recommended_next_action
+      });
       expect(String(payload.stderr_tail || "")).toContain("429 Too Many Requests");
       expect(String(payload.stderr_tail || "")).not.toContain("supersecret");
       expect(logs.some((message) => message.includes("429 Too Many Requests"))).toBe(true);

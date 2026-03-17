@@ -10,6 +10,7 @@ import {
   OperatorReasonPanel,
   RunArtifactEvidenceGrid,
   SystemHealthPanel,
+  deriveCliProvider,
   deriveControlAvailability,
   postControlAndRefresh,
   summarizeApiError
@@ -82,6 +83,14 @@ describe("RunArtifactEvidenceGrid", () => {
     expect(html).toContain("No material state change summary captured.");
     expect(html).toContain("No verification evidence captured.");
     expect(html).toContain("No operational evidence captured.");
+  });
+});
+
+describe("deriveCliProvider", () => {
+  test("classifies claude binaries for the execution-provider toggle", () => {
+    expect(deriveCliProvider("claude")).toBe("claude");
+    expect(deriveCliProvider("/usr/local/bin/claude")).toBe("claude");
+    expect(deriveCliProvider("codex")).toBe("codex");
   });
 });
 

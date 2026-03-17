@@ -161,6 +161,7 @@ describe("aggregateDimensionAssessments", () => {
     expect(result.evidence.some((line) => line.includes("no KPI output was logged"))).toBe(true);
     expect(result.recommended_next_action).toContain("goal_alignment: collect KPI evidence");
     expect(result.recommended_next_action).toContain("pause");
+    expect(result.recovery_path).toBe("strategic_governance");
   });
 
   test("surfaces Codex authentication failures as evaluator infrastructure blockers", () => {
@@ -191,6 +192,7 @@ describe("aggregateDimensionAssessments", () => {
     expect(result.evidence.some((line) => line.includes("401 Unauthorized"))).toBe(true);
     expect(result.recommended_next_action).toContain(".ailoop/codex-home/auth.json");
     expect(result.recommended_next_action).not.toContain("gather evidence");
+    expect(result.recovery_path).toBe("strategic_governance");
   });
 
   test("surfaces generic Codex process failures as evaluator infrastructure blockers", () => {
@@ -234,6 +236,7 @@ describe("aggregateDimensionAssessments", () => {
     expect(result.justification).toContain("Evaluator infrastructure failure");
     expect(result.root_cause).toBe("evaluator_infrastructure:codex_process_failure");
     expect(result.recommended_next_action).toContain("prompt");
+    expect(result.recovery_path).toBe("strategic_governance");
   });
 
   test("surfaces concrete evidence and follow-up actions when a key dimension fails", () => {
@@ -260,6 +263,7 @@ describe("aggregateDimensionAssessments", () => {
     expect(result.recommended_next_action).toContain(
       "causal_validity: rerun targeted verification with before and after output"
     );
+    expect(result.recovery_path).toBe("tactical_rework");
   });
 
   test("passes when weighted score meets threshold and no blockers", () => {

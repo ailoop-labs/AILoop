@@ -233,6 +233,22 @@ describe("decideEvaluationFailureRecoveryPath", () => {
     expect(path).toBe("leader");
   });
 
+  test("honors an explicit strategic recovery signal even when the root cause looks tactical", () => {
+    const path = decideEvaluationFailureRecoveryPath(
+      {
+        decision: "fail",
+        justification: "Scope reduction is required before more executor retries.",
+        root_cause: "dimension_failure:risk_externality",
+        evidence: ["Further retries in the same file would expand hot-file pressure."],
+        recommended_next_action: "Pause and split the work into a smaller structural pass.",
+        recovery_path: "strategic_governance"
+      },
+      makeToolResult("Executor completed the requested change, but the evaluator wants governance review.")
+    );
+
+    expect(path).toBe("leader");
+  });
+
   test("keeps clear implementation failures on the auto rework path", () => {
     const path = decideEvaluationFailureRecoveryPath(
       {
@@ -352,6 +368,7 @@ describe("LoopEngine auto rework", () => {
         root_cause: "insufficient_evidence:goal_alignment",
         evidence: ["No behavioral verification excerpt was attached."],
         recommended_next_action: "Attach minimal proof from the round artifacts.",
+        recovery_path: "strategic_governance",
         dimensions: [
           {
             dimension: "goal_alignment",
@@ -375,6 +392,7 @@ describe("LoopEngine auto rework", () => {
     const outcome = await mutable.runRound(1);
 
     expect(outcome.success).toBe(false);
+    expect(outcome.errorMessage).toContain("EvaluatorStrategicBlock:");
     expect(outcome.errorMessage).toContain("Insufficient evidence");
     expect(executeCall).toBe(1);
 

@@ -28,6 +28,7 @@ export type OperatorStatusReasonKind =
   | "manual_pause"
   | "budget_breach"
   | "hot_file_governance"
+  | "evaluator_strategic_block"
   | "evaluator_failure_limit"
   | "crash_recovery"
   | "rollback_incomplete"
@@ -116,6 +117,8 @@ export interface DimensionAssessment {
 
 export type HotFileGovernanceResultClass = "hot_file_growth_failure";
 
+export type EvaluationRecoveryPath = "tactical_rework" | "strategic_governance";
+
 export interface HotFileGovernanceResult {
   file_path: string;
   heuristic_labels: string[];
@@ -130,6 +133,7 @@ export interface EvaluationResult {
   root_cause?: string;
   evidence: string[];
   recommended_next_action?: string;
+  recovery_path?: EvaluationRecoveryPath;
   dimensions?: DimensionAssessment[];
   aggregate_score?: number;
   hot_file_governance?: HotFileGovernanceResult | null;

@@ -19,6 +19,14 @@ function createCodexConfig(): CodexConfig {
   };
 }
 
+function createClaudeConfig(): CodexConfig {
+  return {
+    ...createCodexConfig(),
+    bin: "claude",
+    model: "claude-sonnet-4-5"
+  };
+}
+
 function outputPathFromArgs(args: string[]): string {
   const outputIndex = args.findIndex((item) => item === "-o");
   if (outputIndex < 0 || outputIndex + 1 >= args.length) {
@@ -109,6 +117,62 @@ describe("CodexClient.runJson", () => {
       expect(capturedCwd).not.toBe(workspaceDir);
       expect(capturedAgentsGuide).toContain("Internal Runtime Agent Session");
       expect(capturedAgentsGuide).toContain("do not apply");
+    } finally {
+      await fs.rm(sandboxRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("runs Claude CLI in print mode with mapped permissions and schema instructions", async () => {
+    const sandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-claude-cli-"));
+    const workspaceDir = path.join(sandboxRoot, "workspace");
+    await fs.mkdir(workspaceDir, { recursive: true });
+
+    let capturedCmd = "";
+    let capturedArgs: string[] = [];
+
+    try {
+      const runner: ProcessRunner = async (cmd, args) => {
+        capturedCmd = cmd;
+        capturedArgs = [...args];
+        return {
+          code: 0,
+          stdout: '{"status":"success"}',
+          stderr: ""
+        };
+      };
+
+      const client = new CodexClient(createClaudeConfig(), runner);
+      const result = await client.runJson<{ status: string }>({
+        prompt: "Return JSON",
+        schema: {
+          type: "object",
+          properties: {
+            status: { type: "string" }
+          },
+          required: ["status"],
+          additionalProperties: false
+        },
+        cwd: workspaceDir,
+        sandbox: "workspace-write",
+        maxRetries: 0
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.data?.status).toBe("success");
+      expect(capturedCmd).toBe("claude");
+      expect(capturedArgs).toContain("-p");
+      expect(capturedArgs).toContain("--permission-mode");
+      expect(capturedArgs).toContain("acceptEdits");
+      expect(capturedArgs).toContain("--add-dir");
+      expect(capturedArgs).toContain(workspaceDir);
+      expect(capturedArgs).toContain("--model");
+      expect(capturedArgs).toContain("claude-sonnet-4-5");
+      expect(capturedArgs).not.toContain("--output-schema");
+      expect(capturedArgs).not.toContain("-o");
+
+      const prompt = capturedArgs[capturedArgs.indexOf("-p") + 1] ?? "";
+      expect(prompt).toContain("IMPORTANT: You MUST return a single JSON object");
+      expect(prompt).toContain("\"status\"");
     } finally {
       await fs.rm(sandboxRoot, { recursive: true, force: true });
     }

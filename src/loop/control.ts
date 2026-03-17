@@ -722,6 +722,32 @@ function formatHotFileGovernanceSummary(hotFileGovernance: HotFileGovernanceResu
   ].join(" ");
 }
 
+function formatStrategicHotFileGovernanceSummary(hotFileGovernance: HotFileGovernanceResult): string {
+  const labels =
+    hotFileGovernance.heuristic_labels.length > 0
+      ? ` Labels: ${hotFileGovernance.heuristic_labels.join(", ")}.`
+      : "";
+
+  return [
+    `Paused because the evaluator requested immediate hot-file governance review for ${hotFileGovernance.file_path}.`,
+    `Class: ${hotFileGovernance.result_class}.`,
+    `Reason: ${hotFileGovernance.reason}.${labels}`
+  ].join(" ");
+}
+
+function resolveStrategicEvaluatorNextAction(state: LoopStateData): string {
+  const dimensionAction = state.previous_evaluation_dimensions
+    ?.find((dimension) => dimension.decision !== "pass")
+    ?.recommended_next_action
+    ?.trim();
+
+  if (dimensionAction) {
+    return dimensionAction;
+  }
+
+  return "Review the evaluator findings, adjust scope or architecture, and resume only after the governance issue is addressed.";
+}
+
 function deriveOperatorReason(
   state: LoopStateData,
   options: {
@@ -762,6 +788,26 @@ function deriveOperatorReason(
       title: "Budget breach",
       summary: formatBudgetBreachSummary(state, message),
       next_action: "Review the last budget snapshot and reduce scope or raise budgets before resuming.",
+      severity: "critical"
+    };
+  }
+
+  if (/^EvaluatorStrategicBlock:/i.test(message)) {
+    if (state.previous_hot_file_governance) {
+      return {
+        kind: "hot_file_governance",
+        title: "Hot-file governance block",
+        summary: formatStrategicHotFileGovernanceSummary(state.previous_hot_file_governance),
+        next_action: state.previous_hot_file_governance.recommended_next_action,
+        severity: "critical"
+      };
+    }
+
+    return {
+      kind: "evaluator_strategic_block",
+      title: "Strategic evaluator block",
+      summary: trimReasonPrefix(message, /^EvaluatorStrategicBlock:\s*/i),
+      next_action: resolveStrategicEvaluatorNextAction(state),
       severity: "critical"
     };
   }

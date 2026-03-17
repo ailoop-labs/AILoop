@@ -1547,7 +1547,7 @@ describe("getLoopStatus", () => {
     await fs.rm(homeDir, { recursive: true, force: true });
   });
 
-  test("surfaces hot-file governance distinctly from generic evaluator failure limits", async () => {
+  test("surfaces strategic evaluator governance distinctly from generic evaluator failure limits", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-hot-file-governance-test-"));
     const paths = buildLoopPaths(homeDir);
     await fs.mkdir(homeDir, { recursive: true });
@@ -1564,7 +1564,7 @@ describe("getLoopStatus", () => {
       ...defaultLoopState(),
       state: "paused",
       round: 9,
-      last_error: "EvaluatorFailureLimit: repeated evaluator failures require operator review.",
+      last_error: "EvaluatorStrategicBlock: Further retries require immediate hot-file governance review.",
       previous_hot_file_governance: hotFileGovernance
     });
 
@@ -1575,7 +1575,7 @@ describe("getLoopStatus", () => {
       kind: "hot_file_governance",
       title: "Hot-file governance block",
       summary:
-        "Paused after repeated hot-file governance failures in src/loop/engine.ts. Class: hot_file_growth_failure. Reason: continued growth in pressured file without bounded justification. Labels: recent-touch hot-file pressure, line-count pressure.",
+        "Paused because the evaluator requested immediate hot-file governance review for src/loop/engine.ts. Class: hot_file_growth_failure. Reason: continued growth in pressured file without bounded justification. Labels: recent-touch hot-file pressure, line-count pressure.",
       next_action: "pause and split the next change into a bounded structural-maintenance pass",
       severity: "critical"
     });

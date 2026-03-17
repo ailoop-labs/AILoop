@@ -2,6 +2,7 @@ import type { AppConfig } from "../../config/env";
 import type {
   DimensionAssessment,
   EvaluationDimension,
+  EvaluationRecoveryPath,
   EvaluationResult,
   HotFileGovernanceResult,
   RoundEvaluationContext
@@ -910,6 +911,7 @@ export function aggregateDimensionAssessments(
   root_cause: string;
   evidence: string[];
   recommended_next_action: string;
+  recovery_path: EvaluationRecoveryPath;
   aggregateScore: number;
 } {
   const normalized = assessments.map((assessment) => sanitizeDimensionAssessment(assessment.dimension, assessment));
@@ -938,6 +940,7 @@ export function aggregateDimensionAssessments(
       root_cause: `hard_gate_violation:${hardGateFailure.dimension}`,
       evidence: withDetailedEvidence([...evidence, hardGateReason], [hardGateFailure]),
       recommended_next_action: followUpActions,
+      recovery_path: "tactical_rework",
       aggregateScore: score
     };
   }
@@ -950,6 +953,7 @@ export function aggregateDimensionAssessments(
       root_cause: infrastructureFailure.rootCause,
       evidence: withDetailedEvidence(evidence, infrastructureFailure.matchedAssessments),
       recommended_next_action: infrastructureFailure.recommendedNextAction,
+      recovery_path: "strategic_governance",
       aggregateScore: score
     };
   }
@@ -968,6 +972,7 @@ export function aggregateDimensionAssessments(
       recommended_next_action: followUpActions
         ? `pause and gather evidence: ${followUpActions}`
         : `pause and gather evidence: ${choosePriorityAction(unknownKeyDimensions)}`,
+      recovery_path: "strategic_governance",
       aggregateScore: score
     };
   }
@@ -985,6 +990,7 @@ export function aggregateDimensionAssessments(
       root_cause: `blocking_issue:${primaryDimension}`,
       evidence: withDetailedEvidence([...evidence, blockingIssue], keyDimensionsWithBlockingIssues),
       recommended_next_action: followUpActions || blockingIssue,
+      recovery_path: "tactical_rework",
       aggregateScore: score
     };
   }
@@ -999,6 +1005,7 @@ export function aggregateDimensionAssessments(
       root_cause: `dimension_failure:${failedDimensions[0].dimension}`,
       evidence: withDetailedEvidence(evidence, failedKeyDimensions),
       recommended_next_action: followUpActions || choosePriorityAction(failedDimensions),
+      recovery_path: "tactical_rework",
       aggregateScore: score
     };
   }
@@ -1010,6 +1017,7 @@ export function aggregateDimensionAssessments(
       root_cause: "low_aggregate_score",
       evidence,
       recommended_next_action: choosePriorityAction(adjusted),
+      recovery_path: "tactical_rework",
       aggregateScore: score
     };
   }
@@ -1020,6 +1028,7 @@ export function aggregateDimensionAssessments(
     root_cause: "none",
     evidence,
     recommended_next_action: "continue",
+    recovery_path: "tactical_rework",
     aggregateScore: score
   };
 }
@@ -1155,12 +1164,14 @@ export class LLMJudgeEvaluator implements Evaluator {
     const aggregate = aggregateDimensionAssessments(assessments, this.minPassScore);
     emitEvaluationLog(context, `Evaluator completed LLM dimension checks (decision=${aggregate.decision}).`);
     const hotFileGovernance = detectHotFileGovernance(assessments, aggregate);
+    const recoveryPath = hotFileGovernance ? "strategic_governance" : aggregate.recovery_path;
     return {
       decision: aggregate.decision,
       justification: aggregate.justification,
       root_cause: aggregate.root_cause,
       evidence: aggregate.evidence,
       recommended_next_action: aggregate.recommended_next_action,
+      recovery_path: recoveryPath,
       dimensions: assessments,
       aggregate_score: aggregate.aggregateScore,
       hot_file_governance: hotFileGovernance ?? null
