@@ -20,6 +20,7 @@ import type {
   BudgetLimits,
   CrashRecoveryStatus,
   EvaluationResult,
+  HotFileGovernanceResult,
   LoopStateData,
   OperatorStatusReason,
   RoundArtifactPresence,
@@ -331,6 +332,7 @@ export async function instructLoop(config: AppConfig, message: string): Promise<
 export interface LoopStatusView extends LoopStateData {
   pid_alive: boolean;
   pending_instruction_count: number;
+  hot_file_governance: HotFileGovernanceResult | null;
   crash_recovery: CrashRecoveryStatus | null;
   operator_reason: OperatorStatusReason | null;
   budget_health: BudgetHealthStatus | null;
@@ -690,6 +692,19 @@ function trimReasonPrefix(message: string, prefixPattern: RegExp): string {
   return message.replace(prefixPattern, "").trim() || message;
 }
 
+function formatHotFileGovernanceSummary(hotFileGovernance: HotFileGovernanceResult): string {
+  const labels =
+    hotFileGovernance.heuristic_labels.length > 0
+      ? ` Labels: ${hotFileGovernance.heuristic_labels.join(", ")}.`
+      : "";
+
+  return [
+    `Paused after repeated hot-file governance failures in ${hotFileGovernance.file_path}.`,
+    `Class: ${hotFileGovernance.result_class}.`,
+    `Reason: ${hotFileGovernance.reason}.${labels}`
+  ].join(" ");
+}
+
 function deriveOperatorReason(
   state: LoopStateData,
   options: {
@@ -735,6 +750,16 @@ function deriveOperatorReason(
   }
 
   if (/EvaluatorFailureLimit:/i.test(message)) {
+    if (state.previous_hot_file_governance) {
+      return {
+        kind: "hot_file_governance",
+        title: "Hot-file governance block",
+        summary: formatHotFileGovernanceSummary(state.previous_hot_file_governance),
+        next_action: state.previous_hot_file_governance.recommended_next_action,
+        severity: "critical"
+      };
+    }
+
     return {
       kind: "evaluator_failure_limit",
       title: "Evaluator failure threshold",
@@ -815,6 +840,7 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
       ...recovered,
       pid_alive: false,
       pending_instruction_count: pendingInstructionCount,
+      hot_file_governance: recovered.previous_hot_file_governance ?? null,
       crash_recovery: crashRecovery,
       operator_reason: deriveOperatorReason(recovered, {
         crashRecovery,
@@ -849,6 +875,7 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
       ...normalized,
       pid_alive: false,
       pending_instruction_count: pendingInstructionCount,
+      hot_file_governance: normalized.previous_hot_file_governance ?? null,
       crash_recovery: null,
       operator_reason: null,
       budget_health: null,
@@ -864,6 +891,7 @@ export async function getLoopStatus(config: AppConfig): Promise<LoopStatusView> 
     pid: pid ?? null,
     pid_alive: pidAlive,
     pending_instruction_count: pendingInstructionCount,
+    hot_file_governance: state.previous_hot_file_governance ?? null,
     crash_recovery: crashRecovery,
     operator_reason: deriveOperatorReason(state, {
       crashRecovery,
@@ -912,6 +940,14 @@ export function renderCliStatus(status: CliStatusPayload): string {
     lines.push(`Pause / risk reason: ${status.state.operator_reason.title}`);
     lines.push(`Reason summary: ${status.state.operator_reason.summary}`);
     lines.push(`Next safe action: ${status.state.operator_reason.next_action}`);
+  }
+
+  if (status.state.hot_file_governance) {
+    lines.push(
+      `Hot-file governance: ${status.state.hot_file_governance.result_class} @ ${status.state.hot_file_governance.file_path}`
+    );
+    lines.push(`Hot-file labels: ${status.state.hot_file_governance.heuristic_labels.join(", ")}`);
+    lines.push(`Hot-file next action: ${status.state.hot_file_governance.recommended_next_action}`);
   }
 
   if (status.state.budget_health) {
@@ -973,6 +1009,7 @@ export async function listRuns(config: AppConfig, limit = 20): Promise<
     summary: string;
     metrics: Record<string, unknown> | null;
     evaluation: EvaluationResult | null;
+    hot_file_governance: HotFileGovernanceResult | null;
     artifacts: RoundArtifactPresence;
   }>
 > {
@@ -1003,6 +1040,7 @@ export async function listRuns(config: AppConfig, limit = 20): Promise<
         summary: redactor.redact(summary),
         metrics,
         evaluation: evaluation ? redactJsonStrings(evaluation, redactor) : null,
+        hot_file_governance: evaluation?.hot_file_governance ? redactJsonStrings(evaluation.hot_file_governance, redactor) : null,
         artifacts
       };
     })
@@ -1016,6 +1054,7 @@ export interface RunArtifactBundle {
   log: string | null;
   state_change: string | null;
   evaluation: EvaluationResult | null;
+  hot_file_governance: HotFileGovernanceResult | null;
   artifacts: RoundArtifactPresence;
   active_requirement: RequirementArtifactSnapshot;
 }
@@ -1081,6 +1120,7 @@ export async function getRunArtifacts(config: AppConfig, timestamp: string): Pro
     log: log === null ? null : redact(log),
     state_change: stateChange === null ? null : redact(stateChange),
     evaluation: evaluation ? redactJsonStrings(evaluation, redactor) : null,
+    hot_file_governance: evaluation?.hot_file_governance ? redactJsonStrings(evaluation.hot_file_governance, redactor) : null,
     artifacts,
     active_requirement: {
       ...activeRequirement,

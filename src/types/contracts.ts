@@ -27,6 +27,7 @@ export type OperatorStatusReasonKind =
   | "manual_pause_requested"
   | "manual_pause"
   | "budget_breach"
+  | "hot_file_governance"
   | "evaluator_failure_limit"
   | "crash_recovery"
   | "rollback_incomplete"
@@ -113,6 +114,16 @@ export interface DimensionAssessment {
   recommended_next_action: string;
 }
 
+export type HotFileGovernanceResultClass = "hot_file_growth_failure";
+
+export interface HotFileGovernanceResult {
+  file_path: string;
+  heuristic_labels: string[];
+  result_class: HotFileGovernanceResultClass;
+  reason: string;
+  recommended_next_action: string;
+}
+
 export interface EvaluationResult {
   decision: "pass" | "fail";
   justification: string;
@@ -121,6 +132,7 @@ export interface EvaluationResult {
   recommended_next_action?: string;
   dimensions?: DimensionAssessment[];
   aggregate_score?: number;
+  hot_file_governance?: HotFileGovernanceResult | null;
 }
 
 export interface ToolResult {
@@ -197,6 +209,7 @@ export interface LeaderContext {
   lastError: string | null;
   previousEvaluationJustification: string | null;
   previousEvaluationDimensions?: DimensionAssessment[];
+  previousHotFileGovernance?: HotFileGovernanceResult | null;
   stateChange: string | null;
 }
 
@@ -256,6 +269,7 @@ export interface LoopStateData {
   consecutive_evaluator_failures: number;
   previous_tool_result: ToolResult | null;
   previous_evaluation_dimensions?: DimensionAssessment[];
+  previous_hot_file_governance?: HotFileGovernanceResult | null;
   current_budget: {
     limits: BudgetLimits;
     usage: BudgetUsage;

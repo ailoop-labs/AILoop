@@ -458,6 +458,7 @@ export class LoopEngine {
                   lastError: currentStateData.last_error,
                   previousEvaluationJustification: currentStateData.last_error,
                   previousEvaluationDimensions: currentStateData.previous_evaluation_dimensions,
+                  previousHotFileGovernance: currentStateData.previous_hot_file_governance,
                   stateChange: null
                 },
                 paths: this.paths,
@@ -946,6 +947,7 @@ export class LoopEngine {
         last_error: failureMessage,
         consecutive_evaluator_failures: current.consecutive_evaluator_failures,
         previous_tool_result: failureToolResult,
+        previous_hot_file_governance: null,
         current_budget: {
           limits: guardrails.limitsSnapshot(),
           usage
@@ -1003,6 +1005,7 @@ export class LoopEngine {
       consecutive_evaluator_failures: evaluation.decision === "fail" ? current.consecutive_evaluator_failures + 1 : 0,
       previous_tool_result: toolResult,
       previous_evaluation_dimensions: evaluation.dimensions,
+      previous_hot_file_governance: evaluation.hot_file_governance ?? null,
       current_budget: { limits: metrics.budget_limits, usage: metrics.budget_usage }
     }));
   }

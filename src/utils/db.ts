@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import path from "node:path";
-import type { LoopStateData } from "../types/contracts";
+import type { HotFileGovernanceResult, LoopStateData } from "../types/contracts";
 
 export interface DBConfig {
   dbPath: string;
@@ -29,12 +29,14 @@ export class DatabaseManager {
         consecutive_evaluator_failures INTEGER NOT NULL DEFAULT 0,
         previous_tool_result_json TEXT,
         previous_evaluation_dimensions_json TEXT,
+        previous_hot_file_governance_json TEXT,
         current_budget_json TEXT,
         goal_reference_json TEXT
       )
     `);
     this.ensureColumn("system_state", "pause_reason", "TEXT");
     this.ensureColumn("system_state", "goal_reference_json", "TEXT");
+    this.ensureColumn("system_state", "previous_hot_file_governance_json", "TEXT");
 
     // Historical Rounds & Metrics
     this.db.run(`
@@ -60,10 +62,12 @@ export class DatabaseManager {
         justification TEXT,
         root_cause TEXT,
         dimensions_json TEXT,
+        hot_file_governance_json TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(round_id) REFERENCES rounds(round_id)
       )
     `);
+    this.ensureColumn("evaluations", "hot_file_governance_json", "TEXT");
 
     // Leader Strategic Decisions
     this.db.run(`
@@ -130,6 +134,9 @@ export class DatabaseManager {
       consecutive_evaluator_failures: row.consecutive_evaluator_failures,
       previous_tool_result: row.previous_tool_result_json ? JSON.parse(row.previous_tool_result_json) : null,
       previous_evaluation_dimensions: row.previous_evaluation_dimensions_json ? JSON.parse(row.previous_evaluation_dimensions_json) : undefined,
+      previous_hot_file_governance: row.previous_hot_file_governance_json
+        ? JSON.parse(row.previous_hot_file_governance_json)
+        : undefined,
       current_budget: row.current_budget_json ? JSON.parse(row.current_budget_json) : null
     };
   }
@@ -139,8 +146,8 @@ export class DatabaseManager {
       INSERT INTO system_state (
         id, state, round, updated_at, pid, pause_reason, last_error, 
         consecutive_evaluator_failures, previous_tool_result_json, 
-        previous_evaluation_dimensions_json, current_budget_json, goal_reference_json
-      ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        previous_evaluation_dimensions_json, previous_hot_file_governance_json, current_budget_json, goal_reference_json
+      ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         state = excluded.state,
         round = excluded.round,
@@ -151,6 +158,7 @@ export class DatabaseManager {
         consecutive_evaluator_failures = excluded.consecutive_evaluator_failures,
         previous_tool_result_json = excluded.previous_tool_result_json,
         previous_evaluation_dimensions_json = excluded.previous_evaluation_dimensions_json,
+        previous_hot_file_governance_json = excluded.previous_hot_file_governance_json,
         current_budget_json = excluded.current_budget_json,
         goal_reference_json = excluded.goal_reference_json
     `);
@@ -165,6 +173,7 @@ export class DatabaseManager {
       state.consecutive_evaluator_failures,
       state.previous_tool_result ? JSON.stringify(state.previous_tool_result) : null,
       state.previous_evaluation_dimensions ? JSON.stringify(state.previous_evaluation_dimensions) : null,
+      state.previous_hot_file_governance ? JSON.stringify(state.previous_hot_file_governance) : null,
       state.current_budget ? JSON.stringify(state.current_budget) : null,
       state.goal_reference ? JSON.stringify(state.goal_reference) : null
     );
@@ -196,8 +205,8 @@ export class DatabaseManager {
 
   async saveEvaluation(roundId: number, evaluation: any) {
     const query = this.db.prepare(`
-      INSERT INTO evaluations (round_id, decision, justification, root_cause, dimensions_json)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO evaluations (round_id, decision, justification, root_cause, dimensions_json, hot_file_governance_json)
+      VALUES (?, ?, ?, ?, ?, ?)
     `);
 
     query.run(
@@ -205,7 +214,8 @@ export class DatabaseManager {
       evaluation.decision,
       evaluation.justification,
       evaluation.root_cause || null,
-      evaluation.dimensions ? JSON.stringify(evaluation.dimensions) : null
+      evaluation.dimensions ? JSON.stringify(evaluation.dimensions) : null,
+      evaluation.hot_file_governance ? JSON.stringify(evaluation.hot_file_governance) : null
     );
   }
 
@@ -309,6 +319,9 @@ export class DatabaseManager {
     const leaderStrategy = this.db.query(`
       SELECT * FROM leader_strategies WHERE round_id = ? ORDER BY created_at DESC LIMIT 1
     `).get(roundId) as any;
+    const evaluation = this.db.query(`
+      SELECT hot_file_governance_json FROM evaluations WHERE round_id = ? ORDER BY id DESC LIMIT 1
+    `).get(roundId) as { hot_file_governance_json: string | null } | null;
 
     const ccbSession = this.db.query(`
       SELECT * FROM ccb_sessions WHERE round_id = ? ORDER BY created_at DESC LIMIT 1
@@ -322,6 +335,9 @@ export class DatabaseManager {
     }
 
     return {
+      hot_file_governance: evaluation?.hot_file_governance_json
+        ? (JSON.parse(evaluation.hot_file_governance_json) as HotFileGovernanceResult)
+        : null,
       leader: leaderStrategy ? {
         rationale: leaderStrategy.rationale,
         action: leaderStrategy.action,

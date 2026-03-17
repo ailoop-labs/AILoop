@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../config/env";
 import type { ActionRecord, EvaluationResult, ProductManagerContext, SubTask, ToolResult } from "../types/contracts";
-import { ensureLoopHome, readLoopState, type LoopPaths, writeLoopState } from "./state";
+import { ensureLoopHome, readLoopState, setFlag, type LoopPaths, writeLoopState } from "./state";
 import { writeActiveRequirementArtifact } from "../product/requirements";
 import { WorkspaceManager } from "../environment/workspace";
 import {
@@ -183,6 +183,52 @@ describe("buildEvaluatorReworkInstructions", () => {
 });
 
 describe("LoopEngine auto rework", () => {
+  test("persists detailed governance failures from Leader execution into loop state", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-governance-error-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir,
+      AILOOP_ENABLE_LEADER: "1",
+      AILOOP_MAX_CYCLES: "1"
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const seeded = await readLoopState(paths);
+    await writeLoopState(paths, {
+      ...seeded,
+      state: "paused",
+      round: 23,
+      last_error: "Evaluator blocked the round."
+    });
+    await setFlag(paths.pauseFlagPath);
+
+    const mutable = engine as unknown as {
+      leader: {
+        execute: (input: { paths: LoopPaths }) => Promise<never>;
+      };
+      run: () => Promise<void>;
+    };
+
+    mutable.leader = {
+      execute: async () => {
+        await setFlag(paths.stopFlagPath);
+        throw new Error(
+          "Codex exited with code 1 | stderr: upstream apiToken=[REDACTED] returned 502 Bad Gateway | raw: {\"detail\":\"returned non-json strategy blob\"}"
+        );
+      }
+    };
+
+    await mutable.run();
+
+    const finalState = await readLoopState(paths);
+    expect(finalState.last_error).toBe(
+      "Governance failed: Codex exited with code 1 | stderr: upstream apiToken=[REDACTED] returned 502 Bad Gateway | raw: {\"detail\":\"returned non-json strategy blob\"}"
+    );
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
   test("invokes ProductManager and persists the active requirement artifact before normal execution when requirements are missing", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-product-manager-test-"));
     const config = loadConfig({

@@ -5,7 +5,7 @@ import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import type { AppConfig } from "./config/env";
 import { readRuntimeLoopConfig, saveRuntimeLoopConfig } from "./config/runtime";
-import { buildLoopPaths, defaultLoopState, readLoopState, writeLoopState } from "./loop/state";
+import { buildLoopPaths, defaultLoopState, readLoopState, saveEvaluation, writeLoopState } from "./loop/state";
 import { writeActiveRequirementArtifact } from "./product/requirements";
 import { DatabaseManager } from "./utils/db";
 
@@ -22,6 +22,14 @@ const originalEnv = new Map<string, string | undefined>(
 );
 const originalCwd = process.cwd();
 const tempDirs = new Set<string>();
+
+const HOT_FILE_GOVERNANCE_PAYLOAD = {
+  file_path: "src/loop/engine.ts",
+  heuristic_labels: ["recent-touch hot-file pressure", "line-count pressure"],
+  result_class: "hot_file_growth_failure" as const,
+  reason: "continued growth in pressured file without bounded justification",
+  recommended_next_action: "pause and split the next change into a bounded structural-maintenance pass"
+};
 
 afterEach(async () => {
   for (const key of ENV_KEYS) {
@@ -268,6 +276,7 @@ async function seedRoundHistory(
     justification?: string;
     rootCause?: string | null;
     dimensions?: Record<string, unknown>[];
+    hotFileGovernance?: Record<string, unknown> | null;
   }
 ) {
   const db = new Database(path.join(homeDir, "ailoop.db"), { create: true });
@@ -294,6 +303,7 @@ async function seedRoundHistory(
         justification TEXT,
         root_cause TEXT,
         dimensions_json TEXT,
+        hot_file_governance_json TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -311,8 +321,8 @@ async function seedRoundHistory(
       db
         .prepare(
           `
-          INSERT INTO evaluations (round_id, decision, justification, root_cause, dimensions_json)
-          VALUES (?, ?, ?, ?, ?)
+          INSERT INTO evaluations (round_id, decision, justification, root_cause, dimensions_json, hot_file_governance_json)
+          VALUES (?, ?, ?, ?, ?, ?)
         `
         )
         .run(
@@ -320,7 +330,8 @@ async function seedRoundHistory(
           input.decision,
           input.justification ?? "",
           input.rootCause ?? null,
-          input.dimensions ? JSON.stringify(input.dimensions) : null
+          input.dimensions ? JSON.stringify(input.dimensions) : null,
+          input.hotFileGovernance ? JSON.stringify(input.hotFileGovernance) : null
         );
     }
   } finally {
@@ -789,6 +800,117 @@ describe("console server API contract", () => {
         }
       }
     });
+  });
+
+  test("serializes hot-file governance distinctly in authenticated status responses", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "paused",
+      round: 13,
+      last_error: "EvaluatorFailureLimit: repeated evaluator failures require operator review.",
+      previous_hot_file_governance: HOT_FILE_GOVERNANCE_PAYLOAD
+    });
+
+    const response = await fetchHandler(createAuthorizedRequest("http://console.test/api/status", token));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      state: "paused",
+      round: 13,
+      hot_file_governance: HOT_FILE_GOVERNANCE_PAYLOAD,
+      operator_reason: {
+        kind: "hot_file_governance",
+        title: "Hot-file governance block",
+        next_action: "pause and split the next change into a bounded structural-maintenance pass",
+        severity: "critical"
+      }
+    });
+  });
+
+  test("keeps one persisted hot-file-governance payload aligned across authenticated status, run history, and artifact APIs", async () => {
+    const token = "test-token";
+    const { config, fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+    const timestamp = "2026-03-10T12-00-00-000Z";
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "paused",
+      round: 4,
+      last_error: "EvaluatorFailureLimit: repeated evaluator failures require operator review.",
+      previous_hot_file_governance: HOT_FILE_GOVERNANCE_PAYLOAD
+    });
+    await writeRunArtifacts(paths.runsDir, timestamp, {
+      summary: "Hot-file governed summary\n",
+      metrics: { round: 4, status: "failure" },
+      evaluation: {
+        decision: "fail",
+        justification: "Hot-file governance blocked further growth.",
+        evidence: ["bun test src/server.test.ts"],
+        hot_file_governance: HOT_FILE_GOVERNANCE_PAYLOAD
+      },
+      log: "governed log\n",
+      stateChange: "governed diff\n"
+    });
+    await saveEvaluation(paths, 4, {
+      decision: "fail",
+      justification: "Hot-file governance blocked further growth.",
+      evidence: ["bun test src/server.test.ts"],
+      hot_file_governance: HOT_FILE_GOVERNANCE_PAYLOAD
+    });
+
+    const [statusResponse, runsResponse, artifactsResponse] = await Promise.all([
+      fetchHandler(createAuthorizedRequest("http://console.test/api/status", token)),
+      fetchHandler(createAuthorizedRequest("http://console.test/api/runs?limit=1", token)),
+      fetchHandler(createAuthorizedRequest(`http://console.test/api/runs/${timestamp}/artifacts`, token))
+    ]);
+
+    expect(statusResponse.status).toBe(200);
+    expect(await statusResponse.json()).toMatchObject({
+      state: "paused",
+      round: 4,
+      hot_file_governance: HOT_FILE_GOVERNANCE_PAYLOAD,
+      operator_reason: {
+        kind: "hot_file_governance",
+        next_action: HOT_FILE_GOVERNANCE_PAYLOAD.recommended_next_action
+      }
+    });
+
+    expect(runsResponse.status).toBe(200);
+    expect(await runsResponse.json()).toEqual([
+      expect.objectContaining({
+        timestamp,
+        round: 4,
+        hot_file_governance: HOT_FILE_GOVERNANCE_PAYLOAD,
+        evaluation: expect.objectContaining({
+          hot_file_governance: HOT_FILE_GOVERNANCE_PAYLOAD
+        })
+      })
+    ]);
+
+    expect(artifactsResponse.status).toBe(200);
+    expect(await artifactsResponse.json()).toEqual(
+      expect.objectContaining({
+        timestamp,
+        hot_file_governance: HOT_FILE_GOVERNANCE_PAYLOAD,
+        evaluation: expect.objectContaining({
+          hot_file_governance: HOT_FILE_GOVERNANCE_PAYLOAD
+        }),
+        governance: {
+          hot_file_governance: HOT_FILE_GOVERNANCE_PAYLOAD,
+          leader: null,
+          ccb: null
+        }
+      })
+    );
+
+    expect(config.homeDir).toBe(paths.homeDir);
   });
 
   test("returns startup crash recovery signals when status finalizes a dead starting process", async () => {
@@ -1527,6 +1649,7 @@ describe("console server API contract", () => {
         summary: "Incomplete summary\n",
         metrics: null,
         evaluation: null,
+        hot_file_governance: null,
         artifacts: {
           kind: "partial_bundle",
           label: "Partial bundle",
@@ -1561,6 +1684,72 @@ describe("console server API contract", () => {
             }
           ]
         },
+        hot_file_governance: null,
+        artifacts: {
+          kind: "full_bundle",
+          label: "Full evidence bundle",
+          present: ["log", "summary", "metrics", "state_change", "evaluation"],
+          missing: []
+        },
+        has_governance: false
+      }
+    ]);
+  });
+
+  test("returns hot-file governance metadata in authenticated run history responses", async () => {
+    const token = "test-token";
+    const { config, fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    const hotFileGovernance = {
+      file_path: "src/loop/engine.ts",
+      heuristic_labels: ["recent-touch hot-file pressure", "line-count pressure"],
+      result_class: "hot_file_growth_failure",
+      reason: "continued growth in pressured file without bounded justification",
+      recommended_next_action: "pause and split the next change into a bounded structural-maintenance pass"
+    };
+
+    await writeRunArtifacts(paths.runsDir, "2026-03-10T12-00-00-000Z", {
+      summary: "Hot-file governed summary\n",
+      metrics: { round: 4, status: "failure" },
+      evaluation: {
+        decision: "fail",
+        justification: "Hot-file governance blocked further growth.",
+        evidence: ["bun test src/server.test.ts"],
+        hot_file_governance: hotFileGovernance
+      },
+      log: "governed log\n",
+      stateChange: "governed diff\n"
+    });
+    await seedRoundHistory(config.homeDir, {
+      round: 4,
+      timestamp: "2026-03-10T12-00-00-000Z",
+      state: "paused",
+      decision: "fail",
+      justification: "Hot-file governance blocked further growth.",
+      hotFileGovernance
+    });
+
+    const response = await fetchHandler(createAuthorizedRequest("http://console.test/api/runs?limit=1", token));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual([
+      {
+        timestamp: "2026-03-10T12-00-00-000Z",
+        round: 4,
+        summary: "Hot-file governed summary\n",
+        metrics: {
+          round: 4,
+          status: "failure"
+        },
+        evaluation: {
+          decision: "fail",
+          justification: "Hot-file governance blocked further growth.",
+          evidence: ["bun test src/server.test.ts"],
+          hot_file_governance: hotFileGovernance
+        },
+        hot_file_governance: hotFileGovernance,
         artifacts: {
           kind: "full_bundle",
           label: "Full evidence bundle",
@@ -1647,6 +1836,7 @@ describe("console server API contract", () => {
             }
           ]
         },
+        hot_file_governance: null,
         artifacts: {
           kind: "full_bundle",
           label: "Full evidence bundle",
@@ -1709,6 +1899,7 @@ describe("console server API contract", () => {
         evidence: ["bun test src/server.test.ts"],
         aggregate_score: 96
       },
+      hot_file_governance: null,
       log: "OPENAI_API_KEY=[REDACTED]\n",
       state_change: "+SESSION_SECRET=[REDACTED]\n",
       artifacts: {
@@ -1730,6 +1921,7 @@ describe("console server API contract", () => {
         updated_at: expect.any(String)
       },
       governance: {
+        hot_file_governance: null,
         leader: null,
         ccb: null
       }
@@ -1806,6 +1998,7 @@ describe("console server API contract", () => {
         evidence: ["bun test src/server.test.ts"],
         aggregate_score: 97
       },
+      hot_file_governance: null,
       log: "round log\n",
       state_change: "+state change\n",
       artifacts: {
@@ -1827,6 +2020,7 @@ describe("console server API contract", () => {
         updated_at: null
       },
       governance: {
+        hot_file_governance: null,
         leader: {
           rationale: "Retry with a narrower API patch.",
           action: "resume",
@@ -1851,6 +2045,89 @@ describe("console server API contract", () => {
             }
           ]
         }
+      }
+    });
+  });
+
+  test("returns hot-file governance in both artifact and governance payloads for selected runs", async () => {
+    const token = "test-token";
+    const { config, fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    const timestamp = "2026-03-10T11-30-00-000Z";
+    const hotFileGovernance = {
+      file_path: "src/loop/engine.ts",
+      heuristic_labels: ["recent-touch hot-file pressure", "line-count pressure"],
+      result_class: "hot_file_growth_failure",
+      reason: "continued growth in pressured file without bounded justification",
+      recommended_next_action: "pause and split the next change into a bounded structural-maintenance pass"
+    };
+
+    await writeRunArtifacts(paths.runsDir, timestamp, {
+      summary: "Hot-file artifact summary\n",
+      metrics: { round: 5, status: "failure" },
+      evaluation: {
+        decision: "fail",
+        justification: "Hot-file governance blocked the round.",
+        evidence: ["bun test src/server.test.ts"],
+        hot_file_governance: hotFileGovernance
+      },
+      log: "artifact log\n",
+      stateChange: "artifact diff\n"
+    });
+    await seedRoundHistory(config.homeDir, {
+      round: 5,
+      timestamp,
+      state: "paused",
+      decision: "fail",
+      justification: "Hot-file governance blocked the round.",
+      hotFileGovernance
+    });
+
+    const response = await fetchHandler(
+      createAuthorizedRequest(`http://console.test/api/runs/${timestamp}/artifacts`, token)
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      timestamp,
+      summary: "Hot-file artifact summary\n",
+      metrics: {
+        round: 5,
+        status: "failure"
+      },
+      evaluation: {
+        decision: "fail",
+        justification: "Hot-file governance blocked the round.",
+        evidence: ["bun test src/server.test.ts"],
+        hot_file_governance: hotFileGovernance
+      },
+      hot_file_governance: hotFileGovernance,
+      log: "artifact log\n",
+      state_change: "artifact diff\n",
+      artifacts: {
+        kind: "full_bundle",
+        label: "Full evidence bundle",
+        present: ["log", "summary", "metrics", "state_change", "evaluation"],
+        missing: []
+      },
+      active_requirement: {
+        path: paths.activeRequirementPath,
+        exists: false,
+        artifact_status: "missing",
+        lifecycle_status: "active",
+        title: null,
+        summary: null,
+        acceptance_criteria_total: 0,
+        acceptance_criteria_completed: 0,
+        markdown: null,
+        updated_at: null
+      },
+      governance: {
+        hot_file_governance: hotFileGovernance,
+        leader: null,
+        ccb: null
       }
     });
   });
@@ -1892,6 +2169,7 @@ describe("console server API contract", () => {
         justification: "Artifacts verified for apiToken=[REDACTED].",
         evidence: ["sessionSecret=[REDACTED]"]
       },
+      hot_file_governance: null,
       log: "sessionSecret=[REDACTED]\n",
       state_change: "+apiToken=[REDACTED]\n",
       artifacts: {
@@ -1913,6 +2191,7 @@ describe("console server API contract", () => {
         updated_at: null
       },
       governance: {
+        hot_file_governance: null,
         leader: null,
         ccb: null
       }
@@ -1946,6 +2225,7 @@ describe("console server API contract", () => {
         status: "running"
       },
       evaluation: null,
+      hot_file_governance: null,
       log: "partial log\n",
       state_change: null,
       artifacts: {
@@ -1967,6 +2247,7 @@ describe("console server API contract", () => {
         updated_at: null
       },
       governance: {
+        hot_file_governance: null,
         leader: null,
         ccb: null
       }
@@ -1995,6 +2276,7 @@ describe("console server API contract", () => {
       summary: null,
       metrics: null,
       evaluation: null,
+      hot_file_governance: null,
       log: "log only\n",
       state_change: null,
       artifacts: {

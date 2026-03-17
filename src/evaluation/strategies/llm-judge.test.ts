@@ -443,6 +443,76 @@ describe("LLMJudgeEvaluator", () => {
       await fs.rm(workspaceRoot, { recursive: true, force: true });
     }
   });
+
+  test("emits structured hot-file governance metadata when pressured-file growth is the blocking failure", async () => {
+    const mockCodex = {
+      async runJson<T>() {
+        return {
+          ok: true,
+          data: {
+            dimension: "constraint_compliance",
+            decision: "fail",
+            score: 20,
+            confidence: 0.92,
+            justification:
+              "recent-touch hot-file pressure in `src/loop/engine.ts`: continued growth in pressured file without bounded justification",
+            evidence: [
+              "Heuristic labels: recent-touch hot-file pressure, line-count pressure",
+              "The round kept adding lines to `src/loop/engine.ts` instead of issuing a bounded structural-maintenance round."
+            ],
+            blocking_issues: [
+              "Structural-governance blockage: continued growth in pressured file without bounded justification"
+            ],
+            recommended_next_action: "pause and split the next change into a bounded structural-maintenance pass"
+          } as T,
+          rawMessage: "{}",
+          stdout: "",
+          stderr: ""
+        };
+      }
+    };
+
+    const evaluator = new LLMJudgeEvaluator(makeLlmConfig(["constraint_compliance"]), mockCodex as never);
+    const result = await evaluator.evaluate(makeRoundContext());
+
+    expect(result.decision).toBe("fail");
+    expect(result.hot_file_governance).toEqual({
+      file_path: "src/loop/engine.ts",
+      heuristic_labels: ["recent-touch hot-file pressure", "line-count pressure"],
+      result_class: "hot_file_growth_failure",
+      reason: "recent-touch hot-file pressure in `src/loop/engine.ts`: continued growth in pressured file without bounded justification",
+      recommended_next_action: "pause and split the next change into a bounded structural-maintenance pass"
+    });
+  });
+
+  test("does not mislabel ordinary evaluator failures as hot-file governance", async () => {
+    const mockCodex = {
+      async runJson<T>() {
+        return {
+          ok: true,
+          data: {
+            dimension: "constraint_compliance",
+            decision: "fail",
+            score: 35,
+            confidence: 0.87,
+            justification: "Targeted verification evidence is missing for the claimed API behavior change.",
+            evidence: ["No test command or runtime check was recorded for the changed endpoint."],
+            blocking_issues: ["Add a focused verification command before claiming the fix worked."],
+            recommended_next_action: "run the narrowest missing verification and attach the result"
+          } as T,
+          rawMessage: "{}",
+          stdout: "",
+          stderr: ""
+        };
+      }
+    };
+
+    const evaluator = new LLMJudgeEvaluator(makeLlmConfig(["constraint_compliance"]), mockCodex as never);
+    const result = await evaluator.evaluate(makeRoundContext());
+
+    expect(result.decision).toBe("fail");
+    expect(result.hot_file_governance).toBeNull();
+  });
 });
 
 describe("buildDimensionPrompt", () => {

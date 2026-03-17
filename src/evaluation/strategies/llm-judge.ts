@@ -3,6 +3,7 @@ import type {
   DimensionAssessment,
   EvaluationDimension,
   EvaluationResult,
+  HotFileGovernanceResult,
   RoundEvaluationContext
 } from "../../types/contracts";
 import { CodexClient, type JsonSchema } from "../../agent/codex-client";
@@ -110,8 +111,47 @@ const EVIDENCE_PRIORITY_LINES: string[] = [
   "structural scope signal evidence (file count/path spread, out-of-scope file touches)"
 ];
 
+const HOT_FILE_RESULT_CLASS = "hot_file_growth_failure" as const;
+
+const HOT_FILE_CONTEXT_PATTERNS: RegExp[] = [
+  /hot[- ]file/i,
+  /pressured (?:workspace )?file/i,
+  /pressured-file/i,
+  /recent-touch hot-file pressure/i,
+  /line-count pressure/i,
+  /recent-touch pressure/i
+];
+
+const HOT_FILE_FAILURE_PATTERNS: RegExp[] = [
+  /continued growth/i,
+  /unnecessary growth/i,
+  /growth failure/i,
+  /without bounded justification/i,
+  /without bounded structural(?:-|\s)maintenance/i,
+  /structural(?:-|\s)governance blockage/i,
+  /structural(?:-|\s)maintenance round/i
+];
+
+const HOT_FILE_LABEL_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
+  { label: "warning", pattern: /\bwarning\b/i },
+  { label: "refactor candidate", pattern: /refactor candidate/i },
+  { label: "recent-touch hot-file pressure", pattern: /recent-touch hot-file pressure/i },
+  { label: "line-count pressure", pattern: /line-count pressure/i },
+  { label: "recent-touch pressure", pattern: /recent-touch pressure/i }
+];
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function normalizeHotFileValue(value: string): string {
+  return redactSecretLikeText(
+    value
+      .split(/\r?\n/)
+      .map((line) => line.replace(/[^\S\r\n]+/g, " ").trim())
+      .filter(Boolean)
+      .join("\n")
+  );
 }
 
 function sanitizeDimensionAssessment(
@@ -206,6 +246,117 @@ function choosePriorityAction(assessments: DimensionAssessment[]): string {
   }
 
   return "continue";
+}
+
+function extractFilePath(text: string): string | null {
+  const backtickMatch = text.match(/`([^`\n]+)`/);
+  if (backtickMatch?.[1]) {
+    const candidate = backtickMatch[1].trim();
+    if (candidate && !candidate.startsWith(".ailoop/runs/")) {
+      return candidate;
+    }
+  }
+
+  const inlineMatch = text.match(/\b(?:\.\/)?(?:src|web\/src|scripts|docs|tests)\/[A-Za-z0-9._/-]+\b/);
+  if (inlineMatch?.[0] && !inlineMatch[0].startsWith(".ailoop/runs/")) {
+    return inlineMatch[0];
+  }
+
+  return null;
+}
+
+function extractHotFileLabels(text: string): string[] {
+  const labels = new Set<string>();
+
+  const explicitMatches = [
+    ...text.matchAll(/(?:heuristic|pressure) labels?:\s*([^\n.]+)/gi),
+    ...text.matchAll(/labels?:\s*\[([^\]]+)\]/gi)
+  ];
+  for (const match of explicitMatches) {
+    const raw = match[1] ?? "";
+    for (const label of raw.split(/[|,]/)) {
+      const normalized = normalizeHotFileValue(label).replace(/^and\s+/i, "");
+      if (normalized) {
+        labels.add(normalized);
+      }
+    }
+  }
+
+  for (const candidate of HOT_FILE_LABEL_PATTERNS) {
+    if (candidate.pattern.test(text)) {
+      labels.add(candidate.label);
+    }
+  }
+
+  return Array.from(labels);
+}
+
+function looksLikeHotFileGovernanceText(text: string): boolean {
+  return hasPattern(HOT_FILE_CONTEXT_PATTERNS, text) && hasPattern(HOT_FILE_FAILURE_PATTERNS, text);
+}
+
+function buildHotFileReason(text: string): string {
+  const matchedLine = text
+    .split(/\n+/)
+    .map((line) => normalizeHotFileValue(line))
+    .find((line) => looksLikeHotFileGovernanceText(line));
+
+  if (matchedLine) {
+    return matchedLine;
+  }
+
+  return "continued growth in pressured file without bounded justification";
+}
+
+function detectHotFileGovernance(
+  assessments: DimensionAssessment[],
+  aggregate: Pick<EvaluationResult, "decision" | "justification" | "recommended_next_action" | "root_cause">
+): HotFileGovernanceResult | undefined {
+  if (aggregate.decision !== "fail") {
+    return undefined;
+  }
+
+  const sources = assessments.flatMap((assessment) => {
+    const parts = [
+      assessment.justification,
+      ...assessment.evidence,
+      ...assessment.blocking_issues,
+      assessment.recommended_next_action
+    ].filter(Boolean);
+    const text = normalizeHotFileValue(parts.join("\n"));
+    return text ? [{ assessment, text }] : [];
+  });
+
+  const aggregateText = normalizeHotFileValue(
+    [aggregate.root_cause, aggregate.justification, aggregate.recommended_next_action].filter(Boolean).join("\n")
+  );
+  const matchingSource = sources.find((source) => looksLikeHotFileGovernanceText(source.text));
+
+  if (!matchingSource && !looksLikeHotFileGovernanceText(aggregateText)) {
+    return undefined;
+  }
+
+  const candidateText = [matchingSource?.text, aggregateText].filter(Boolean).join("\n");
+  const filePath = extractFilePath(candidateText);
+  if (!filePath) {
+    return undefined;
+  }
+
+  const heuristicLabels = extractHotFileLabels(candidateText);
+  if (heuristicLabels.length === 0) {
+    return undefined;
+  }
+
+  return {
+    file_path: filePath,
+    heuristic_labels: heuristicLabels,
+    result_class: HOT_FILE_RESULT_CLASS,
+    reason: buildHotFileReason(candidateText),
+    recommended_next_action:
+      matchingSource?.assessment.recommended_next_action?.trim() ||
+      aggregate.recommended_next_action?.trim() ||
+      "pause and reduce scope in the pressured file before retrying"
+  };
 }
 
 function weightedScore(assessments: DimensionAssessment[]): number {
@@ -919,6 +1070,7 @@ export class LLMJudgeEvaluator implements Evaluator {
 
     const aggregate = aggregateDimensionAssessments(assessments, this.minPassScore);
     emitEvaluationLog(context, `Evaluator completed LLM dimension checks (decision=${aggregate.decision}).`);
+    const hotFileGovernance = detectHotFileGovernance(assessments, aggregate);
     return {
       decision: aggregate.decision,
       justification: aggregate.justification,
@@ -926,7 +1078,8 @@ export class LLMJudgeEvaluator implements Evaluator {
       evidence: aggregate.evidence,
       recommended_next_action: aggregate.recommended_next_action,
       dimensions: assessments,
-      aggregate_score: aggregate.aggregateScore
+      aggregate_score: aggregate.aggregateScore,
+      hot_file_governance: hotFileGovernance ?? null
     };
   }
 }

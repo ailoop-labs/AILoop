@@ -182,6 +182,7 @@ function normalizeLoopState(raw: Partial<LoopStateData> | null | undefined): Loo
       raw.state === "paused" ? raw.pause_reason ?? derivePauseReasonLabel(raw.last_error) : null,
     previous_tool_result: raw.previous_tool_result ?? null,
     previous_evaluation_dimensions: raw.previous_evaluation_dimensions,
+    previous_hot_file_governance: raw.previous_hot_file_governance ?? undefined,
     current_budget: raw.current_budget ?? null
   };
 }

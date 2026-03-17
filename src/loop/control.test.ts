@@ -4,7 +4,16 @@ import path from "node:path";
 import * as childProcess from "node:child_process";
 import { Database } from "bun:sqlite";
 import { describe, expect, mock, spyOn, test } from "bun:test";
-import { appendInstruction, buildLoopPaths, defaultLoopState, hasFlag, readLoopState, setFlag, writeLoopState } from "./state";
+import {
+  appendInstruction,
+  buildLoopPaths,
+  defaultLoopState,
+  hasFlag,
+  readLoopState,
+  saveEvaluation,
+  setFlag,
+  writeLoopState
+} from "./state";
 import {
   ensureProjectRoles,
   getCliStatus,
@@ -61,6 +70,15 @@ function makeTestConfig(homeDir: string): AppConfig {
     }
   };
 }
+
+// Compact contract payload reused to verify status, run-history, and artifact views stay aligned.
+const HOT_FILE_GOVERNANCE_PAYLOAD = {
+  file_path: "src/loop/engine.ts",
+  heuristic_labels: ["recent-touch hot-file pressure", "line-count pressure"],
+  result_class: "hot_file_growth_failure" as const,
+  reason: "continued growth in pressured file without bounded justification",
+  recommended_next_action: "pause and split the next change into a bounded structural-maintenance pass"
+};
 
 async function seedProjectRoles(paths: ReturnType<typeof buildLoopPaths>) {
   await Promise.all([
@@ -190,6 +208,7 @@ async function seedRoundHistory(
     justification?: string;
     rootCause?: string | null;
     dimensions?: Record<string, unknown>[];
+    hotFileGovernance?: Record<string, unknown> | null;
   }
 ) {
   const db = new Database(path.join(homeDir, "ailoop.db"), { create: true });
@@ -216,6 +235,7 @@ async function seedRoundHistory(
         justification TEXT,
         root_cause TEXT,
         dimensions_json TEXT,
+        hot_file_governance_json TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -233,8 +253,8 @@ async function seedRoundHistory(
       db
         .prepare(
           `
-          INSERT INTO evaluations (round_id, decision, justification, root_cause, dimensions_json)
-          VALUES (?, ?, ?, ?, ?)
+          INSERT INTO evaluations (round_id, decision, justification, root_cause, dimensions_json, hot_file_governance_json)
+          VALUES (?, ?, ?, ?, ?, ?)
         `
         )
         .run(
@@ -242,7 +262,8 @@ async function seedRoundHistory(
           input.decision,
           input.justification ?? "",
           input.rootCause ?? null,
-          input.dimensions ? JSON.stringify(input.dimensions) : null
+          input.dimensions ? JSON.stringify(input.dimensions) : null,
+          input.hotFileGovernance ? JSON.stringify(input.hotFileGovernance) : null
         );
     }
   } finally {
@@ -431,6 +452,7 @@ describe("listRuns", () => {
           status: "success"
         },
         evaluation: null,
+        hot_file_governance: null,
         artifacts: {
           kind: "partial_bundle",
           label: "Partial bundle",
@@ -520,6 +542,7 @@ describe("listRuns", () => {
             }
           ]
         },
+        hot_file_governance: null,
         artifacts: {
           kind: "full_bundle",
           label: "Full evidence bundle",
@@ -591,6 +614,7 @@ describe("listRuns", () => {
             }
           ]
         },
+        hot_file_governance: null,
         artifacts: {
           kind: "full_bundle",
           label: "Full evidence bundle",
@@ -623,6 +647,7 @@ describe("listRuns", () => {
           summary: "",
           metrics: null,
           evaluation: null,
+          hot_file_governance: null,
           artifacts: {
             kind: "log_only",
             label: "Log only",
@@ -670,6 +695,7 @@ describe("getRunArtifacts", () => {
         justification: "Artifacts verified.",
         evidence: ["bun test src/loop/control.test.ts"]
       },
+      hot_file_governance: null,
       log: "OPENAI_API_KEY=[REDACTED]\n",
       state_change: "+ SESSION_SECRET=[REDACTED]\n",
       artifacts: {
@@ -746,6 +772,7 @@ describe("getRunArtifacts", () => {
         justification: "Artifacts verified.",
         evidence: ["bun test src/loop/control.test.ts"]
       },
+      hot_file_governance: null,
       log: "round log\n",
       state_change: "state diff\n",
       artifacts: {
@@ -804,6 +831,7 @@ describe("getRunArtifacts", () => {
           justification: "Artifacts verified for apiToken=[REDACTED].",
           evidence: ["sessionSecret=[REDACTED]"]
         },
+        hot_file_governance: null,
         log: "sessionSecret=[REDACTED]\n",
         state_change: "+ apiToken=[REDACTED]\n",
         artifacts: {
@@ -851,6 +879,7 @@ describe("getRunArtifacts", () => {
         status: "success"
       },
       evaluation: null,
+      hot_file_governance: null,
       log: "log\n",
       state_change: "diff\n",
       artifacts: {
@@ -891,6 +920,7 @@ describe("getRunArtifacts", () => {
       summary: null,
       metrics: null,
       evaluation: null,
+      hot_file_governance: null,
       log: "log only\n",
       state_change: null,
       artifacts: {
@@ -913,6 +943,70 @@ describe("getRunArtifacts", () => {
       }
     });
     expect(await getRunArtifacts(makeTestConfig(homeDir), "../outside")).toBeNull();
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+});
+
+describe("hot-file governance contract", () => {
+  test("keeps one persisted payload aligned across status, run history, and artifact views", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-hot-file-contract-test-"));
+    const paths = buildLoopPaths(homeDir);
+    const timestamp = "2026-03-10T12-00-00-000Z";
+    await fs.mkdir(homeDir, { recursive: true });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "paused",
+      round: 4,
+      last_error: "EvaluatorFailureLimit: repeated evaluator failures require operator review.",
+      previous_hot_file_governance: HOT_FILE_GOVERNANCE_PAYLOAD
+    });
+
+    await writeRunArtifacts(paths.runsDir, timestamp, {
+      summary: "Hot-file governed summary\n",
+      metrics: { round: 4, status: "failure" },
+      evaluation: {
+        decision: "fail",
+        justification: "Hot-file governance blocked further growth.",
+        evidence: ["bun test src/loop/control.test.ts"],
+        hot_file_governance: HOT_FILE_GOVERNANCE_PAYLOAD
+      },
+      log: "governed log\n",
+      stateChange: "governed diff\n"
+    });
+    await saveEvaluation(paths, 4, {
+      decision: "fail",
+      justification: "Hot-file governance blocked further growth.",
+      evidence: ["bun test src/loop/control.test.ts"],
+      hot_file_governance: HOT_FILE_GOVERNANCE_PAYLOAD
+    });
+
+    const [status, runs, artifacts] = await Promise.all([
+      getLoopStatus(makeTestConfig(homeDir)),
+      listRuns(makeTestConfig(homeDir)),
+      getRunArtifacts(makeTestConfig(homeDir), timestamp)
+    ]);
+
+    expect(status.hot_file_governance).toEqual(HOT_FILE_GOVERNANCE_PAYLOAD);
+    expect(runs).toEqual([
+      expect.objectContaining({
+        timestamp,
+        hot_file_governance: HOT_FILE_GOVERNANCE_PAYLOAD,
+        evaluation: expect.objectContaining({
+          hot_file_governance: HOT_FILE_GOVERNANCE_PAYLOAD
+        })
+      })
+    ]);
+    expect(artifacts).toEqual(
+      expect.objectContaining({
+        timestamp,
+        hot_file_governance: HOT_FILE_GOVERNANCE_PAYLOAD,
+        evaluation: expect.objectContaining({
+          hot_file_governance: HOT_FILE_GOVERNANCE_PAYLOAD
+        })
+      })
+    );
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
@@ -1022,7 +1116,7 @@ describe("resumeLoop", () => {
       expect(state.pid).not.toBeNull();
       restartedPid = state.pid;
 
-      const runningState = await waitForRunningState(homeDir);
+      const runningState = await waitForRunningState(homeDir, 5_000);
       expect(runningState.pid).toBe(restartedPid);
       expect(runningState.last_error).toBeNull();
     } finally {
@@ -1393,6 +1487,42 @@ describe("getLoopStatus", () => {
           ratio: 0.25
         }
       ]
+    });
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("surfaces hot-file governance distinctly from generic evaluator failure limits", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-status-hot-file-governance-test-"));
+    const paths = buildLoopPaths(homeDir);
+    await fs.mkdir(homeDir, { recursive: true });
+
+    const hotFileGovernance = {
+      file_path: "src/loop/engine.ts",
+      heuristic_labels: ["recent-touch hot-file pressure", "line-count pressure"],
+      result_class: "hot_file_growth_failure" as const,
+      reason: "continued growth in pressured file without bounded justification",
+      recommended_next_action: "pause and split the next change into a bounded structural-maintenance pass"
+    };
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "paused",
+      round: 9,
+      last_error: "EvaluatorFailureLimit: repeated evaluator failures require operator review.",
+      previous_hot_file_governance: hotFileGovernance
+    });
+
+    const status = await getLoopStatus(makeTestConfig(homeDir));
+
+    expect(status.hot_file_governance).toEqual(hotFileGovernance);
+    expect(status.operator_reason).toEqual({
+      kind: "hot_file_governance",
+      title: "Hot-file governance block",
+      summary:
+        "Paused after repeated hot-file governance failures in src/loop/engine.ts. Class: hot_file_growth_failure. Reason: continued growth in pressured file without bounded justification. Labels: recent-touch hot-file pressure, line-count pressure.",
+      next_action: "pause and split the next change into a bounded structural-maintenance pass",
+      severity: "critical"
     });
 
     await fs.rm(homeDir, { recursive: true, force: true });
@@ -1859,6 +1989,71 @@ describe("getCliStatus", () => {
     expect(output).toContain("Latest artifact timestamp: 2026-03-15T02:16:11.000Z");
     expect(output).toContain("Last error: BudgetBreach: action budget exceeded");
     expect(output).toContain("Current budget usage: $0.3, 12000ms, 11 actions");
+  });
+
+  test("renders hot-file governance details before lower-level pause context", () => {
+    const hotFileGovernance = {
+      file_path: "src/loop/engine.ts",
+      heuristic_labels: ["recent-touch hot-file pressure", "line-count pressure"],
+      result_class: "hot_file_growth_failure" as const,
+      reason: "continued growth in pressured file without bounded justification",
+      recommended_next_action: "pause and split the next change into a bounded structural-maintenance pass"
+    };
+
+    const output = renderCliStatus({
+      budget: {
+        usdPerRound: 1,
+        timeMinutes: 1,
+        actions: 10
+      },
+      state: {
+        ...defaultLoopState(),
+        state: "paused",
+        round: 6,
+        pid_alive: false,
+        pending_instruction_count: 1,
+        operator_reason: {
+          kind: "hot_file_governance",
+          title: "Hot-file governance block",
+          summary:
+            "Paused after repeated hot-file governance failures in src/loop/engine.ts. Class: hot_file_growth_failure. Reason: continued growth in pressured file without bounded justification. Labels: recent-touch hot-file pressure, line-count pressure.",
+          next_action: "pause and split the next change into a bounded structural-maintenance pass",
+          severity: "critical"
+        },
+        hot_file_governance: hotFileGovernance,
+        budget_health: null,
+        last_error: "EvaluatorFailureLimit: repeated evaluator failures require operator review.",
+        crash_recovery: null,
+        artifact_completeness: {
+          kind: "full_bundle",
+          label: "Full evidence bundle",
+          latest_round_timestamp: "2026-03-16T14-55-28-494Z",
+          latest_artifact_at: "2026-03-16T14:55:29.000Z",
+          present: ["log", "summary", "metrics", "state_change", "evaluation"],
+          missing: []
+        },
+        current_budget: null,
+        active_requirement: {
+          path: "",
+          exists: false,
+          artifact_status: "missing",
+          lifecycle_status: "active",
+          title: null,
+          summary: null,
+          acceptance_criteria_total: 0,
+          acceptance_criteria_completed: 0,
+          markdown: null,
+          updated_at: null
+        }
+      }
+    });
+
+    expect(output).toContain("Pause / risk reason: Hot-file governance block");
+    expect(output).toContain("Hot-file governance: hot_file_growth_failure @ src/loop/engine.ts");
+    expect(output).toContain("Hot-file labels: recent-touch hot-file pressure, line-count pressure");
+    expect(output).toContain(
+      "Hot-file next action: pause and split the next change into a bounded structural-maintenance pass"
+    );
   });
 });
 

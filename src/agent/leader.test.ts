@@ -22,6 +22,13 @@ const sampleLeaderContext: LeaderContext = {
       recommended_next_action: "Patch LeaderAgent and add focused coverage."
     }
   ],
+  previousHotFileGovernance: {
+    file_path: "src/agent/leader.ts",
+    heuristic_labels: ["recent-touch hot-file pressure", "line-count pressure"],
+    result_class: "hot_file_growth_failure",
+    reason: "continued growth in pressured file without bounded justification",
+    recommended_next_action: "Split the next change into a narrower structural-maintenance pass."
+  },
   stateChange: null
 };
 
@@ -122,6 +129,10 @@ describe("LeaderAgent", () => {
       expect(capturedPrompt).toContain("Custom leader guidance.");
       expect(capturedPrompt).toContain(sampleLeaderContext.goal);
       expect(capturedPrompt).toContain(sampleLeaderContext.lastError ?? "");
+      expect(capturedPrompt).toContain("Pause Diagnostic: Hot-file governance block in src/agent/leader.ts");
+      expect(capturedPrompt).toContain("Hot-File Governance Signal");
+      expect(capturedPrompt).toContain("recent-touch hot-file pressure, line-count pressure");
+      expect(capturedPrompt).toContain("Split the next change into a narrower structural-maintenance pass.");
       expect(capturedIsolationEnabled).toBe(true);
       expect(capturedIsolationGuide).toContain("Internal Runtime Agent Session");
       expect(capturedIsolationGuide).toContain("You are the internal Leader agent inside the AILoop product.");
@@ -130,6 +141,59 @@ describe("LeaderAgent", () => {
         "Keep reasoning anchored to the supplied failure, evaluation, and governance context unless the runtime prompt explicitly broadens scope."
       );
       expect(capturedCwd).toBe(realWorkspaceRoot);
+    } finally {
+      process.chdir(originalCwd);
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("surfaces redacted Codex stderr and raw output when strategy generation fails", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-leader-agent-error-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(path.join(homeDir, "LEADER_ROLE.md"), "# Leader Role\n\nCustom leader guidance.\n", "utf8");
+
+    const logs: string[] = [];
+    const mockCodex = {
+      async runJson() {
+        return {
+          ok: false,
+          data: undefined,
+          rawMessage: '{"detail":"returned non-json strategy blob"}',
+          stdout: "",
+          stderr: "upstream apiToken=supersecret123 returned 502 Bad Gateway",
+          error: "Codex exited with code 1"
+        };
+      }
+    };
+
+    const originalCwd = process.cwd();
+    process.chdir(workspaceRoot);
+
+    try {
+      const agent = new LeaderAgent(makeConfig(homeDir));
+      (agent as { codex: typeof mockCodex }).codex = mockCodex;
+
+      await expect(
+        agent.execute({
+          context: sampleLeaderContext,
+          paths: { homeDir },
+          onLog: async (message) => {
+            logs.push(message);
+          }
+        })
+      ).rejects.toThrow(
+        "Codex exited with code 1 | stderr: upstream apiToken=[REDACTED] returned 502 Bad Gateway | raw: {\"detail\":\"returned non-json strategy blob\"}"
+      );
+
+      expect(logs).toContain("Leader analyzing failures and formulating strategy...");
+      expect(
+        logs.some((message) =>
+          message.includes(
+            "Leader Error: Codex exited with code 1 | stderr: upstream apiToken=[REDACTED] returned 502 Bad Gateway | raw: {\"detail\":\"returned non-json strategy blob\"}"
+          )
+        )
+      ).toBe(true);
     } finally {
       process.chdir(originalCwd);
       await fs.rm(workspaceRoot, { recursive: true, force: true });

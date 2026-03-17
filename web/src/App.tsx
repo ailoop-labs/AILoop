@@ -13,6 +13,7 @@ import {
   type RunHistoryItem,
   type GovernanceDetails,
   type ExpertOpinion,
+  type HotFileGovernanceResult,
   type RoundReport
 } from "./run-history";
 import { paginateRunHistory, RUN_HISTORY_PAGE_SIZE } from "./run-history-pagination";
@@ -28,6 +29,7 @@ interface LoopStatus {
   pid_alive: boolean;
   pending_instruction_count: number;
   pause_reason: string | null;
+  hot_file_governance: HotFileGovernanceResult | null;
   crash_recovery: CrashRecoveryStatus | null;
   operator_reason: OperatorStatusReason | null;
   artifact_completeness: ArtifactCompletenessStatus;
@@ -70,6 +72,7 @@ interface OperatorStatusReason {
     | "manual_pause_requested"
     | "manual_pause"
     | "budget_breach"
+    | "hot_file_governance"
     | "evaluator_failure_limit"
     | "crash_recovery"
     | "rollback_incomplete"
@@ -426,6 +429,7 @@ interface RunArtifactBundle {
   metrics: Record<string, unknown> | null;
   log: string | null;
   state_change: string | null;
+  hot_file_governance: HotFileGovernanceResult | null;
   artifacts: RunArtifactPresence;
   active_requirement: RequirementArtifactView;
   evaluation: {
@@ -639,6 +643,57 @@ function resolveRunArtifactPresence(run: Pick<RunHistoryItem, "artifacts">): Run
 
 function formatArtifactPresenceList(items: RunArtifactPresence["present"]): string {
   return items.length > 0 ? items.map(formatArtifactKindLabel).join(", ") : "none";
+}
+
+function formatHotFileGovernanceLabels(signal: HotFileGovernanceResult): string {
+  return signal.heuristic_labels.length > 0 ? signal.heuristic_labels.join(", ") : "none";
+}
+
+export function HotFileGovernanceBadge({ signal }: { signal: HotFileGovernanceResult }) {
+  return (
+    <span className="rounded-full border border-warning/30 bg-warning/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-warning">
+      {signal.result_class.replace(/_/g, " ")}
+    </span>
+  );
+}
+
+export function HotFileGovernancePanel({
+  signal,
+  compact = false
+}: {
+  signal: HotFileGovernanceResult | null;
+  compact?: boolean;
+}) {
+  if (!signal) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-2xl border border-warning/30 bg-warning/10 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.04)]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-warning">Hot-File Governance</p>
+          <h2 className="mt-2 text-xl font-semibold text-mist">{signal.file_path}</h2>
+          <p className="mt-2 text-sm leading-6 text-mist/85">{signal.reason}</p>
+        </div>
+        <HotFileGovernanceBadge signal={signal} />
+      </div>
+      <div className={`mt-4 grid gap-3 ${compact ? "md:grid-cols-2" : "md:grid-cols-3"}`}>
+        <div className="rounded-xl border border-white/10 bg-ink/70 p-3">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-mist/60">Governance Class</p>
+          <p className="mt-2 text-sm font-semibold text-mist">{signal.result_class}</p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-ink/70 p-3">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-mist/60">Heuristic Labels</p>
+          <p className="mt-2 text-sm font-semibold text-mist">{formatHotFileGovernanceLabels(signal)}</p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-ink/70 p-3">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-mist/60">Recommended Next Action</p>
+          <p className="mt-2 text-sm font-semibold text-mist">{signal.recommended_next_action}</p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function ArtifactCompletenessPanel({
@@ -1167,15 +1222,25 @@ export default function App() {
       setArtifactsBusy(true);
       setSelectedGovernance(null);
       const bundle = await api<RunArtifactBundle & { governance: GovernanceDetails }>(`/api/runs/${run.timestamp}/artifacts`, undefined, authToken);
+      const hotFileGovernance =
+        bundle.governance?.hot_file_governance ??
+        bundle.hot_file_governance ??
+        run.hot_file_governance ??
+        run.evaluation?.hot_file_governance ??
+        null;
       setSelectedArtifacts({
         ...bundle,
         timestamp: run.timestamp,
         summary: bundle.summary ?? run.summary,
         metrics: bundle.metrics ?? run.metrics,
         evaluation: bundle.evaluation ?? run.evaluation,
+        hot_file_governance: hotFileGovernance,
         artifacts: bundle.artifacts ?? resolveRunArtifactPresence(run)
       });
-      setSelectedGovernance(bundle.governance);
+      setSelectedGovernance({
+        ...bundle.governance,
+        hot_file_governance: hotFileGovernance
+      });
       setError(null);
     } catch (requestError) {
       handleRequestError(requestError, "无法获取运行详情：请重试或重新登录。");
@@ -1278,6 +1343,9 @@ export default function App() {
         <div className="mt-4 grid gap-4 xl:grid-cols-2">
           <OperatorReasonPanel operatorReason={status?.operator_reason ?? null} />
           <ArtifactCompletenessPanel artifactCompleteness={status?.artifact_completeness ?? null} />
+        </div>
+        <div className="mt-4">
+          <HotFileGovernancePanel signal={status?.hot_file_governance ?? null} />
         </div>
         <CrashRecoveryPanel crashRecovery={status?.crash_recovery ?? null} />
 
@@ -1727,6 +1795,7 @@ export default function App() {
             runHistoryPagination.items.map((run, index) => {
               const report = projectRunHistoryReport(run);
               const artifacts = resolveRunArtifactPresence(run);
+              const hotFileGovernance = run.hot_file_governance ?? run.evaluation?.hot_file_governance ?? null;
               const incompleteEvidence = artifacts.kind !== "full_bundle";
               const parsedTimestamp = parseRunTimestamp(run.timestamp);
               const displayTimestamp = formatRunTimestamp(run.timestamp);
@@ -1756,6 +1825,22 @@ export default function App() {
                       {incompleteEvidence ? "Incomplete evidence" : `Evaluator ${report.decision}`}
                     </span>
                   </div>
+
+                  {hotFileGovernance ? (
+                    <div className="mt-3 rounded-xl border border-warning/30 bg-warning/10 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <HotFileGovernanceBadge signal={hotFileGovernance} />
+                          <p className="text-sm font-semibold text-mist">{hotFileGovernance.file_path}</p>
+                        </div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-warning/90">
+                          {formatHotFileGovernanceLabels(hotFileGovernance)}
+                        </p>
+                      </div>
+                      <p className="mt-2 text-xs leading-6 text-mist/80">{hotFileGovernance.reason}</p>
+                      <p className="mt-2 text-xs text-mist/65">Next: {hotFileGovernance.recommended_next_action}</p>
+                    </div>
+                  ) : null}
 
                   {incompleteEvidence ? (
                     <>
@@ -2102,6 +2187,11 @@ export default function App() {
                           </span>
                           <p className="text-xs font-bold uppercase tracking-widest text-mist/80">2. Evaluation: {selectedArtifactsReport?.decision.toUpperCase() || 'UNKNOWN'}</p>
                           <p className="mt-1 text-xs text-mist/60">{selectedArtifactsReport?.justification}</p>
+                          {selectedGovernance.hot_file_governance ? (
+                            <div className="mt-4">
+                              <HotFileGovernancePanel signal={selectedGovernance.hot_file_governance} compact />
+                            </div>
+                          ) : null}
                         </div>
 
                         {/* Leader Step */}

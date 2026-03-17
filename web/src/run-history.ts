@@ -6,6 +6,7 @@ export interface RunEvaluation {
   aggregate_score?: number;
   dimensions?: RunEvaluationDimension[];
   recommended_next_action?: string;
+  hot_file_governance?: HotFileGovernanceResult | null;
 }
 
 export interface RunEvaluationDimension {
@@ -26,7 +27,16 @@ export interface ExpertOpinion {
   incapacity_flag: boolean;
 }
 
+export interface HotFileGovernanceResult {
+  file_path: string;
+  heuristic_labels: string[];
+  result_class: "hot_file_growth_failure";
+  reason: string;
+  recommended_next_action: string;
+}
+
 export interface GovernanceDetails {
+  hot_file_governance: HotFileGovernanceResult | null;
   leader: {
     rationale: string;
     action: string;
@@ -53,6 +63,7 @@ export interface RunHistoryItem {
   summary: string;
   metrics: Record<string, unknown> | null;
   evaluation: RunEvaluation | null;
+  hot_file_governance?: HotFileGovernanceResult | null;
   artifacts?: RunArtifactPresence;
   has_governance?: boolean;
 }

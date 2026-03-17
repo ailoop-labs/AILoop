@@ -5,6 +5,7 @@ import {
   BudgetHealthPanel,
   ControlErrorPanel,
   CrashRecoveryPanel,
+  HotFileGovernancePanel,
   LifecycleStatusGrid,
   OperatorReasonPanel,
   RunArtifactEvidenceGrid,
@@ -140,6 +141,32 @@ describe("OperatorReasonPanel", () => {
 
     expect(html).toContain("No active pause or risk signal");
     expect(html).toContain("The current status surface does not show a live pause or safety block.");
+  });
+});
+
+describe("HotFileGovernancePanel", () => {
+  test("renders the pressured file, heuristic labels, and smallest next action", () => {
+    const html = renderToStaticMarkup(
+      <HotFileGovernancePanel
+        signal={{
+          file_path: "src/loop/engine.ts",
+          heuristic_labels: ["recent-touch hot-file pressure", "line-count pressure"],
+          result_class: "hot_file_growth_failure",
+          reason: "continued growth in pressured file without bounded justification",
+          recommended_next_action: "pause and split the next change into a bounded structural-maintenance pass"
+        }}
+      />
+    );
+
+    expect(html).toContain("Hot-File Governance");
+    expect(html).toContain("src/loop/engine.ts");
+    expect(html).toContain("hot_file_growth_failure");
+    expect(html).toContain("recent-touch hot-file pressure, line-count pressure");
+    expect(html).toContain("pause and split the next change into a bounded structural-maintenance pass");
+  });
+
+  test("renders nothing when no hot-file governance signal is present", () => {
+    expect(renderToStaticMarkup(<HotFileGovernancePanel signal={null} />)).toBe("");
   });
 });
 
