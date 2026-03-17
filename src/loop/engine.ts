@@ -270,6 +270,39 @@ export function resolveNextLastError(currentLastError: string | null, requestedL
   return requestedLastError;
 }
 
+export function summarizeGovernanceFailureForState(message: string): string {
+  const normalized = message.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "Governance execution failed";
+  }
+
+  const diagnosticsMatch = normalized.match(/\|\s*diagnostics:\s*([^|]+)$/i);
+  const diagnosticsPath = diagnosticsMatch?.[1]?.trim() ?? null;
+  const base = normalized.split(/\s+\|\s+(?:stderr|raw|diagnostics):/i)[0]?.trim() || normalized;
+  const detailMarkers = [
+    "429 too many requests",
+    "502 bad gateway",
+    "503 service unavailable",
+    "504 gateway timeout",
+    "timed out",
+    "schema mismatch",
+    "not valid json",
+    "too many requests"
+  ];
+  const lower = normalized.toLowerCase();
+  const detail = detailMarkers.find((marker) => lower.includes(marker)) ?? null;
+
+  const segments = [base];
+  if (detail && !base.toLowerCase().includes(detail)) {
+    segments.push(`detail: ${detail}`);
+  }
+  if (diagnosticsPath) {
+    segments.push(`diagnostics: ${diagnosticsPath}`);
+  }
+
+  return segments.join(" | ");
+}
+
 function withConcreteArtifactPaths(
   toolResult: ToolResult,
   artifacts: { logPath: string; stateChangePath: string }
@@ -579,7 +612,7 @@ export class LoopEngine {
               }
             } catch (err) {
               console.error(`[GOVERNANCE] Error during Leader/CCB execution:`, err);
-              await this.setState("paused", `Governance failed: ${(err as Error).message}`);
+              await this.setState("paused", `Governance failed: ${summarizeGovernanceFailureForState((err as Error).message)}`);
               const pausedResult = await waitWhilePaused(this.paths);
               if (pausedResult === "stopped") break;
               await this.setState("running");

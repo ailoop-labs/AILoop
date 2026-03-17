@@ -68,7 +68,6 @@ Note on terminology:
 * **Silent Tooling over Narration**: Focus on executing tools and returning structured results. Do not generate unnecessary explanatory text unless requested.
 * **Single-Task Rounds**: Each Round should pursue only one atomic goal. Avoid hidden, multi-step scope expansions.
 * **Anti-Hallucination Measures**: Before modifying files or databases, the Executor *must* use a "read" tool to confirm the current state of the target. Blind writing is strictly prohibited.
-* **Workflow-First Failure Analysis**: When a task fails, first diagnose why the *governance and loop mechanisms* failed to resolve the issue, prioritizing the reliability of the autonomous system.
 * **Compact Handoffs**: When one role hands off to another, prefer a concise summary, artifact manifest, and targeted evidence excerpts. Do not force downstream roles to ingest entire logs or massive raw diffs unless a narrow excerpt is strictly necessary.
 * **Runtime Instruction Isolation**: Internal AILoop agents must not inherit repository-local `AGENTS.md` files, external skill catalogs, or collaborative workflows intended for AI coding assistants helping humans modify the AILoop repository.
 * **Tiered Source Reading**: Runtime roles should read a fixed canonical source set first, then expand only when they can name the missing information and the exact source likely to resolve it.

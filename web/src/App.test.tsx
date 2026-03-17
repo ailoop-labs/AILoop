@@ -8,6 +8,7 @@ import {
   HotFileGovernancePanel,
   LifecycleStatusGrid,
   OperatorReasonPanel,
+  RunHistoryHotFileGovernanceIndicator,
   RunArtifactEvidenceGrid,
   SystemHealthPanel,
   deriveControlAvailability,
@@ -146,7 +147,7 @@ describe("OperatorReasonPanel", () => {
 });
 
 describe("HotFileGovernancePanel", () => {
-  test("renders the pressured file, heuristic labels, and smallest next action", () => {
+  test("renders a live status.hot_file_governance signal with the file path, reason, and next action", () => {
     const html = renderToStaticMarkup(
       <HotFileGovernancePanel
         signal={{
@@ -163,11 +164,38 @@ describe("HotFileGovernancePanel", () => {
     expect(html).toContain("src/loop/engine.ts");
     expect(html).toContain("hot_file_growth_failure");
     expect(html).toContain("recent-touch hot-file pressure, line-count pressure");
+    expect(html).toContain("continued growth in pressured file without bounded justification");
     expect(html).toContain("pause and split the next change into a bounded structural-maintenance pass");
   });
 
   test("renders nothing when no hot-file governance signal is present", () => {
     expect(renderToStaticMarkup(<HotFileGovernancePanel signal={null} />)).toBe("");
+  });
+});
+
+describe("RunHistoryHotFileGovernanceIndicator", () => {
+  test("renders a distinct run-history governance indicator with the file path, reason, and next action", () => {
+    const html = renderToStaticMarkup(
+      <RunHistoryHotFileGovernanceIndicator
+        signal={{
+          file_path: "web/src/App.tsx",
+          heuristic_labels: ["recent-touch hot-file pressure", "line-count pressure"],
+          result_class: "hot_file_growth_failure",
+          reason: "the evaluator blocked another inline governance change in the same file",
+          recommended_next_action: "pause and split the next edit into a bounded follow-up"
+        }}
+      />
+    );
+
+    expect(html).toContain("hot file growth failure");
+    expect(html).toContain("web/src/App.tsx");
+    expect(html).toContain("recent-touch hot-file pressure, line-count pressure");
+    expect(html).toContain("the evaluator blocked another inline governance change in the same file");
+    expect(html).toContain("Next: pause and split the next edit into a bounded follow-up");
+  });
+
+  test("renders nothing when a run-history item has no governance indicator", () => {
+    expect(renderToStaticMarkup(<RunHistoryHotFileGovernanceIndicator signal={null} />)).toBe("");
   });
 });
 

@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import type { AppConfig } from "../config/env";
 import type { LeaderContext, ToolResult } from "../types/contracts";
+import { readJsonFile } from "../utils/fs";
 import { LeaderAgent } from "./leader";
 
 const samplePreviousToolResult: ToolResult = {
@@ -87,6 +88,69 @@ function makeConfig(homeDir: string): AppConfig {
 }
 
 describe("LeaderAgent", () => {
+  test("overrides legacy markdown output contracts in the loaded leader role", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-leader-agent-legacy-role-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, "LEADER_ROLE.md"),
+      `# LeaderAgent Role Contract
+
+## Mission
+Custom leader guidance.
+
+## Output Contract
+Return a Markdown governance memo with:
+- Situation
+- Recommended Path: one of resume_with_instruction, replan, reduce_scope, ccb_review, hard_pause_for_human
+`,
+      "utf8"
+    );
+
+    let capturedPrompt = "";
+    const mockCodex = {
+      async runJson<T>(options?: { prompt?: string }) {
+        capturedPrompt = options?.prompt ?? "";
+        return {
+          ok: true,
+          data: {
+            rationale: "Use the runtime JSON contract.",
+            action: "resume",
+            diagnosis_type: "implementation_failure",
+            instructions: ["Keep the leader output schema aligned."],
+            proposed_readme_change: ""
+          } as T,
+          rawMessage: "{}",
+          stdout: "",
+          stderr: ""
+        };
+      }
+    };
+
+    const originalCwd = process.cwd();
+    process.chdir(workspaceRoot);
+
+    try {
+      const agent = new LeaderAgent(makeConfig(homeDir));
+      (agent as { codex: typeof mockCodex }).codex = mockCodex;
+
+      await agent.execute({
+        context: sampleLeaderContext,
+        paths: { homeDir },
+        onLog: async () => {}
+      });
+
+      expect(capturedPrompt).toContain("Custom leader guidance.");
+      expect(capturedPrompt).not.toContain("Return a Markdown governance memo");
+      expect(capturedPrompt).not.toContain("resume_with_instruction");
+      expect(capturedPrompt).toContain("Return strict JSON only");
+      expect(capturedPrompt).toContain("\"action\": \"resume\" | \"stop\" | \"escalate_to_ccb\"");
+    } finally {
+      process.chdir(originalCwd);
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
   test("runs Codex strategy generation in an isolated runtime session", async () => {
     const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-leader-agent-"));
     const homeDir = path.join(workspaceRoot, ".ailoop");
@@ -217,6 +281,81 @@ describe("LeaderAgent", () => {
           )
         )
       ).toBe(true);
+    } finally {
+      process.chdir(originalCwd);
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("writes a redacted leader diagnostics artifact on Codex failure", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-leader-agent-debug-artifact-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    await fs.mkdir(path.join(homeDir, "runs"), { recursive: true });
+    await fs.writeFile(path.join(homeDir, "LEADER_ROLE.md"), "# Leader Role\n\nCustom leader guidance.\n", "utf8");
+
+    const logs: string[] = [];
+    const logArtifactPath = path.join(homeDir, "runs", "2026-03-17T03-37-02-645Z.round.log");
+    const stateChangePath = path.join(homeDir, "runs", "2026-03-17T03-37-02-645Z.round.state_change.txt");
+    await fs.writeFile(logArtifactPath, "round log\n", "utf8");
+    await fs.writeFile(stateChangePath, "diff\n", "utf8");
+
+    const mockCodex = {
+      async runJson() {
+        return {
+          ok: false,
+          data: undefined,
+          rawMessage: '{"detail":"schema mismatch near action enum"}',
+          stdout: "",
+          stderr: [
+            "OpenAI Codex v0.114.0 (research preview)",
+            "--------",
+            "user",
+            "# LeaderAgent Role Contract",
+            "ERROR: unexpected status 429 Too Many Requests"
+          ].join("\n"),
+          error: "Codex exited with code 1"
+        };
+      }
+    };
+
+    const originalCwd = process.cwd();
+    process.chdir(workspaceRoot);
+
+    try {
+      const agent = new LeaderAgent(makeConfig(homeDir));
+      (agent as { codex: typeof mockCodex }).codex = mockCodex;
+
+      const context: LeaderContext = {
+        ...sampleLeaderContext,
+        previousToolResult: {
+          ...samplePreviousToolResult,
+          artifacts: {
+            log_path: logArtifactPath,
+            state_change_path: stateChangePath
+          }
+        }
+      };
+
+      await expect(
+        agent.execute({
+          context,
+          paths: { homeDir },
+          onLog: async (message) => {
+            logs.push(message);
+          }
+        })
+      ).rejects.toThrow(/diagnostics: .*leader\.debug\.json/);
+
+      const diagnosticsLog = logs.find((message) => message.includes("Leader diagnostics artifact:"));
+      expect(diagnosticsLog).toBeTruthy();
+      const diagnosticsPath = diagnosticsLog!.split("Leader diagnostics artifact: ")[1];
+      const payload = await readJsonFile<Record<string, unknown>>(diagnosticsPath, {});
+
+      expect(payload.failure_classification).toBe("provider_rate_limit");
+      expect(payload.prompt_chars).toBeGreaterThan(0);
+      expect(String(payload.stderr_tail || "")).toContain("429 Too Many Requests");
+      expect(String(payload.stderr_tail || "")).not.toContain("supersecret");
+      expect(logs.some((message) => message.includes("429 Too Many Requests"))).toBe(true);
     } finally {
       process.chdir(originalCwd);
       await fs.rm(workspaceRoot, { recursive: true, force: true });

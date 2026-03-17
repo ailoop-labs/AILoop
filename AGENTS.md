@@ -37,11 +37,12 @@ When writing or refactoring code for AILoop, you must adhere to the following co
 
 1. **Information Gathering:** When given a task, always start by reading the relevant documentation (`README.md`, `ARCHITECTURE.md`, `AILOOP_ENGINE_WORKFLOW.md`) using `grep` or file reading tools.
 2. **State Alignment:** Check the current codebase state. If you spot a misalignment with the documentation, prioritize fixing the code to match the docs.
-3. **Execution:** 
+3. **Workflow-First Failure Analysis:** When analyzing a failed round, paused run, or evaluator/governance issue, first diagnose why the AILoop workflow itself failed to resolve the problem before changing product code. Prioritize failures in evidence handoff, evaluation packaging, governance routing, pause semantics, crash recovery, and other loop mechanisms.
+4. **Execution:** 
    - Write simple, focused code.
    - Do not perform "Big Bang Rewrites" (e.g., rewriting an entire module at once). Follow the Strangler Fig pattern for refactors.
-4. **Validation:** Always write or update tests alongside your code changes. Run tests using `bun test` to ensure you haven't broken the loop engine.
-5. **Commit Discipline for AILoop Handoffs:** Do not silently stage or commit code during normal collaboration. However, if the human operator explicitly asks you to hand the workspace back to AILoop for autonomous validation or continued loop execution, you should stage and commit the intended changes first so the worktree is clean and does not contaminate the next round or evaluator evidence.
+5. **Validation:** Always write or update tests alongside your code changes. Run tests using `bun test` to ensure you haven't broken the loop engine.
+6. **Commit Discipline for AILoop Handoffs:** Do not silently stage or commit code during normal collaboration. However, if the human operator explicitly asks you to hand the workspace back to AILoop for autonomous validation or continued loop execution, you should stage and commit the intended changes first so the worktree is clean and does not contaminate the next round or evaluator evidence.
 
 ## 5. Distinction: You vs. Internal AILoop Agents
 

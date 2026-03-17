@@ -21,7 +21,8 @@ import {
   collectOperationalEvidence,
   decideEvaluationFailureRecoveryPath,
   extractSnapshotTargetsFromSubTask,
-  resolveNextLastError
+  resolveNextLastError,
+  summarizeGovernanceFailureForState
 } from "./engine";
 
 async function waitForPausedState(paths: LoopPaths, timeoutMs = 6_000): Promise<Awaited<ReturnType<typeof readLoopState>>> {
@@ -163,6 +164,19 @@ describe("resolveNextLastError", () => {
   });
 });
 
+describe("summarizeGovernanceFailureForState", () => {
+  test("collapses recursive leader prompt dumps into a concise diagnostic summary", () => {
+    const summary = summarizeGovernanceFailureForState(
+      "Codex exited with code 1 | stderr: OpenAI Codex v0.114.0 -------- user # LeaderAgent Role Contract ## Mission Intervene when the loop pauses | diagnostics: /tmp/2026-03-17T03-37-02-645Z.leader.debug.json"
+    );
+
+    expect(summary).toContain("Codex exited with code 1");
+    expect(summary).toContain("/tmp/2026-03-17T03-37-02-645Z.leader.debug.json");
+    expect(summary).not.toContain("# LeaderAgent Role Contract");
+    expect(summary).not.toContain("OpenAI Codex v0.114.0");
+  });
+});
+
 describe("buildEvaluatorReworkInstructions", () => {
   test("uses compact navigational rework instructions instead of embedding the full raw state change", () => {
     const instructions = buildEvaluatorReworkInstructions(
@@ -267,7 +281,7 @@ describe("LoopEngine auto rework", () => {
       execute: async () => {
         await setFlag(paths.stopFlagPath);
         throw new Error(
-          "Codex exited with code 1 | stderr: upstream apiToken=[REDACTED] returned 502 Bad Gateway | raw: {\"detail\":\"returned non-json strategy blob\"}"
+          "Codex exited with code 1 | stderr: OpenAI Codex v0.114.0 -------- user # LeaderAgent Role Contract ## Mission Intervene when the loop pauses | raw: {\"detail\":\"returned non-json strategy blob\"} | diagnostics: /tmp/leader.debug.json"
         );
       }
     };
@@ -275,9 +289,7 @@ describe("LoopEngine auto rework", () => {
     await mutable.run();
 
     const finalState = await readLoopState(paths);
-    expect(finalState.last_error).toBe(
-      "Governance failed: Codex exited with code 1 | stderr: upstream apiToken=[REDACTED] returned 502 Bad Gateway | raw: {\"detail\":\"returned non-json strategy blob\"}"
-    );
+    expect(finalState.last_error).toBe("Governance failed: Codex exited with code 1 | diagnostics: /tmp/leader.debug.json");
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });

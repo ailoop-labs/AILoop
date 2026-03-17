@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
+import path from "node:path";
 import type { AppConfig } from "../config/env";
 import type { LeaderContext, LeaderDecision } from "../types/contracts";
+import { writeJsonFile } from "../utils/fs";
 import { SecretRedactor } from "../utils/redaction";
 import { CodexClient, type CodexJsonCallResult, type JsonSchema } from "./codex-client";
 import { loadProjectRoleDefinition } from "./role-definitions";
@@ -29,6 +32,48 @@ function normalizeDiagnosticExcerpt(value: string | undefined, redactor: SecretR
   return normalized.slice(0, 500);
 }
 
+function extractUsefulDiagnosticExcerpt(value: string | undefined, redactor: SecretRedactor): string | null {
+  const normalized = redactor.redact((value ?? "").replace(/\s+/g, " ").trim());
+  if (!normalized) {
+    return null;
+  }
+
+  const markers = [
+    "429 too many requests",
+    "too many requests",
+    "502 bad gateway",
+    "503 service unavailable",
+    "504 gateway timeout",
+    "unexpected status",
+    "schema mismatch",
+    "not valid json",
+    "timed out",
+    "stream disconnected before completion",
+    "error sending request",
+    "service unavailable",
+    "bad gateway"
+  ];
+  const lower = normalized.toLowerCase();
+  let markerIndex = -1;
+  for (const marker of markers) {
+    const index = lower.lastIndexOf(marker);
+    if (index > markerIndex) {
+      markerIndex = index;
+    }
+  }
+
+  if (markerIndex >= 0) {
+    const start = Math.max(0, markerIndex - 80);
+    return normalized.slice(start, markerIndex + 320).trim();
+  }
+
+  if (/OpenAI Codex v/i.test(normalized) && /user # LeaderAgent Role Contract/i.test(normalized)) {
+    return "Codex CLI exited before returning a structured diagnostic tail.";
+  }
+
+  return normalized.slice(Math.max(0, normalized.length - 500));
+}
+
 function compactLeaderEvidence(value: string | null | undefined): string {
   const redactor = new SecretRedactor(process.env);
   const normalized = (value ?? "")
@@ -40,7 +85,77 @@ function compactLeaderEvidence(value: string | null | undefined): string {
   return normalizeDiagnosticExcerpt(normalized, redactor) ?? "None";
 }
 
-function buildLeaderFailureMessage(result: CodexJsonCallResult<LeaderDecision>): string {
+function classifyLeaderFailure(result: CodexJsonCallResult<LeaderDecision>): string {
+  const combined = `${result.error ?? ""}\n${result.stderr}\n${result.rawMessage}`.toLowerCase();
+  if (combined.includes("429 too many requests") || combined.includes("too many requests")) {
+    return "provider_rate_limit";
+  }
+  if (combined.includes("502 bad gateway") || combined.includes("503 service unavailable") || combined.includes("504 gateway timeout")) {
+    return "provider_upstream_error";
+  }
+  if (combined.includes("timed out")) {
+    return "timeout";
+  }
+  if (combined.includes("schema mismatch") || combined.includes("not valid json")) {
+    return "schema_or_json_failure";
+  }
+  return "nonzero_exit";
+}
+
+function resolveLeaderDiagnosticsPath(homeDir: string, context: LeaderContext): string {
+  const rawLogPath = context.previousToolResult?.artifacts.log_path?.trim();
+  if (rawLogPath) {
+    const logPath = path.isAbsolute(rawLogPath) ? rawLogPath : path.resolve(process.cwd(), rawLogPath);
+    if (logPath.endsWith(".round.log")) {
+      return logPath.replace(/\.round\.log$/, ".leader.debug.json");
+    }
+    if (logPath.endsWith(".log")) {
+      return logPath.replace(/\.log$/, ".leader.debug.json");
+    }
+  }
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return path.join(homeDir, "runs", `${stamp}.leader.debug.json`);
+}
+
+async function writeLeaderDiagnosticsArtifact(
+  homeDir: string,
+  context: LeaderContext,
+  prompt: string,
+  result: CodexJsonCallResult<LeaderDecision>,
+  sandbox: AppConfig["codex"]["executorSandbox"],
+  cwd: string
+): Promise<string> {
+  const redactor = new SecretRedactor(process.env);
+  const diagnosticsPath = resolveLeaderDiagnosticsPath(homeDir, context);
+  await writeJsonFile(diagnosticsPath, {
+    created_at: new Date().toISOString(),
+    failure_classification: classifyLeaderFailure(result),
+    exit_code: (() => {
+      const match = (result.error ?? "").match(/code (\d+)/i);
+      return match ? Number(match[1]) : null;
+    })(),
+    timed_out: /timed out/i.test(result.error ?? ""),
+    sandbox,
+    cwd,
+    prompt_chars: prompt.length,
+    prompt_sha256: createHash("sha256").update(prompt).digest("hex"),
+    role_contract_mode: "runtime_json_v1",
+    source_artifacts: {
+      log_path: context.previousToolResult?.artifacts.log_path ?? null,
+      state_change_path: context.previousToolResult?.artifacts.state_change_path ?? null
+    },
+    stderr_tail: extractUsefulDiagnosticExcerpt(result.stderr, redactor),
+    raw_tail: extractUsefulDiagnosticExcerpt(result.rawMessage, redactor),
+    error: normalizeDiagnosticExcerpt(result.error, redactor)
+  });
+  return diagnosticsPath;
+}
+
+function buildLeaderFailureMessage(
+  result: CodexJsonCallResult<LeaderDecision>,
+  diagnosticsPath?: string
+): string {
   const redactor = new SecretRedactor(process.env);
   const baseMessage = normalizeDiagnosticExcerpt(result.error, redactor) ?? "Leader strategy execution failed";
   const details: string[] = [];
@@ -51,12 +166,16 @@ function buildLeaderFailureMessage(result: CodexJsonCallResult<LeaderDecision>):
   ];
 
   for (const candidate of candidates) {
-    const excerpt = normalizeDiagnosticExcerpt(candidate.value, redactor);
+    const excerpt = extractUsefulDiagnosticExcerpt(candidate.value, redactor);
     if (!excerpt || seen.has(excerpt)) {
       continue;
     }
     seen.add(excerpt);
     details.push(`${candidate.label}: ${excerpt}`);
+  }
+
+  if (diagnosticsPath) {
+    details.push(`diagnostics: ${diagnosticsPath}`);
   }
 
   return details.length > 0 ? `${baseMessage} | ${details.join(" | ")}` : baseMessage;
@@ -159,7 +278,16 @@ export class LeaderAgent {
       });
 
       if (!result.ok || !result.data) {
-        throw new Error(buildLeaderFailureMessage(result));
+        const diagnosticsPath = await writeLeaderDiagnosticsArtifact(
+          options.paths.homeDir,
+          options.context,
+          prompt,
+          result,
+          this.sandbox,
+          process.cwd()
+        );
+        await options.onLog(`Leader diagnostics artifact: ${diagnosticsPath}`);
+        throw new Error(buildLeaderFailureMessage(result, diagnosticsPath));
       }
 
       await options.onLog(`Leader Diagnosis: ${result.data.diagnosis_type}. Action: ${result.data.action}.`);

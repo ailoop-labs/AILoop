@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import type { AppConfig } from "../config/env";
-import { ensureProjectRoleDefinitions } from "./role-definitions";
+import { ensureProjectRoleDefinitions, loadProjectRoleDefinition } from "./role-definitions";
 
 function makeConfig(homeDir: string): AppConfig {
   return {
@@ -44,6 +44,36 @@ function makeConfig(homeDir: string): AppConfig {
 }
 
 describe("ensureProjectRoleDefinitions", () => {
+  test("normalizes legacy leader markdown memo contracts to the runtime JSON contract", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-role-defs-leader-normalize-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, "LEADER_ROLE.md"),
+      `# LeaderAgent Role Contract
+
+## Mission
+Intervene when the loop pauses.
+
+## Output Contract
+Return a Markdown governance memo with:
+- Situation
+- Recommended Path: one of resume_with_instruction, replan, reduce_scope, ccb_review, hard_pause_for_human
+`,
+      "utf8"
+    );
+
+    const normalized = await loadProjectRoleDefinition(homeDir, "leader");
+
+    expect(normalized).not.toContain("Return a Markdown governance memo");
+    expect(normalized).not.toContain("resume_with_instruction");
+    expect(normalized).toContain("Return strict JSON only.");
+    expect(normalized).toContain("action must be one of: resume, stop, escalate_to_ccb.");
+    expect(normalized).toContain("Intervene when the loop pauses.");
+
+    await fs.rm(workspaceRoot, { recursive: true, force: true });
+  });
+
   test("creates missing role files from AI output", async () => {
     const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-role-defs-create-"));
     const homeDir = path.join(workspaceRoot, ".ailoop");

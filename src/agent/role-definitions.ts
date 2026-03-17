@@ -64,6 +64,35 @@ function normalizeMarkdown(content: string): string {
   return `${normalized}\n`;
 }
 
+function leaderJsonOutputContractMarkdown(): string {
+  return [
+    "## Output Contract",
+    "Return strict JSON only.",
+    "- Fields: rationale, action, diagnosis_type, instructions, proposed_readme_change.",
+    "- action must be one of: resume, stop, escalate_to_ccb.",
+    "- diagnosis_type must be one of: implementation_failure, constitutional_conflict.",
+    "- If executor success claims conflict with evaluator evidence-insufficiency failure, treat the issue as evidence/validation handoff failure before retrying product code."
+  ].join("\n");
+}
+
+function normalizeLeaderRoleDefinition(content: string): string {
+  const normalized = normalizeMarkdown(content);
+  const hasLegacyOutputContract =
+    /Return a Markdown governance memo/i.test(normalized) ||
+    /resume_with_instruction|ccb_review|hard_pause_for_human/i.test(normalized);
+
+  if (!hasLegacyOutputContract) {
+    return normalized;
+  }
+
+  const withoutLegacyOutput = normalized
+    .replace(/\n## Output Contract[\s\S]*?(?=\n##\s|\n#\s|$)/, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return normalizeMarkdown([withoutLegacyOutput, leaderJsonOutputContractMarkdown()].join("\n\n"));
+}
+
 const ROLES_SOURCE_HASH_FILENAME = ".roles_source_hash";
 
 export function computeSourceHash(readme: string, goal: string, architecture: string = "", workflow: string = ""): string {
@@ -243,6 +272,9 @@ export async function loadProjectRoleDefinition(homeDir: string, role: ProjectRo
   const fallback = defaultRoleDefinition(role);
   const content = await readTextFile(rolePath, "");
   if (!content.trim()) return fallback;
+  if (role === "leader") {
+    return normalizeLeaderRoleDefinition(content);
+  }
   return normalizeMarkdown(content);
 }
 
