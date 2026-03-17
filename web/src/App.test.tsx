@@ -290,6 +290,34 @@ describe("RunHistoryCard", () => {
     expect(html.indexOf("Hot-File Governance")).toBeLessThan(html.indexOf("Evaluator fail"));
     expect(html.indexOf("Hot-File Governance")).toBeLessThan(html.indexOf("Objective:"));
   });
+
+  test("falls back to the persisted run-level hot-file governance signal when evaluation details are absent", () => {
+    const html = renderToStaticMarkup(
+      <RunHistoryCard
+        run={makeRunHistoryItem({
+          evaluation: {
+            ...makeRunHistoryItem().evaluation!,
+            hot_file_governance: null
+          },
+          hot_file_governance: {
+            file_path: "src/loop/control.ts",
+            heuristic_labels: ["recent-touch hot-file pressure"],
+            result_class: "hot_file_growth_failure",
+            reason: "paused history kept the governance signal after evaluation details were trimmed",
+            recommended_next_action: "review the paused run and split the next edit into a bounded follow-up"
+          }
+        })}
+        index={0}
+        startIndex={0}
+        onOpenArtifacts={() => {}}
+      />
+    );
+
+    expect(html).toContain("Hot-File Governance");
+    expect(html).toContain("File: src/loop/control.ts");
+    expect(html).toContain("Reason: paused history kept the governance signal after evaluation details were trimmed");
+    expect(html).toContain("review the paused run and split the next edit into a bounded follow-up");
+  });
 });
 
 describe("ArtifactCompletenessPanel", () => {
