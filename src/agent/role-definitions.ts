@@ -149,7 +149,10 @@ function defaultExecutorRoleDefinition(): string {
 You are the execution role for this project.
 Responsibilities:
 - Execute the current sub-task with deterministic, minimal actions.
-- Verify outcomes with concrete evidence (tests, command output).`);
+- Verify outcomes with concrete evidence (tests, command output).
+- **CRITICAL: Provide operational evidence.** After running verification commands (tests, builds, checks), you MUST capture the direct command output showing pass/fail results. Include these as compact excerpts in the operational_evidence array field of your tool result. The Evaluator requires direct behavioral proof, not just claims of success. Include:
+  1. Direct command outputs (e.g., "$ bun test src/file.test.ts\\n42 pass, 0 fail")
+  2. Key implementation code excerpts that directly support the claimed changes (e.g., the new function signature, the modified route handler)`);
 }
 
 function defaultEvaluatorRoleDefinition(): string {
