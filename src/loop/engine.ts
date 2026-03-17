@@ -573,7 +573,17 @@ export class LoopEngine {
 
           console.log(`[GOVERNANCE] Invoking Leader for diagnosis...`);
           try {
-            const decision = await this.leader.execute({
+            // Create a stop flag checker that runs in parallel with Leader execution
+            const stopFlagChecker = (async () => {
+              while (true) {
+                if (await hasFlag(this.paths.stopFlagPath)) {
+                  throw new Error("STOP_REQUESTED");
+                }
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              }
+            })();
+
+            const leaderExecution = this.leader.execute({
               context: {
                 goal: goalContent,
                 lastError: currentStateData.last_error,
@@ -587,6 +597,8 @@ export class LoopEngine {
               onLog: (msg) => console.log(`[LEADER] ${msg}`)
             });
 
+            const decision = await Promise.race([leaderExecution, stopFlagChecker]);
+
             await saveLeaderStrategy(this.paths, currentStateData.round, decision);
 
             // Check stop flag AGAIN after leader execution as it might take time
@@ -598,7 +610,19 @@ export class LoopEngine {
             if (decision.action === "escalate_to_ccb" || (decision.action === "resume" && leaderReworkCount >= LEADER_REWORK_LIMIT)) {
               // --- GOVERNANCE STEP 4: CCB Meeting ---
               console.log(`[GOVERNANCE] Escalating to CCB...`);
-              const ccbResult = await this.ccb.run(currentStateData.round, decision, readmeContent);
+
+              // Create a stop flag checker that runs in parallel with CCB execution
+              const ccbStopFlagChecker = (async () => {
+                while (true) {
+                  if (await hasFlag(this.paths.stopFlagPath)) {
+                    throw new Error("STOP_REQUESTED");
+                  }
+                  await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+              })();
+
+              const ccbExecution = this.ccb.run(currentStateData.round, decision, readmeContent);
+              const ccbResult = await Promise.race([ccbExecution, ccbStopFlagChecker]);
 
               await saveCCBSession(this.paths, currentStateData.round, ccbResult);
 
@@ -643,6 +667,14 @@ export class LoopEngine {
             }
           } catch (err) {
             const errorMessage = (err as Error).message;
+
+            // Check if stop was requested during Leader execution
+            if (errorMessage === "STOP_REQUESTED") {
+              console.log(`[GOVERNANCE] Stop requested during Leader execution. Exiting cleanly.`);
+              await this.setState("stopping");
+              break;
+            }
+
             console.error(`[GOVERNANCE] Error during Leader/CCB execution:`, err);
 
             // Check if this is a network/upstream error (502, 503, timeout, etc.)
