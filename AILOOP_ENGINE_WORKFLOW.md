@@ -132,7 +132,7 @@ Rework handoff rule:
 - avoid replaying entire raw state-change files into the rework prompt unless the minimal relevant excerpt is known
 
 ### Phase 6: Leader / CCB Intervention
-1. When the loop is set to `paused` (whether due to human intervention or severe failure), if governance intervention (`AILOOP_ENABLE_LEADER`) is enabled, the engine awakens the **LeaderAgent** (and potentially introduces CCB experts like SeniorDev, QALead, ProductOwner for consultation).
+1. When the loop is set to `paused` (whether due to human intervention or severe failure), the engine awakens the **LeaderAgent** (and potentially introduces CCB experts like SeniorDev, QALead, ProductOwner for consultation).
 2. The Leader reads the failure logs through a secure sandbox, analyzes the Friction Index, and decides whether to guide the Executor, reduce scope, or issue a Clarification Request to the human. It waits for new intervention instructions from the human before continuing.
 
 ## 4. External Intervention & State Alignment

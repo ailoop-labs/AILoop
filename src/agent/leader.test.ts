@@ -55,7 +55,6 @@ function makeConfig(homeDir: string): AppConfig {
     intervalSeconds: 1,
     maxCycles: 1,
     exitOnError: false,
-    enableLeader: true,
     evaluatorReworkMaxAttempts: 1,
     consoleHost: "127.0.0.1",
     consolePort: 3090,

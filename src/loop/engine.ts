@@ -544,84 +544,77 @@ export class LoopEngine {
         // --- GOVERNANCE STEP 2/3: Leader Diagnosis & CCB ---
         if (await hasFlag(this.paths.pauseFlagPath)) {
           await this.setState("paused");
-          
-          if (this.config.enableLeader) {
-            console.log(`[GOVERNANCE] Invoking Leader for diagnosis...`);
-            try {
-              const decision = await this.leader.execute({
-                context: {
-                  goal: goalContent,
-                  lastError: currentStateData.last_error,
-                  previousEvaluationJustification: currentStateData.last_error,
-                  previousToolResult: currentStateData.previous_tool_result,
-                  previousEvaluationDimensions: currentStateData.previous_evaluation_dimensions,
-                  previousHotFileGovernance: currentStateData.previous_hot_file_governance,
-                  stateChange: await readLeaderStateChangeEvidence(currentStateData.previous_tool_result)
-                },
-                paths: this.paths,
-                onLog: (msg) => console.log(`[LEADER] ${msg}`)
-              });
+          console.log(`[GOVERNANCE] Invoking Leader for diagnosis...`);
+          try {
+            const decision = await this.leader.execute({
+              context: {
+                goal: goalContent,
+                lastError: currentStateData.last_error,
+                previousEvaluationJustification: currentStateData.last_error,
+                previousToolResult: currentStateData.previous_tool_result,
+                previousEvaluationDimensions: currentStateData.previous_evaluation_dimensions,
+                previousHotFileGovernance: currentStateData.previous_hot_file_governance,
+                stateChange: await readLeaderStateChangeEvidence(currentStateData.previous_tool_result)
+              },
+              paths: this.paths,
+              onLog: (msg) => console.log(`[LEADER] ${msg}`)
+            });
 
-              await saveLeaderStrategy(this.paths, currentStateData.round, decision);
+            await saveLeaderStrategy(this.paths, currentStateData.round, decision);
 
-              // Check stop flag AGAIN after leader execution as it might take time
-              if (await hasFlag(this.paths.stopFlagPath)) {
-                await this.setState("stopping");
-                break;
-              }
-
-              if (decision.action === "escalate_to_ccb" || (decision.action === "resume" && leaderReworkCount >= LEADER_REWORK_LIMIT)) {
-                // --- GOVERNANCE STEP 4: CCB Meeting ---
-                console.log(`[GOVERNANCE] Escalating to CCB...`);
-                const ccbResult = await this.ccb.run(currentStateData.round, decision, readmeContent);
-
-                await saveCCBSession(this.paths, currentStateData.round, ccbResult);
-                
-                if (ccbResult.decision === "approve") {
-                  console.log(`[CCB] CHANGE APPROVED. Applying Constitution modification...`);
-                  // Leader modifies README.md
-                  await fs.writeFile(path.join(process.cwd(), "README.md"), decision.proposed_readme_change!, "utf8");
-                  await clearFlag(this.paths.pauseFlagPath);
-                  leaderReworkCount = 0;
-                  continue;
-                } else if (ccbResult.decision === "escalate_to_human") {
-                  console.log(`[CCB] EXPERT INCAPACITY. Escalating to human.`);
-                  await this.setState("paused", `CCB Expert requested human intervention: ${ccbResult.rationale}`);
-                  break;
-                } else {
-                  console.log(`[CCB] CHANGE REJECTED.`);
-                  // Feed remediation hints back to instructions
-                  for (const expert of ccbResult.experts) {
-                    if (expert.remediation_hints) {
-                      for (const hint of expert.remediation_hints) await appendInstruction(this.paths, `[CCB Hint from ${expert.expert_role}]: ${hint}`);
-                    }
-                  }
-                  await clearFlag(this.paths.pauseFlagPath);
-                  continue;
-                }
-              } else if (decision.action === "resume") {
-                // Leader issues strategic instructions
-                console.log(`[LEADER] Strategy: ${decision.rationale}`);
-                for (const inst of decision.instructions) await appendInstruction(this.paths, inst);
-                await clearFlag(this.paths.pauseFlagPath);
-                leaderReworkCount++;
-                continue;
-              } else {
-                await this.setState("stopping");
-                break;
-              }
-            } catch (err) {
-              console.error(`[GOVERNANCE] Error during Leader/CCB execution:`, err);
-              await this.setState("paused", `Governance failed: ${summarizeGovernanceFailureForState((err as Error).message)}`);
-              const pausedResult = await waitWhilePaused(this.paths);
-              if (pausedResult === "stopped") break;
-              await this.setState("running");
-              continue;
+            // Check stop flag AGAIN after leader execution as it might take time
+            if (await hasFlag(this.paths.stopFlagPath)) {
+              await this.setState("stopping");
+              break;
             }
-          } else {
+
+            if (decision.action === "escalate_to_ccb" || (decision.action === "resume" && leaderReworkCount >= LEADER_REWORK_LIMIT)) {
+              // --- GOVERNANCE STEP 4: CCB Meeting ---
+              console.log(`[GOVERNANCE] Escalating to CCB...`);
+              const ccbResult = await this.ccb.run(currentStateData.round, decision, readmeContent);
+
+              await saveCCBSession(this.paths, currentStateData.round, ccbResult);
+              
+              if (ccbResult.decision === "approve") {
+                console.log(`[CCB] CHANGE APPROVED. Applying Constitution modification...`);
+                // Leader modifies README.md
+                await fs.writeFile(path.join(process.cwd(), "README.md"), decision.proposed_readme_change!, "utf8");
+                await clearFlag(this.paths.pauseFlagPath);
+                leaderReworkCount = 0;
+                continue;
+              } else if (ccbResult.decision === "escalate_to_human") {
+                console.log(`[CCB] EXPERT INCAPACITY. Escalating to human.`);
+                await this.setState("paused", `CCB Expert requested human intervention: ${ccbResult.rationale}`);
+                break;
+              } else {
+                console.log(`[CCB] CHANGE REJECTED.`);
+                // Feed remediation hints back to instructions
+                for (const expert of ccbResult.experts) {
+                  if (expert.remediation_hints) {
+                    for (const hint of expert.remediation_hints) await appendInstruction(this.paths, `[CCB Hint from ${expert.expert_role}]: ${hint}`);
+                  }
+                }
+                await clearFlag(this.paths.pauseFlagPath);
+                continue;
+              }
+            } else if (decision.action === "resume") {
+              // Leader issues strategic instructions
+              console.log(`[LEADER] Strategy: ${decision.rationale}`);
+              for (const inst of decision.instructions) await appendInstruction(this.paths, inst);
+              await clearFlag(this.paths.pauseFlagPath);
+              leaderReworkCount++;
+              continue;
+            } else {
+              await this.setState("stopping");
+              break;
+            }
+          } catch (err) {
+            console.error(`[GOVERNANCE] Error during Leader/CCB execution:`, err);
+            await this.setState("paused", `Governance failed: ${summarizeGovernanceFailureForState((err as Error).message)}`);
             const pausedResult = await waitWhilePaused(this.paths);
             if (pausedResult === "stopped") break;
             await this.setState("running");
+            continue;
           }
         }
 

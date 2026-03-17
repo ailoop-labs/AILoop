@@ -254,7 +254,6 @@ describe("LoopEngine auto rework", () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-governance-error-test-"));
     const config = loadConfig({
       AILOOP_HOME: homeDir,
-      AILOOP_ENABLE_LEADER: "1",
       AILOOP_MAX_CYCLES: "1"
     });
     const engine = new LoopEngine(config);
@@ -393,7 +392,6 @@ describe("LoopEngine auto rework", () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-leader-context-test-"));
     const config = loadConfig({
       AILOOP_HOME: homeDir,
-      AILOOP_ENABLE_LEADER: "1",
       AILOOP_MAX_CYCLES: "1"
     });
     const engine = new LoopEngine(config);
@@ -1878,9 +1876,28 @@ describe("LoopEngine crash recovery on startup", () => {
     });
 
     let runRoundCalls = 0;
+    let releaseLeader = () => {};
+    const leaderGate = new Promise<void>((resolve) => {
+      releaseLeader = resolve;
+    });
     const mutable = engine as unknown as {
+      leader: {
+        execute: () => Promise<LeaderDecision>;
+      };
       runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
       run: () => Promise<void>;
+    };
+    mutable.leader = {
+      execute: async () => {
+        await leaderGate;
+        await setFlag(paths.stopFlagPath);
+        return {
+          rationale: "Crash recovery requires human review before new work starts.",
+          action: "stop",
+          diagnosis_type: "implementation_failure",
+          instructions: []
+        };
+      }
     };
     mutable.runRound = async () => {
       runRoundCalls += 1;
@@ -1909,7 +1926,9 @@ describe("LoopEngine crash recovery on startup", () => {
       });
       expect(pausedState.last_error || "").toContain("Interrupted");
       expect(pausedState.last_error || "").toContain("startup");
+      releaseLeader();
     } finally {
+      releaseLeader();
       await fs.writeFile(paths.stopFlagPath, "1\n", "utf8");
       if (runPromise) {
         await Promise.race([

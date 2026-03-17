@@ -26,7 +26,6 @@ function makeConfig(): AppConfig {
     intervalSeconds: 1200,
     maxCycles: 0,
     exitOnError: false,
-    enableLeader: false,
     evaluatorReworkMaxAttempts: 1,
     consoleHost: "127.0.0.1",
     consolePort: 3090,

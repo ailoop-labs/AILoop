@@ -697,30 +697,6 @@ export function HotFileGovernancePanel({
   );
 }
 
-export function RunHistoryHotFileGovernanceIndicator({
-  signal
-}: {
-  signal: HotFileGovernanceResult | null;
-}) {
-  if (!signal) {
-    return null;
-  }
-
-  return (
-    <div className="mt-3 rounded-xl border border-warning/30 bg-warning/10 p-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <HotFileGovernanceBadge signal={signal} />
-          <p className="text-sm font-semibold text-mist">{signal.file_path}</p>
-        </div>
-        <p className="text-xs uppercase tracking-[0.18em] text-warning/90">{formatHotFileGovernanceLabels(signal)}</p>
-      </div>
-      <p className="mt-2 text-xs leading-6 text-mist/80">{signal.reason}</p>
-      <p className="mt-2 text-xs text-mist/65">Next: {signal.recommended_next_action}</p>
-    </div>
-  );
-}
-
 export function ArtifactCompletenessPanel({
   artifactCompleteness
 }: {
@@ -1875,7 +1851,11 @@ export default function App() {
                     </span>
                   </div>
 
-                  <RunHistoryHotFileGovernanceIndicator signal={hotFileGovernance} />
+                  {hotFileGovernance ? (
+                    <div className="mt-3">
+                      <HotFileGovernancePanel signal={hotFileGovernance} compact />
+                    </div>
+                  ) : null}
 
                   {incompleteEvidence ? (
                     <>

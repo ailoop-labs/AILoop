@@ -8,7 +8,6 @@ import {
   HotFileGovernancePanel,
   LifecycleStatusGrid,
   OperatorReasonPanel,
-  RunHistoryHotFileGovernanceIndicator,
   RunArtifactEvidenceGrid,
   SystemHealthPanel,
   deriveControlAvailability,
@@ -171,12 +170,10 @@ describe("HotFileGovernancePanel", () => {
   test("renders nothing when no hot-file governance signal is present", () => {
     expect(renderToStaticMarkup(<HotFileGovernancePanel signal={null} />)).toBe("");
   });
-});
 
-describe("RunHistoryHotFileGovernanceIndicator", () => {
-  test("renders a distinct run-history governance indicator with the file path, reason, and next action", () => {
+  test("renders the run-history hot-file governance surface with the file path, reason, and next action", () => {
     const html = renderToStaticMarkup(
-      <RunHistoryHotFileGovernanceIndicator
+      <HotFileGovernancePanel
         signal={{
           file_path: "web/src/App.tsx",
           heuristic_labels: ["recent-touch hot-file pressure", "line-count pressure"],
@@ -184,18 +181,16 @@ describe("RunHistoryHotFileGovernanceIndicator", () => {
           reason: "the evaluator blocked another inline governance change in the same file",
           recommended_next_action: "pause and split the next edit into a bounded follow-up"
         }}
+        compact
       />
     );
 
-    expect(html).toContain("hot file growth failure");
+    expect(html).toContain("Hot-File Governance");
     expect(html).toContain("web/src/App.tsx");
+    expect(html).toContain("hot_file_growth_failure");
     expect(html).toContain("recent-touch hot-file pressure, line-count pressure");
     expect(html).toContain("the evaluator blocked another inline governance change in the same file");
-    expect(html).toContain("Next: pause and split the next edit into a bounded follow-up");
-  });
-
-  test("renders nothing when a run-history item has no governance indicator", () => {
-    expect(renderToStaticMarkup(<RunHistoryHotFileGovernanceIndicator signal={null} />)).toBe("");
+    expect(html).toContain("pause and split the next edit into a bounded follow-up");
   });
 });
 

@@ -30,7 +30,6 @@ export interface AppConfig {
   intervalSeconds: number;
   maxCycles: number;
   exitOnError: boolean;
-  enableLeader: boolean;
   evaluatorReworkMaxAttempts: number;
   consoleHost: string;
   consolePort: number;
@@ -86,7 +85,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const intervalSeconds = parseNumber(get("AILOOP_INTERVAL_SECONDS"), 1200);
   const maxCycles = parseNumber(get("AILOOP_MAX_CYCLES"), 0);
   const exitOnError = (get("AILOOP_EXIT_ON_ERROR") ?? "0") === "1";
-  const enableLeader = (get("AILOOP_ENABLE_LEADER") ?? "0") === "1";
   const evaluatorReworkMaxAttempts = Math.max(
     0,
     Math.min(5, Math.round(parseNumber(get("AILOOP_EVAL_REWORK_MAX_ATTEMPTS"), 1)))
@@ -101,7 +99,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     intervalSeconds,
     maxCycles,
     exitOnError,
-    enableLeader,
     evaluatorReworkMaxAttempts,
     consoleHost,
     consolePort,

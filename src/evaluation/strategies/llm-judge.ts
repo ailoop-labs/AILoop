@@ -551,11 +551,16 @@ const STATE_CHANGE_EVIDENCE_PATTERNS: RegExp[] = [
 const STATE_CHANGE_EXCERPT_PATTERNS: RegExp[] = [
   /\bhotFilePressureCount\b/i,
   /Hot-File Pressure/i,
+  /Hot-File Governance/i,
+  /\bHotFileGovernancePanel\b/i,
   /governance blocks/i,
   /healthStatus/i,
   /\bat_risk\b/i,
   /\bbun test\b/i,
-  /System Health/i
+  /System Health/i,
+  /\brenderToStaticMarkup\b/i,
+  /\bexpect\s*\(/i,
+  /\btoContain\s*\(/i
 ];
 
 function normalizePromptText(value: string): string {
@@ -575,7 +580,7 @@ function scoreLogEvidence(line: string): number {
 
   if (/\[executor\]/i.test(line)) score += 60;
   if (/\[planner\]/i.test(line)) score -= 40;
-  if (/\[evaluator\]/i.test(line)) score += 10;
+  if (/\[evaluator\]/i.test(line)) score -= 80;
   if (/run_shell_command/i.test(line)) score += 30;
   if (/\/bin\/zsh -lc/i.test(line)) score += 20;
   if (/\bbun test\b/i.test(line)) score += 45;
@@ -593,11 +598,16 @@ function scoreStateChangeEvidence(line: string): number {
 
   if (/\bhotFilePressureCount\b/i.test(line)) score += 60;
   if (/Hot-File Pressure/i.test(line)) score += 50;
+  if (/Hot-File Governance/i.test(line)) score += 50;
+  if (/\bHotFileGovernancePanel\b/i.test(line)) score += 40;
   if (/governance blocks/i.test(line)) score += 45;
   if (/\bhealthStatus\b/i.test(line)) score += 25;
   if (/\bat_risk\b/i.test(line)) score += 20;
   if (/\bbun test\b/i.test(line)) score += 40;
   if (/System Health/i.test(line)) score += 25;
+  if (/\brenderToStaticMarkup\b/i.test(line)) score += 35;
+  if (/\bexpect\s*\(/i.test(line)) score += 55;
+  if (/\btoContain\s*\(/i.test(line)) score += 45;
 
   return score;
 }
@@ -606,6 +616,7 @@ function collectRelevantLogLines(logLines: string[]): string[] {
   return logLines
     .map((line) => normalizePromptText(line))
     .filter(Boolean)
+    .filter((line) => !/\[evaluator\]/i.test(line))
     .filter((line) => hasPattern(VALIDATION_SIGNAL_PATTERNS, line))
     .map((line, index) => ({ line, index, score: scoreLogEvidence(line) }))
     .filter((item) => item.score > 0)
@@ -672,7 +683,7 @@ function buildValidationSummary(
   }
 
   if (logSignals.length > 0 || stateChangeSignals.length > 0) {
-    const derivedSignals = [...logSignals, ...stateChangeSignals].slice(0, MAX_VALIDATION_HIGHLIGHTS);
+    const derivedSignals = [...stateChangeSignals, ...logSignals].slice(0, MAX_VALIDATION_HIGHLIGHTS);
     return {
       status: "derived",
       summary: "No explicit validation summary was attached; use the smallest executor-log and state-change excerpts selected as direct evidence.",
@@ -741,16 +752,6 @@ function buildTargetedExcerpts(
     });
   }
 
-  for (const line of collectRelevantLogLines(context.logLines)) {
-    addExcerpt({
-      source: "log_lines",
-      artifactPath: artifactManifest.round_log_path || "",
-      selectionReason:
-        "This executor log line is a direct verification or implementation signal and is more probative than planner/process guidance.",
-      excerpt: line
-    });
-  }
-
   for (const excerpt of collectRelevantStateChangeExcerpts(context.stateChange)) {
     addExcerpt({
       source: "state_change_excerpt",
@@ -768,6 +769,16 @@ function buildTargetedExcerpts(
       selectionReason:
         "State-change notes identify where verification or operational follow-up was recorded; include the note instead of the raw diff.",
       excerpt: note
+    });
+  }
+
+  for (const line of collectRelevantLogLines(context.logLines)) {
+    addExcerpt({
+      source: "log_lines",
+      artifactPath: artifactManifest.round_log_path || "",
+      selectionReason:
+        "This executor log line is a direct verification or implementation signal and is more probative than planner/process guidance.",
+      excerpt: line
     });
   }
 

@@ -62,7 +62,6 @@ function makeLlmConfig(dimensions: AppConfig["codex"]["llmEvaluatorDimensions"] 
     intervalSeconds: 1,
     maxCycles: 1,
     exitOnError: false,
-    enableLeader: false,
     evaluatorReworkMaxAttempts: 1,
     consoleHost: "127.0.0.1",
     consolePort: 3090,
@@ -648,7 +647,42 @@ describe("buildDimensionPrompt", () => {
     expect(targetedExcerpts.some((excerpt) => excerpt.excerpt.includes("61 pass, 0 fail"))).toBe(true);
     expect(targetedExcerpts.some((excerpt) => excerpt.excerpt.includes("hotFilePressureCount"))).toBe(true);
     expect(targetedExcerpts.some((excerpt) => excerpt.excerpt.includes("Hot-File Pressure"))).toBe(true);
-    expect(targetedExcerpts[0]?.excerpt).toContain("bun test src/server.test.ts web/src/App.test.tsx");
+    expect(targetedExcerpts[0]?.source).toBe("state_change_excerpt");
+  });
+
+  test("prefers direct state-change assertions over recursive evaluator log echoes", () => {
+    const context = makeRoundContext();
+    context.stateChange = [
+      "### Snapshot File Diffs",
+      "```diff",
+      "--- web/src/App.test.tsx",
+      "+++ web/src/App.test.tsx",
+      "@@ -170,6 +170,18 @@",
+      '+    expect(html).toContain("Hot-File Governance");',
+      '+    expect(html).toContain("web/src/App.tsx");',
+      '+    expect(html).toContain("pause and split the next edit into a bounded follow-up");',
+      "--- web/src/App.tsx",
+      "+++ web/src/App.tsx",
+      "@@ -1854,6 +1854,10 @@",
+      "+                      <HotFileGovernancePanel signal={hotFileGovernance} compact />",
+      "```"
+    ].join("\n");
+    context.logLines = [
+      '[04:49:29][evaluator] "[04:45:28][executor] {\\"actions\\":[\\"read_file: inspected web/src/App.tsx\\",\\"run_shell_command: Ran `bun test web/src/App.test.tsx` and confirmed `20 pass, 0 fail`.\\"]}"',
+      '[04:49:31][evaluator] "[04:45:38][evaluator] \\"[04:45:28][executor] {\\\\\\"actions\\\\\\":[\\\\\\"read_file\\\\\\"]}\\""',
+      "[executor] run_shell_command: Ran `bun test web/src/App.test.tsx` and confirmed `20 pass, 0 fail`."
+    ];
+
+    const roundContext = extractPromptRoundContext(buildDimensionPrompt("goal_alignment", context));
+    const validationSummary = roundContext.validation_summary as Record<string, unknown>;
+    const highlightedSignals = validationSummary.highlighted_signals as string[];
+    const targetedExcerpts = roundContext.targeted_excerpts as Array<Record<string, string>>;
+
+    expect(highlightedSignals.some((signal) => signal.includes('expect(html).toContain("Hot-File Governance")'))).toBe(true);
+    expect(targetedExcerpts[0]?.source).toBe("state_change_excerpt");
+    expect(targetedExcerpts[0]?.excerpt).toContain('expect(html).toContain("Hot-File Governance")');
+    expect(targetedExcerpts.some((excerpt) => excerpt.excerpt.includes("[evaluator]"))).toBe(false);
+    expect(targetedExcerpts.some((excerpt) => excerpt.excerpt.includes("\\\"actions\\\""))).toBe(false);
   });
 });
 
