@@ -814,8 +814,8 @@ export class LoopEngine {
           const priorJustification = evaluation.justification;
           const reworkExecutionStartedAt = Date.now();
           await enforceBudgetBeforeAction(`executor.execute auto-rework ${attempt}`);
-          execution = await activeAgent.execute({ 
-            subTask, round, goal, 
+          execution = await activeAgent.execute({
+            subTask, round, goal,
             instructions: buildEvaluatorReworkInstructions(
               instructions,
               evaluation,
@@ -826,8 +826,8 @@ export class LoopEngine {
                 logPath: artifacts.logPath,
                 stateChangePath: artifacts.stateChangePath
               }
-            ), 
-            guardrails, paths: this.paths, onLog: log 
+            ),
+            guardrails, paths: this.paths, onLog: log
           });
           phaseTimings.execution += Date.now() - reworkExecutionStartedAt;
           finalToolResult = withConcreteArtifactPaths(execution.toolResult, artifacts);
@@ -850,7 +850,7 @@ export class LoopEngine {
           if (evaluation.decision === "pass") break;
         }
       } else if (evaluation.decision === "fail" && failureRecoveryPath === "leader") {
-        await log("[GOVERNANCE] Routing evaluator failure directly to Leader before tactical rework.");
+        await log("[GOVERNANCE] Routing evaluator failure directly to Leader (evidence handoff issue detected).");
       }
 
       if (finalToolResult.status === "failure" && lastSuccessfulExecution) {
