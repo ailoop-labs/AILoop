@@ -1786,7 +1786,7 @@ describe("console server API contract", () => {
           present: ["log", "summary", "metrics", "state_change", "evaluation"],
           missing: []
         },
-        has_governance: false
+        has_governance: true
       }
     ]);
   });

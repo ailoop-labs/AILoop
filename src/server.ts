@@ -257,7 +257,7 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
 
             return {
               ...run,
-              has_governance: Boolean(governance.leader || governance.ccb)
+              has_governance: Boolean(governance.hot_file_governance || governance.leader || governance.ccb)
             };
           })
         );
