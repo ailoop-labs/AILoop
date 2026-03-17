@@ -163,6 +163,7 @@ export function buildExecutorPrompt(input: ExecutorPromptInput, executorRoleDefi
     "After performing actions in the workspace, output:",
     "- status: success or failure",
     "- summary: short factual sentence",
+    "- operational_evidence: array of compact proof snippets including direct verification command output and key code excerpts",
     "- error_type: empty string on success, otherwise a short machine-friendly type",
     "- error_message: empty string on success, otherwise a concrete failure reason",
     "- next_state_hint: continue/pause/stop",

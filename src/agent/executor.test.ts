@@ -107,6 +107,26 @@ describe("buildExecutorPrompt", () => {
     expect(prompt).toContain("If you run local verifications or test commands, capture the concrete evidence in both `summary` and `actions`.");
   });
 
+  test("requires operational evidence in the output contract", () => {
+    const prompt = buildExecutorPrompt(
+      {
+        round: 1,
+        goal: "Ship feature",
+        instructions: ["Keep scope minimal"],
+        subTask: sampleSubTask,
+        ailoopHome: "/tmp/.ailoop",
+        workspaceRoot: "/tmp/workspace",
+        availableTools: [{ name: "run_shell", description: "Execute shell command" }],
+        availableSkills: []
+      },
+      "# Executor Role\n\nProject-specific executor instructions."
+    );
+
+    expect(prompt).toContain("operational_evidence");
+    expect(prompt).toContain("direct verification command output");
+    expect(prompt).toContain("key code excerpts");
+  });
+
   test("adds runtime isolation guidance and repository-root navigation", () => {
     const prompt = buildExecutorPrompt(
       {
