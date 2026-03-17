@@ -25,6 +25,7 @@ export interface ExecuteResult {
 interface CodexExecutorResponse {
   status: "success" | "failure";
   summary: string;
+  operational_evidence: string[];
   error_type: string;
   error_message: string;
   next_state_hint: "continue" | "pause" | "stop";
@@ -50,6 +51,11 @@ const EXECUTOR_RESPONSE_SCHEMA: JsonSchema = {
   properties: {
     status: { type: "string", enum: ["success", "failure"] },
     summary: { type: "string" },
+    operational_evidence: {
+      type: "array",
+      items: { type: "string" },
+      description: "CRITICAL: Direct command outputs and key implementation code excerpts proving the work succeeded. Must include: 1) Direct test/build command outputs showing pass/fail results, 2) Key code excerpts supporting the claimed changes."
+    },
     error_type: { type: "string" },
     error_message: { type: "string" },
     next_state_hint: { type: "string", enum: ["continue", "pause", "stop"] },
@@ -58,7 +64,7 @@ const EXECUTOR_RESPONSE_SCHEMA: JsonSchema = {
       items: { type: "string" }
     }
   },
-  required: ["status", "summary", "error_type", "error_message", "next_state_hint", "actions"],
+  required: ["status", "summary", "operational_evidence", "error_type", "error_message", "next_state_hint", "actions"],
   additionalProperties: false
 };
 
@@ -256,6 +262,7 @@ export class ExecutorAgent {
         toolResult: {
           status: "failure",
           summary: "Executor could not complete the task because Codex execution failed.",
+          operational_evidence: [],
           artifacts: {
             state_change_path: options.paths.runsDir,
             log_path: options.paths.runsDir
@@ -291,6 +298,7 @@ export class ExecutorAgent {
       toolResult: {
         status: safeStatus,
         summary: String(codexResult.data.summary || "No summary provided by Codex executor."),
+        operational_evidence: codexResult.data.operational_evidence ?? [],
         artifacts: {
           state_change_path: options.paths.runsDir, // Will be replaced by finalizeRoundArtifacts with the concrete file path
           log_path: options.paths.runsDir // Will be replaced by finalizeRoundArtifacts with the concrete file path
