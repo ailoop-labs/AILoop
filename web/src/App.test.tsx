@@ -9,6 +9,7 @@ import {
   LifecycleStatusGrid,
   OperatorReasonPanel,
   RunArtifactEvidenceGrid,
+  SystemHealthPanel,
   deriveControlAvailability,
   postControlAndRefresh,
   summarizeApiError
@@ -270,6 +271,34 @@ describe("BudgetHealthPanel", () => {
     expect(html).toContain("0.9000 / 1");
     expect(html).toContain("11 / 10");
     expect(html).toContain("30s / 2m");
+  });
+});
+
+describe("SystemHealthPanel", () => {
+  test("renders recent hot-file pressure alongside the existing friction metrics", () => {
+    const html = renderToStaticMarkup(
+      <SystemHealthPanel
+        frictionIndex={{
+          reworkChurnRate: 0.15,
+          averageActions: 18.2,
+          leaderInterventionCount: 1,
+          overEngineeringCount: 0,
+          hotFilePressureCount: 2,
+          healthStatus: "at_risk"
+        }}
+      />
+    );
+
+    expect(html).toContain("System Health (Friction Index)");
+    expect(html).toContain("Recent telemetry from the last 20 rounds.");
+    expect(html).toContain("Hot-File Pressure");
+    expect(html).toContain("governance blocks");
+    expect(html).toContain(">2<");
+    expect(html).toContain("Interventions");
+  });
+
+  test("renders nothing when friction telemetry is unavailable", () => {
+    expect(renderToStaticMarkup(<SystemHealthPanel frictionIndex={null} />)).toBe("");
   });
 });
 

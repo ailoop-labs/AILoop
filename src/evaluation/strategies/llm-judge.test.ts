@@ -611,6 +611,45 @@ describe("buildDimensionPrompt", () => {
     expect(targetedExcerpts[0]?.artifact_path).toBe(".ailoop/runs/example.round.state_change.txt");
     expect(targetedExcerpts.some((excerpt) => excerpt.source === "log_lines")).toBe(true);
   });
+
+  test("prefers executor validation evidence over planner guidance when deriving excerpts", () => {
+    const context = makeRoundContext();
+    context.stateChange = [
+      "### Snapshot File Diffs",
+      "```diff",
+      "--- src/utils/db.ts",
+      "+++ src/utils/db.ts",
+      "@@ -296,6 +296,12 @@",
+      "+      hotFilePressureCount: hotFilePressure?.count || 0,",
+      "--- web/src/App.tsx",
+      "+++ web/src/App.tsx",
+      "@@ -840,6 +850,12 @@",
+      "+          <p className=\"text-[10px] uppercase tracking-widest text-mist/50\">Hot-File Pressure</p>",
+      "+          <p className=\"text-[10px] uppercase tracking-[0.18em] text-mist/45\">governance blocks</p>",
+      "```"
+    ].join("\n");
+    context.logLines = [
+      "[planner] validation: Prefer sub-tasks with clear verification steps and visible user value.",
+      "[planner] failure history should influence the next rationale.",
+      "[executor] /bin/zsh -lc 'bun test src/server.test.ts web/src/App.test.tsx' in /Users/yinjames/projects/AILoop",
+      "[executor] run_shell_command: Ran `bun test src/server.test.ts web/src/App.test.tsx` in `/Users/yinjames/projects/AILoop` and confirmed `61 pass, 0 fail`.",
+      "[executor] +      hotFilePressureCount: hotFilePressure?.count || 0,",
+      "[executor] +          <p className=\"text-[10px] uppercase tracking-widest text-mist/50\">Hot-File Pressure</p>"
+    ];
+
+    const roundContext = extractPromptRoundContext(buildDimensionPrompt("goal_alignment", context));
+    const validationSummary = roundContext.validation_summary as Record<string, unknown>;
+    const highlightedSignals = validationSummary.highlighted_signals as string[];
+    const targetedExcerpts = roundContext.targeted_excerpts as Array<Record<string, string>>;
+
+    expect(validationSummary.status).toBe("derived");
+    expect(highlightedSignals.some((signal) => signal.includes("61 pass, 0 fail"))).toBe(true);
+    expect(highlightedSignals.some((signal) => signal.includes("hotFilePressureCount"))).toBe(true);
+    expect(targetedExcerpts.some((excerpt) => excerpt.excerpt.includes("61 pass, 0 fail"))).toBe(true);
+    expect(targetedExcerpts.some((excerpt) => excerpt.excerpt.includes("hotFilePressureCount"))).toBe(true);
+    expect(targetedExcerpts.some((excerpt) => excerpt.excerpt.includes("Hot-File Pressure"))).toBe(true);
+    expect(targetedExcerpts[0]?.excerpt).toContain("bun test src/server.test.ts web/src/App.test.tsx");
+  });
 });
 
 describe("LLMJudgeEvaluator logging", () => {

@@ -208,6 +208,7 @@ export interface LeaderContext {
   goal: string;
   lastError: string | null;
   previousEvaluationJustification: string | null;
+  previousToolResult?: ToolResult | null;
   previousEvaluationDimensions?: DimensionAssessment[];
   previousHotFileGovernance?: HotFileGovernanceResult | null;
   stateChange: string | null;

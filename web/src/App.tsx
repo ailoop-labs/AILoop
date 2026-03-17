@@ -164,6 +164,7 @@ interface FrictionIndex {
   averageActions: number;
   leaderInterventionCount: number;
   overEngineeringCount: number;
+  hotFilePressureCount: number;
   healthStatus: "healthy" | "at_risk";
 }
 
@@ -815,6 +816,59 @@ export function BudgetHealthPanel({
   );
 }
 
+export function SystemHealthPanel({ frictionIndex }: { frictionIndex: FrictionIndex | null }) {
+  if (!frictionIndex) {
+    return null;
+  }
+
+  return (
+    <div className="mt-4 rounded-xl border border-white/10 bg-ink/60 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs uppercase tracking-[0.2em] text-mist/70">System Health (Friction Index)</p>
+          <p className="mt-1 text-xs text-mist/55">Recent telemetry from the last 20 rounds.</p>
+        </div>
+        <span
+          className={`h-2 w-2 rounded-full ${
+            frictionIndex.healthStatus === "healthy"
+              ? "bg-accent shadow-[0_0_8px_rgba(102,255,187,0.6)]"
+              : "bg-ember animate-pulse shadow-[0_0_8px_rgba(255,102,102,0.6)]"
+          }`}
+        />
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-4 md:grid-cols-5">
+        <div>
+          <p className="text-[10px] uppercase tracking-widest text-mist/50">Rework Churn</p>
+          <p className={`text-lg font-bold ${frictionIndex.reworkChurnRate > 0.4 ? "text-ember" : "text-mist"}`}>
+            {(frictionIndex.reworkChurnRate * 100).toFixed(0)}%
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-widest text-mist/50">Avg Actions</p>
+          <p className={`text-lg font-bold ${frictionIndex.averageActions > 50 ? "text-warning" : "text-mist"}`}>
+            {frictionIndex.averageActions.toFixed(1)}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-widest text-mist/50">Interventions</p>
+          <p className="text-lg font-bold text-mist">{frictionIndex.leaderInterventionCount}</p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-widest text-mist/50">Over-Engineering</p>
+          <p className="text-lg font-bold text-mist">{frictionIndex.overEngineeringCount}</p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-widest text-mist/50">Hot-File Pressure</p>
+          <p className={`text-lg font-bold ${frictionIndex.hotFilePressureCount > 0 ? "text-warning" : "text-mist"}`}>
+            {frictionIndex.hotFilePressureCount}
+          </p>
+          <p className="text-[10px] uppercase tracking-[0.18em] text-mist/45">governance blocks</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function LifecycleStatusGrid({ status }: { status: LoopStatus | null }) {
   const pendingInstructionCount = status?.pending_instruction_count ?? 0;
   const pauseReason = status?.pause_reason ?? "None active";
@@ -1349,36 +1403,7 @@ export default function App() {
         </div>
         <CrashRecoveryPanel crashRecovery={status?.crash_recovery ?? null} />
 
-        {frictionIndex && (
-          <div className="mt-4 rounded-xl border border-white/10 bg-ink/60 p-4">
-            <div className="flex items-center justify-between">
-              <p className="text-xs uppercase tracking-[0.2em] text-mist/70">System Health (Friction Index)</p>
-              <span className={`h-2 w-2 rounded-full ${frictionIndex.healthStatus === 'healthy' ? 'bg-accent shadow-[0_0_8px_rgba(102,255,187,0.6)]' : 'bg-ember animate-pulse shadow-[0_0_8px_rgba(255,102,102,0.6)]'}`} />
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-4 md:grid-cols-4">
-              <div>
-                <p className="text-[10px] uppercase tracking-widest text-mist/50">Rework Churn</p>
-                <p className={`text-lg font-bold ${(frictionIndex.reworkChurnRate > 0.4) ? 'text-ember' : 'text-mist'}`}>
-                  {(frictionIndex.reworkChurnRate * 100).toFixed(0)}%
-                </p>
-              </div>
-              <div>
-                <p className="text-[10px] uppercase tracking-widest text-mist/50">Avg Actions</p>
-                <p className={`text-lg font-bold ${(frictionIndex.averageActions > 50) ? 'text-warning' : 'text-mist'}`}>
-                  {frictionIndex.averageActions.toFixed(1)}
-                </p>
-              </div>
-              <div>
-                <p className="text-[10px] uppercase tracking-widest text-mist/50">Interventions</p>
-                <p className="text-lg font-bold text-mist">{frictionIndex.leaderInterventionCount}</p>
-              </div>
-              <div>
-                <p className="text-[10px] uppercase tracking-widest text-mist/50">Over-Engineering</p>
-                <p className="text-lg font-bold text-mist">{frictionIndex.overEngineeringCount}</p>
-              </div>
-            </div>
-          </div>
-        )}
+        <SystemHealthPanel frictionIndex={frictionIndex} />
 
         <div className="mt-4 rounded-xl border border-white/10 bg-ink/60 p-4">
           <div className="flex items-center justify-between gap-3">

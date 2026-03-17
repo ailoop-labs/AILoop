@@ -29,6 +29,17 @@ function normalizeDiagnosticExcerpt(value: string | undefined, redactor: SecretR
   return normalized.slice(0, 500);
 }
 
+function compactLeaderEvidence(value: string | null | undefined): string {
+  const redactor = new SecretRedactor(process.env);
+  const normalized = (value ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 12)
+    .join("\n");
+  return normalizeDiagnosticExcerpt(normalized, redactor) ?? "None";
+}
+
 function buildLeaderFailureMessage(result: CodexJsonCallResult<LeaderDecision>): string {
   const redactor = new SecretRedactor(process.env);
   const baseMessage = normalizeDiagnosticExcerpt(result.error, redactor) ?? "Leader strategy execution failed";
@@ -52,6 +63,13 @@ function buildLeaderFailureMessage(result: CodexJsonCallResult<LeaderDecision>):
 }
 
 function buildLeaderPrompt(context: LeaderContext, roleDefinition: string): string {
+  const previousToolResultSummary = context.previousToolResult?.summary?.trim() ?? "None";
+  const previousArtifactRefs = context.previousToolResult
+    ? [
+        `- Log Artifact: ${context.previousToolResult.artifacts.log_path || "None"}`,
+        `- State Change Artifact: ${context.previousToolResult.artifacts.state_change_path || "None"}`
+      ].join("\n")
+    : "None";
   const dimensionsSummary = context.previousEvaluationDimensions
     ? context.previousEvaluationDimensions.map(d => 
         `- ${d.dimension}: ${d.decision} (score=${d.score}, confidence=${d.confidence}) - ${d.justification}`
@@ -77,17 +95,31 @@ function buildLeaderPrompt(context: LeaderContext, roleDefinition: string): stri
     `- Goal: ${context.goal}`,
     `- Last Error: ${context.lastError ?? "None"}`,
     `- Pause Diagnostic: ${pauseDiagnosticSummary}`,
+    `- Previous Tool Result Summary: ${previousToolResultSummary}`,
+    `- Previous Artifact References:\n${previousArtifactRefs}`,
     `- Previous Evaluation Dimensions:`,
     dimensionsSummary,
     "",
     `- Hot-File Governance Signal:`,
     hotFileGovernanceSummary,
     "",
+    `- Recent State Change Evidence:`,
+    compactLeaderEvidence(context.stateChange),
+    "",
     "## Task",
     "Analyze the situation and decide the next move.",
+    "If the executor claims success but the evaluator failed for missing evidence, treat that as a validation/evidence-handoff failure first, not as a product-code failure.",
     "1. If it's an 'implementation_failure', provide strategic instructions for the Executor and set action='resume'.",
     "2. If the goal in README.md is unreachable given the current constraints/logic, it's a 'constitutional_conflict'. Set action='escalate_to_ccb' and propose a change to README.md.",
-    "3. Return the decision as JSON."
+    "3. Return strict JSON only.",
+    "4. JSON fields must be exactly:",
+    '{',
+    '  "rationale": "short diagnosis",',
+    '  "action": "resume" | "stop" | "escalate_to_ccb",',
+    '  "diagnosis_type": "implementation_failure" | "constitutional_conflict",',
+    '  "instructions": ["compact next-step instruction"],',
+    '  "proposed_readme_change": "optional markdown when action=escalate_to_ccb"',
+    '}'
   ].join("\n");
 }
 

@@ -293,12 +293,28 @@ export class DatabaseManager {
       WHERE root_cause = 'over_engineering'
     `).get() as any;
 
+    // 5. Hot-file pressure: Count recent rounds blocked by hot-file governance in the last 20 rounds
+    const hotFilePressure = this.db.query(`
+      SELECT COUNT(*) as count
+      FROM (
+        SELECT DISTINCT round_id
+        FROM evaluations
+        WHERE hot_file_governance_json IS NOT NULL
+          AND TRIM(hot_file_governance_json) != ''
+          AND round_id IN (SELECT round_id FROM rounds ORDER BY round_id DESC LIMIT 20)
+      )
+    `).get() as any;
+
     return {
       reworkChurnRate: reworkChurn?.rate || 0,
       averageActions: actionBloat?.avg_actions || 0,
       leaderInterventionCount: leaderInterventions?.count || 0,
       overEngineeringCount: overEngineeringCount?.count || 0,
-      healthStatus: (reworkChurn?.rate > 0.4 || actionBloat?.avg_actions > 50) ? 'at_risk' : 'healthy'
+      hotFilePressureCount: hotFilePressure?.count || 0,
+      healthStatus:
+        reworkChurn?.rate > 0.4 || actionBloat?.avg_actions > 50 || (hotFilePressure?.count || 0) > 1
+          ? "at_risk"
+          : "healthy"
     };
   }
 

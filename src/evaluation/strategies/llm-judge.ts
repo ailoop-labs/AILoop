@@ -548,6 +548,16 @@ const STATE_CHANGE_EVIDENCE_PATTERNS: RegExp[] = [
   /\bvalidat(?:e|ion)\b/i
 ];
 
+const STATE_CHANGE_EXCERPT_PATTERNS: RegExp[] = [
+  /\bhotFilePressureCount\b/i,
+  /Hot-File Pressure/i,
+  /governance blocks/i,
+  /healthStatus/i,
+  /\bat_risk\b/i,
+  /\bbun test\b/i,
+  /System Health/i
+];
+
 function normalizePromptText(value: string): string {
   return redactSecretLikeText(value.replace(/\s+/g, " ").trim());
 }
@@ -560,11 +570,47 @@ function truncatePromptText(value: string, maxLength = MAX_EXCERPT_LENGTH): stri
   return `${value.slice(0, maxLength - 3).trimEnd()}...`;
 }
 
+function scoreLogEvidence(line: string): number {
+  let score = 10;
+
+  if (/\[executor\]/i.test(line)) score += 60;
+  if (/\[planner\]/i.test(line)) score -= 40;
+  if (/\[evaluator\]/i.test(line)) score += 10;
+  if (/run_shell_command/i.test(line)) score += 30;
+  if (/\/bin\/zsh -lc/i.test(line)) score += 20;
+  if (/\bbun test\b/i.test(line)) score += 45;
+  if (/\b\d+\s+pass,\s+\d+\s+fail\b/i.test(line)) score += 55;
+  if (/\bhotFilePressureCount\b/i.test(line)) score += 40;
+  if (/Hot-File Pressure/i.test(line)) score += 35;
+  if (/governance blocks/i.test(line)) score += 30;
+  if (/expected_outcome|rationale|goal|failure history/i.test(line)) score -= 25;
+
+  return score;
+}
+
+function scoreStateChangeEvidence(line: string): number {
+  let score = 0;
+
+  if (/\bhotFilePressureCount\b/i.test(line)) score += 60;
+  if (/Hot-File Pressure/i.test(line)) score += 50;
+  if (/governance blocks/i.test(line)) score += 45;
+  if (/\bhealthStatus\b/i.test(line)) score += 25;
+  if (/\bat_risk\b/i.test(line)) score += 20;
+  if (/\bbun test\b/i.test(line)) score += 40;
+  if (/System Health/i.test(line)) score += 25;
+
+  return score;
+}
+
 function collectRelevantLogLines(logLines: string[]): string[] {
   return logLines
     .map((line) => normalizePromptText(line))
     .filter(Boolean)
-    .filter((line) => hasPattern(VALIDATION_SIGNAL_PATTERNS, line));
+    .filter((line) => hasPattern(VALIDATION_SIGNAL_PATTERNS, line))
+    .map((line, index) => ({ line, index, score: scoreLogEvidence(line) }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .map((item) => item.line);
 }
 
 function collectRelevantStateChangeNotes(notes: string[]): string[] {
@@ -572,6 +618,20 @@ function collectRelevantStateChangeNotes(notes: string[]): string[] {
     .map((note) => normalizePromptText(note))
     .filter(Boolean)
     .filter((note) => hasPattern(STATE_CHANGE_EVIDENCE_PATTERNS, note));
+}
+
+function collectRelevantStateChangeExcerpts(stateChange: string): string[] {
+  return stateChange
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => (line.startsWith("+") || line.startsWith("-")) && !line.startsWith("+++") && !line.startsWith("---"))
+    .map((line) => normalizePromptText(line))
+    .filter(Boolean)
+    .filter((line) => hasPattern(STATE_CHANGE_EXCERPT_PATTERNS, line))
+    .map((line, index) => ({ line, index, score: scoreStateChangeEvidence(line) }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .map((item) => item.line);
 }
 
 function buildValidationSummary(
@@ -583,7 +643,10 @@ function buildValidationSummary(
     .map((line) => normalizePromptText(line))
     .filter(Boolean);
   const logSignals = collectRelevantLogLines(context.logLines);
-  const stateChangeSignals = collectRelevantStateChangeNotes(stateChangeSummary.notes);
+  const stateChangeSignals = [
+    ...collectRelevantStateChangeExcerpts(context.stateChange),
+    ...collectRelevantStateChangeNotes(stateChangeSummary.notes)
+  ];
   const errorSignal = context.toolResult.error
     ? normalizePromptText(`${context.toolResult.error.type}: ${context.toolResult.error.message}`)
     : "";
@@ -612,7 +675,7 @@ function buildValidationSummary(
     const derivedSignals = [...logSignals, ...stateChangeSignals].slice(0, MAX_VALIDATION_HIGHLIGHTS);
     return {
       status: "derived",
-      summary: "No explicit validation summary was attached; use the smallest validation-like excerpts selected from logs or state-change notes.",
+      summary: "No explicit validation summary was attached; use the smallest executor-log and state-change excerpts selected as direct evidence.",
       primary_sources: [
         ...(logSignals.length > 0 ? ["artifact_manifest.round_log_path"] : []),
         ...(stateChangeSignals.length > 0 ? ["artifact_manifest.state_change_path"] : [])
@@ -678,6 +741,26 @@ function buildTargetedExcerpts(
     });
   }
 
+  for (const line of collectRelevantLogLines(context.logLines)) {
+    addExcerpt({
+      source: "log_lines",
+      artifactPath: artifactManifest.round_log_path || "",
+      selectionReason:
+        "This executor log line is a direct verification or implementation signal and is more probative than planner/process guidance.",
+      excerpt: line
+    });
+  }
+
+  for (const excerpt of collectRelevantStateChangeExcerpts(context.stateChange)) {
+    addExcerpt({
+      source: "state_change_excerpt",
+      artifactPath: artifactManifest.state_change_path || "",
+      selectionReason:
+        "This compact state-change excerpt shows the observable implementation surface without embedding the full diff.",
+      excerpt
+    });
+  }
+
   for (const note of collectRelevantStateChangeNotes(stateChangeSummary.notes)) {
     addExcerpt({
       source: "state_change_summary.notes",
@@ -685,16 +768,6 @@ function buildTargetedExcerpts(
       selectionReason:
         "State-change notes identify where verification or operational follow-up was recorded; include the note instead of the raw diff.",
       excerpt: note
-    });
-  }
-
-  for (const line of collectRelevantLogLines(context.logLines)) {
-    addExcerpt({
-      source: "log_lines",
-      artifactPath: artifactManifest.round_log_path || "",
-      selectionReason:
-        "This log line contains a validation or failure keyword and is more probative than generic executor chatter.",
-      excerpt: line
     });
   }
 

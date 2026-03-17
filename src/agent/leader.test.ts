@@ -3,13 +3,25 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import type { AppConfig } from "../config/env";
-import type { LeaderContext } from "../types/contracts";
+import type { LeaderContext, ToolResult } from "../types/contracts";
 import { LeaderAgent } from "./leader";
+
+const samplePreviousToolResult: ToolResult = {
+  status: "success",
+  summary:
+    "Verified the existing workspace change set computes hot-file-pressure telemetry in `src/utils/db.ts`, renders it in the Web Console, and `bun test src/server.test.ts web/src/App.test.tsx` passed with `61 pass, 0 fail`.",
+  artifacts: {
+    log_path: ".ailoop/runs/example.round.log",
+    state_change_path: ".ailoop/runs/example.round.state_change.txt"
+  },
+  next_state_hint: "continue"
+};
 
 const sampleLeaderContext: LeaderContext = {
   goal: "Keep the runtime loop aligned with documented isolation guarantees.",
   lastError: "Evaluator reported missing runtime isolation coverage.",
   previousEvaluationJustification: "Leader path does not enforce the internal runtime session contract.",
+  previousToolResult: samplePreviousToolResult,
   previousEvaluationDimensions: [
     {
       dimension: "constraint_compliance",
@@ -29,7 +41,11 @@ const sampleLeaderContext: LeaderContext = {
     reason: "continued growth in pressured file without bounded justification",
     recommended_next_action: "Split the next change into a narrower structural-maintenance pass."
   },
-  stateChange: null
+  stateChange: [
+    "+      hotFilePressureCount: hotFilePressure?.count || 0,",
+    "+          <p className=\"text-[10px] uppercase tracking-widest text-mist/50\">Hot-File Pressure</p>",
+    "+          <p className=\"text-[10px] uppercase tracking-[0.18em] text-mist/45\">governance blocks</p>"
+  ].join("\n")
 };
 
 function makeConfig(homeDir: string): AppConfig {
@@ -129,10 +145,17 @@ describe("LeaderAgent", () => {
       expect(capturedPrompt).toContain("Custom leader guidance.");
       expect(capturedPrompt).toContain(sampleLeaderContext.goal);
       expect(capturedPrompt).toContain(sampleLeaderContext.lastError ?? "");
+      expect(capturedPrompt).toContain(samplePreviousToolResult.summary);
+      expect(capturedPrompt).toContain(samplePreviousToolResult.artifacts.state_change_path);
+      expect(capturedPrompt).toContain("61 pass, 0 fail");
       expect(capturedPrompt).toContain("Pause Diagnostic: Hot-file governance block in src/agent/leader.ts");
       expect(capturedPrompt).toContain("Hot-File Governance Signal");
       expect(capturedPrompt).toContain("recent-touch hot-file pressure, line-count pressure");
       expect(capturedPrompt).toContain("Split the next change into a narrower structural-maintenance pass.");
+      expect(capturedPrompt).toContain("Recent State Change Evidence");
+      expect(capturedPrompt).toContain("hotFilePressureCount");
+      expect(capturedPrompt).toContain("Return strict JSON only");
+      expect(capturedPrompt).toContain("\"action\": \"resume\" | \"stop\" | \"escalate_to_ccb\"");
       expect(capturedIsolationEnabled).toBe(true);
       expect(capturedIsolationGuide).toContain("Internal Runtime Agent Session");
       expect(capturedIsolationGuide).toContain("You are the internal Leader agent inside the AILoop product.");

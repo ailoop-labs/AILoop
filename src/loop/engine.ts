@@ -213,6 +213,58 @@ export function buildEvaluatorReworkInstructions(
   return next;
 }
 
+export function decideEvaluationFailureRecoveryPath(
+  evaluation: EvaluationResult,
+  toolResult: ToolResult
+): "auto_rework" | "leader" {
+  if (evaluation.decision !== "fail" || toolResult.status !== "success") {
+    return "auto_rework";
+  }
+
+  const rootCause = evaluation.root_cause?.trim().toLowerCase() ?? "";
+  if (rootCause.startsWith("insufficient_evidence:") || rootCause.startsWith("evaluator_infrastructure:")) {
+    return "leader";
+  }
+
+  const text = [
+    evaluation.justification,
+    evaluation.recommended_next_action,
+    ...(evaluation.evidence ?? []),
+    ...(evaluation.dimensions ?? []).flatMap((dimension) => [
+      dimension.justification,
+      dimension.recommended_next_action,
+      ...(dimension.evidence ?? []),
+      ...(dimension.blocking_issues ?? [])
+    ])
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
+
+  const hasKeyUnknownDimension = (evaluation.dimensions ?? []).some(
+    (dimension) =>
+      (dimension.dimension === "goal_alignment" ||
+        dimension.dimension === "causal_validity" ||
+        dimension.dimension === "constraint_compliance") &&
+      dimension.decision === "unknown"
+  );
+
+  const looksLikeEvidenceHandoffFailure =
+    /insufficient evidence/.test(text) ||
+    /no explicit validation summary/.test(text) ||
+    /no behavioral verification excerpt/.test(text) ||
+    /targeted excerpt/.test(text) ||
+    /compact evidence/.test(text) ||
+    /validation evidence is missing/.test(text) ||
+    /attach minimal proof/.test(text);
+
+  if (hasKeyUnknownDimension || looksLikeEvidenceHandoffFailure) {
+    return "leader";
+  }
+
+  return "auto_rework";
+}
+
 export function resolveNextLastError(currentLastError: string | null, requestedLastError?: string | null): string | null {
   if (requestedLastError === undefined) return currentLastError;
   return requestedLastError;
@@ -384,6 +436,17 @@ export async function collectOperationalEvidence(
   };
 }
 
+async function readLeaderStateChangeEvidence(toolResult: ToolResult | null | undefined): Promise<string | null> {
+  const stateChangePath = toolResult?.artifacts.state_change_path?.trim();
+  if (!stateChangePath) {
+    return null;
+  }
+
+  const content = await readTextFile(stateChangePath, "");
+  const normalized = content.trim();
+  return normalized ? normalized : null;
+}
+
 export class LoopEngine {
   private readonly paths;
   private readonly planner: PlannerAgent;
@@ -457,9 +520,10 @@ export class LoopEngine {
                   goal: goalContent,
                   lastError: currentStateData.last_error,
                   previousEvaluationJustification: currentStateData.last_error,
+                  previousToolResult: currentStateData.previous_tool_result,
                   previousEvaluationDimensions: currentStateData.previous_evaluation_dimensions,
                   previousHotFileGovernance: currentStateData.previous_hot_file_governance,
-                  stateChange: null
+                  stateChange: await readLeaderStateChangeEvidence(currentStateData.previous_tool_result)
                 },
                 paths: this.paths,
                 onLog: (msg) => console.log(`[LEADER] ${msg}`)
@@ -714,9 +778,10 @@ export class LoopEngine {
       let evaluation = await activeEvaluator.evaluate({ subTask, toolResult: finalToolResult, stateChange, logLines, runTimestamp: runId, budgetLimits: guardrails.limitsSnapshot(), budgetUsage: guardrails.usage(), onLog: log });
       phaseTimings.evaluation += Date.now() - evaluationStartedAt;
       let autoReworkAttempts = 0;
+      const failureRecoveryPath = decideEvaluationFailureRecoveryPath(evaluation, finalToolResult);
 
       // --- TACTICAL STEP 2: Auto-Rework (Max 2) ---
-      if (evaluation.decision === "fail" && finalToolResult.status === "success") {
+      if (evaluation.decision === "fail" && finalToolResult.status === "success" && failureRecoveryPath === "auto_rework") {
         for (let attempt = 1; attempt <= tacticalReworkLimit; attempt++) {
           autoReworkAttempts = attempt;
           await log(`[GOVERNANCE] Tactical Rework attempt ${attempt}/${tacticalReworkLimit}`);
@@ -758,6 +823,8 @@ export class LoopEngine {
           );
           if (evaluation.decision === "pass") break;
         }
+      } else if (evaluation.decision === "fail" && failureRecoveryPath === "leader") {
+        await log("[GOVERNANCE] Routing evaluator failure directly to Leader before tactical rework.");
       }
 
       if (finalToolResult.status === "failure" && lastSuccessfulExecution) {

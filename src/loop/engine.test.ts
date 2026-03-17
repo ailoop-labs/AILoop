@@ -3,7 +3,15 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../config/env";
-import type { ActionRecord, EvaluationResult, ProductManagerContext, SubTask, ToolResult } from "../types/contracts";
+import type {
+  ActionRecord,
+  EvaluationResult,
+  LeaderContext,
+  LeaderDecision,
+  ProductManagerContext,
+  SubTask,
+  ToolResult
+} from "../types/contracts";
 import { ensureLoopHome, readLoopState, setFlag, type LoopPaths, writeLoopState } from "./state";
 import { writeActiveRequirementArtifact } from "../product/requirements";
 import { WorkspaceManager } from "../environment/workspace";
@@ -11,6 +19,7 @@ import {
   LoopEngine,
   buildEvaluatorReworkInstructions,
   collectOperationalEvidence,
+  decideEvaluationFailureRecoveryPath,
   extractSnapshotTargetsFromSubTask,
   resolveNextLastError
 } from "./engine";
@@ -182,6 +191,50 @@ describe("buildEvaluatorReworkInstructions", () => {
   });
 });
 
+describe("decideEvaluationFailureRecoveryPath", () => {
+  test("routes insufficient evidence failures to Leader before auto rework", () => {
+    const path = decideEvaluationFailureRecoveryPath(
+      {
+        decision: "fail",
+        justification: "Insufficient evidence for key dimensions: goal_alignment, causal_validity, constraint_compliance.",
+        root_cause: "insufficient_evidence:goal_alignment",
+        evidence: ["No behavioral verification excerpt was attached."],
+        recommended_next_action: "Attach minimal proof.",
+        dimensions: [
+          {
+            dimension: "goal_alignment",
+            decision: "unknown",
+            score: 58,
+            confidence: 0.94,
+            justification: "No direct verification excerpt was attached.",
+            evidence: ["The executor summary is not enough on its own."],
+            blocking_issues: ["No code or state-change excerpt demonstrates the requested behavior."],
+            recommended_next_action: "Attach minimal proof."
+          }
+        ]
+      },
+      makeToolResult("Executor claims the targeted bun test passed with 61 pass, 0 fail.")
+    );
+
+    expect(path).toBe("leader");
+  });
+
+  test("keeps clear implementation failures on the auto rework path", () => {
+    const path = decideEvaluationFailureRecoveryPath(
+      {
+        decision: "fail",
+        justification: "A focused regression test still fails after the change.",
+        root_cause: "implementation_failure:test_regression",
+        evidence: ["bun test src/loop/engine.test.ts failed with one assertion mismatch."],
+        recommended_next_action: "Fix the failing assertion and rerun the focused test."
+      },
+      makeToolResult("Updated the failing code path but one regression still fails.")
+    );
+
+    expect(path).toBe("auto_rework");
+  });
+});
+
 describe("LoopEngine auto rework", () => {
   test("persists detailed governance failures from Leader execution into loop state", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-governance-error-test-"));
@@ -225,6 +278,194 @@ describe("LoopEngine auto rework", () => {
     expect(finalState.last_error).toBe(
       "Governance failed: Codex exited with code 1 | stderr: upstream apiToken=[REDACTED] returned 502 Bad Gateway | raw: {\"detail\":\"returned non-json strategy blob\"}"
     );
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("skips tactical auto rework and returns failure immediately when evidence insufficiency should go to Leader", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-leader-first-routing-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir,
+      AILOOP_EVAL_REWORK_MAX_ATTEMPTS: "2"
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const plan: SubTask = {
+      assignee: "executor",
+      rationale: "test rationale",
+      objective: "Add hot-file pressure telemetry evidence",
+      expected_outcome: "The evaluator can verify the telemetry through compact evidence",
+      impacted_files: [],
+      recommended_tools: ["read_file", "write_file", "run_shell"]
+    };
+
+    let executeCall = 0;
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      executor: {
+        execute: () => Promise<{
+          actions: ActionRecord[];
+          toolResult: ToolResult;
+        }>;
+      };
+      evaluator: { evaluate: () => Promise<EvaluationResult> };
+      collectOperationalEvidence: () => Promise<{
+        summaryNote: string;
+        lines: string[];
+        stateChangeNotes: string[];
+      }>;
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+
+    mutable.planner = { plan: async () => plan };
+    mutable.executor = {
+      execute: async () => {
+        executeCall += 1;
+        return {
+          actions: [makeAction("write_file"), makeAction("run_shell")],
+          toolResult: {
+            ...makeToolResult("Executor reports bun test passed with 61 pass, 0 fail."),
+            operational_evidence: [
+              "run_shell_command: Ran bun test src/server.test.ts web/src/App.test.tsx and observed 61 pass, 0 fail."
+            ]
+          }
+        };
+      }
+    };
+    mutable.evaluator = {
+      evaluate: async () => ({
+        decision: "fail",
+        justification: "Insufficient evidence for key dimensions: goal_alignment, causal_validity, constraint_compliance.",
+        root_cause: "insufficient_evidence:goal_alignment",
+        evidence: ["No behavioral verification excerpt was attached."],
+        recommended_next_action: "Attach minimal proof from the round artifacts.",
+        dimensions: [
+          {
+            dimension: "goal_alignment",
+            decision: "unknown",
+            score: 58,
+            confidence: 0.94,
+            justification: "The executor claims success, but no compact evidence excerpt proves it.",
+            evidence: ["No targeted artifact excerpt shows the expected metric or test output."],
+            blocking_issues: ["Validation evidence is missing."],
+            recommended_next_action: "Attach minimal proof."
+          }
+        ]
+      })
+    };
+    mutable.collectOperationalEvidence = async () => ({
+      summaryNote: "",
+      lines: [],
+      stateChangeNotes: []
+    });
+
+    const outcome = await mutable.runRound(1);
+
+    expect(outcome.success).toBe(false);
+    expect(outcome.errorMessage).toContain("Insufficient evidence");
+    expect(executeCall).toBe(1);
+
+    const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+    const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
+    expect(summaryFile).toBeDefined();
+    const summaryText = await fs.readFile(path.join(homeDir, "runs", summaryFile as string), "utf8");
+    expect(summaryText).toContain("## Auto Rework Attempts");
+    expect(summaryText).not.toContain("Attempt 1/2:");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("passes prior executor evidence into Leader governance context before intervention", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-leader-context-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir,
+      AILOOP_ENABLE_LEADER: "1",
+      AILOOP_MAX_CYCLES: "1"
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const runTimestamp = "2026-03-17T02-13-19-554Z";
+    const stateChangePath = path.join(paths.runsDir, `${runTimestamp}.round.state_change.txt`);
+    const logPath = path.join(paths.runsDir, `${runTimestamp}.round.log`);
+    await fs.mkdir(paths.runsDir, { recursive: true });
+    await fs.writeFile(
+      stateChangePath,
+      [
+        "### Snapshot File Diffs",
+        "+      hotFilePressureCount: hotFilePressure?.count || 0,",
+        "+          <p className=\"text-[10px] uppercase tracking-widest text-mist/50\">Hot-File Pressure</p>"
+      ].join("\n"),
+      "utf8"
+    );
+    await fs.writeFile(logPath, "[executor] bun test src/server.test.ts web/src/App.test.tsx -> 61 pass, 0 fail\n", "utf8");
+
+    const seeded = await readLoopState(paths);
+    await writeLoopState(paths, {
+      ...seeded,
+      state: "paused",
+      round: 24,
+      last_error: "Insufficient evidence for key dimensions: goal_alignment, causal_validity, constraint_compliance.",
+      previous_tool_result: {
+        status: "success",
+        summary:
+          "Verified the existing workspace change set computes hot-file-pressure telemetry in `src/utils/db.ts`, surfaces it in the Web Console health view in `web/src/App.tsx`, and passes the targeted Bun test command with `61 pass, 0 fail`.",
+        artifacts: {
+          log_path: logPath,
+          state_change_path: stateChangePath
+        },
+        next_state_hint: "continue"
+      },
+      previous_evaluation_dimensions: [
+        {
+          dimension: "goal_alignment",
+          decision: "unknown",
+          score: 58,
+          confidence: 0.94,
+          justification: "The evidence bundle is not sufficient to verify goal alignment.",
+          evidence: ["No behavioral verification excerpt shows the focused bun test actually ran and passed."],
+          blocking_issues: ["No code or state-change excerpt demonstrates the required metric/UI change."],
+          recommended_next_action:
+            "Attach minimal proof: one excerpt from src/utils/db.ts, one excerpt from web/src/App.tsx, and the actual output of bun test src/server.test.ts web/src/App.test.tsx."
+        }
+      ]
+    });
+    await setFlag(paths.pauseFlagPath);
+
+    let capturedContext: LeaderContext | null = null;
+    const mutable = engine as unknown as {
+      leader: {
+        execute: (input: { context: LeaderContext; paths: LoopPaths }) => Promise<LeaderDecision>;
+      };
+      run: () => Promise<void>;
+    };
+
+    mutable.leader = {
+      execute: async (input) => {
+        capturedContext = input.context;
+        await setFlag(paths.stopFlagPath);
+        return {
+          rationale: "This is an evidence-handoff failure, not a product-code failure.",
+          action: "stop",
+          diagnosis_type: "implementation_failure",
+          instructions: ["Patch the evaluator evidence handoff before retrying the feature round."]
+        };
+      }
+    };
+
+    await mutable.run();
+
+    expect(capturedContext).not.toBeNull();
+    if (!capturedContext) {
+      throw new Error("Expected Leader context to be captured.");
+    }
+    expect(capturedContext.previousToolResult?.summary).toContain("61 pass, 0 fail");
+    expect(capturedContext.previousToolResult?.artifacts.state_change_path).toBe(stateChangePath);
+    expect(capturedContext.stateChange).toContain("hotFilePressureCount");
+    expect(capturedContext.stateChange).toContain("Hot-File Pressure");
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });

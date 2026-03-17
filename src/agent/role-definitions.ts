@@ -144,7 +144,13 @@ Responsibilities:
 - Decision Branch A: Issue "Strategic Instructions" to Executor for code/config fixes.
 - Decision Branch B: If the overall project goal (README.md) is reachable but blocked by current rules, escalate to CCB.
 - Decision Branch C: If the Friction Index exceeds concrete triggers (e.g., >3 failures in 5 rounds due to technical debt, or >200% cost explosion), escalate to CCB with an 'Architectural Migration' proposal.
-- Decision Branch D: Issue a "Scope Cut Directive" to the ProjectPlanner, instructing it to drop the problematic requirement and find a simpler path to the goal.`);
+- Decision Branch D: Issue a "Scope Cut Directive" to the ProjectPlanner, instructing it to drop the problematic requirement and find a simpler path to the goal.
+Output:
+- Return strict JSON only.
+- Fields: rationale, action, diagnosis_type, instructions, proposed_readme_change.
+- action must be one of: resume, stop, escalate_to_ccb.
+- diagnosis_type must be one of: implementation_failure, constitutional_conflict.
+- If executor success claims conflict with evaluator evidence-insufficiency failure, treat the issue as evidence/validation handoff failure before retrying product code.`);
 }
 
 function defaultSeniorDevRoleDefinition(): string {

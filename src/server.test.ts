@@ -610,6 +610,37 @@ describe("console server API contract", () => {
     }
   });
 
+  test("returns recent hot-file pressure telemetry in the friction-index payload", async () => {
+    const token = "test-token";
+    const { config, fetchHandler } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    for (let round = 1; round <= 21; round += 1) {
+      await seedRoundHistory(config.homeDir, {
+        round,
+        timestamp: `2026-03-15T00-${String(round).padStart(2, "0")}-00-000Z`,
+        decision: round === 1 || round >= 20 ? "fail" : undefined,
+        justification: round === 1 || round >= 20 ? "Governance blocked the round." : undefined,
+        hotFileGovernance: round === 1 || round >= 20 ? HOT_FILE_GOVERNANCE_PAYLOAD : null
+      });
+    }
+
+    const response = await fetchHandler(
+      createAuthorizedRequest("http://console.test/api/metrics/friction-index", token)
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      reworkChurnRate: 0,
+      averageActions: 0,
+      leaderInterventionCount: 0,
+      overEngineeringCount: 0,
+      hotFilePressureCount: 2,
+      healthStatus: "at_risk"
+    });
+  });
+
   test("returns the active requirement snapshot inside authenticated loop status responses", async () => {
     const token = "test-token";
     const { fetchHandler, paths } = await createFixture({
