@@ -74,6 +74,7 @@ interface OperatorStatusReason {
     | "manual_pause"
     | "budget_breach"
     | "hot_file_governance"
+    | "evaluator_strategic_block"
     | "evaluator_failure_limit"
     | "crash_recovery"
     | "rollback_incomplete"

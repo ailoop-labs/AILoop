@@ -146,6 +146,26 @@ describe("OperatorReasonPanel", () => {
     expect(html).toContain("Review the last budget snapshot and reduce scope or raise budgets before resuming.");
   });
 
+  test("preserves the distinct strategic evaluator block title, summary, and next action", () => {
+    const html = renderToStaticMarkup(
+      <OperatorReasonPanel
+        operatorReason={{
+          kind: "evaluator_strategic_block",
+          title: "Strategic evaluator block",
+          summary: "Further retries require immediate governance review.",
+          next_action: "Review the evaluator findings, adjust scope, and resume only after the governance issue is addressed.",
+          severity: "critical"
+        }}
+      />
+    );
+
+    expect(html).toContain("Pause / Risk Reason");
+    expect(html).toContain("Strategic evaluator block");
+    expect(html).toContain("Further retries require immediate governance review.");
+    expect(html).toContain("Next Safe Action");
+    expect(html).toContain("Review the evaluator findings, adjust scope, and resume only after the governance issue is addressed.");
+  });
+
   test("renders a stable empty state when no pause or risk reason is active", () => {
     const html = renderToStaticMarkup(<OperatorReasonPanel operatorReason={null} />);
 

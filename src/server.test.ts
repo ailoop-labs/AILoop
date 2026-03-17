@@ -862,6 +862,50 @@ describe("console server API contract", () => {
     });
   });
 
+  test("serializes evaluator strategic blocks distinctly from evaluator failure thresholds in authenticated status responses", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    await writeLoopState(paths, {
+      ...defaultLoopState(),
+      state: "paused",
+      round: 14,
+      last_error: "EvaluatorStrategicBlock: Further retries require immediate governance review.",
+      previous_evaluation_dimensions: [
+        {
+          dimension: "constraint_compliance",
+          decision: "fail",
+          score: 61,
+          confidence: 0.93,
+          justification: "The round needs explicit governance review before another retry.",
+          evidence: ["status artifact"],
+          blocking_issues: ["Evaluator requested strategic governance escalation."],
+          recommended_next_action:
+            "Review the evaluator findings, adjust scope, and resume only after the governance issue is addressed."
+        }
+      ]
+    });
+
+    const response = await fetchHandler(createAuthorizedRequest("http://console.test/api/status", token));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      state: "paused",
+      round: 14,
+      pause_reason: "Strategic evaluator block",
+      hot_file_governance: null,
+      operator_reason: {
+        kind: "evaluator_strategic_block",
+        title: "Strategic evaluator block",
+        summary: "Further retries require immediate governance review.",
+        next_action: "Review the evaluator findings, adjust scope, and resume only after the governance issue is addressed.",
+        severity: "critical"
+      }
+    });
+  });
+
   test("keeps one persisted hot-file-governance payload aligned across authenticated status, run history, and artifact APIs", async () => {
     const token = "test-token";
     const { config, fetchHandler, paths } = await createFixture({
