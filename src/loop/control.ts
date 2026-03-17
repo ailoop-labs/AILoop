@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { closeSync, openSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { DatabaseManager } from "../utils/db";
@@ -26,6 +27,7 @@ import type {
   RoundArtifactPresence,
   RoundArtifactKind,
   RequirementArtifactSnapshot,
+  LoopStateData,
   LoopStateName
 } from "../types/contracts";
 import { fileExists, readJsonFile, readTextFile } from "../utils/fs";
@@ -47,6 +49,7 @@ import {
   readPid,
   recoverInterruptedLoopState,
   setFlag,
+  updateLoopState,
   writeLoopState
 } from "./state";
 import type { LoopPaths } from "./state";
@@ -92,6 +95,20 @@ function assertValidLifecycleControlTransition(
   throw new InvalidLifecycleTransitionError(
     `Invalid control transition: ${action} is only allowed from ${formatStateList(allowedStates)}.`
   );
+}
+
+export function resolveStartedLoopState(currentState: LoopStateData, childPid: number | null): LoopStateData {
+  if (childPid && currentState.state === "running" && currentState.pid === childPid) {
+    return currentState;
+  }
+
+  return {
+    ...currentState,
+    state: "starting",
+    pid: childPid,
+    last_error: null,
+    current_budget: null
+  };
 }
 
 export async function ensureProjectRoles(
@@ -207,24 +224,24 @@ export async function startBackgroundLoop(config: AppConfig): Promise<{ started:
     await prepareStartFlags(paths);
     const runtimeConfig = await readRuntimeLoopConfig(config);
     const runtimeEnv = runtimeLoopConfigToEnv(runtimeConfig);
-    const child = spawn("bun", ["run", "scripts/ailoop.ts", "run"], {
-      cwd: process.cwd(),
-      detached: true,
-      stdio: "ignore",
-      env: {
-        ...process.env,
-        ...runtimeEnv
-      }
-    });
+    const loopLogFd = openSync(paths.loopLogPath, "a");
+    let child;
+    try {
+      child = spawn("bun", ["run", "scripts/ailoop.ts", "run"], {
+        cwd: process.cwd(),
+        detached: true,
+        stdio: ["ignore", loopLogFd, loopLogFd],
+        env: {
+          ...process.env,
+          ...runtimeEnv
+        }
+      });
+    } finally {
+      closeSync(loopLogFd);
+    }
 
     const result = { started: true, message: `Loop started with pid ${child.pid}` };
-    await writeLoopState(paths, {
-      ...currentState,
-      state: "starting",
-      pid: child.pid ?? null,
-      last_error: null,
-      current_budget: null
-    });
+    await updateLoopState(paths, (latestState) => resolveStartedLoopState(latestState, child.pid ?? null));
     child.unref();
     resolveOperation(result);
     return result;

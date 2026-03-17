@@ -238,6 +238,7 @@ export interface LeaderDecision {
 export interface LoopPaths {
   homeDir: string;
   runsDir: string;
+  loopLogPath: string;
   taskPath: string;
   productRequirementsDirPath: string;
   activeRequirementPath: string;

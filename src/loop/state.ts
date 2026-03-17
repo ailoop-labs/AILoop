@@ -38,6 +38,7 @@ export function buildLoopPaths(homeDir: string): LoopPaths {
   return {
     homeDir,
     runsDir: path.join(homeDir, "runs"),
+    loopLogPath: path.join(homeDir, "loop.run.log"),
     taskPath: path.join(homeDir, "goal.md"),
     productRequirementsDirPath: path.join(homeDir, "product-requirements"),
     activeRequirementPath: path.join(homeDir, "product-requirements", "current.md"),

@@ -24,6 +24,7 @@ import {
   pauseLoop,
   prepareStartFlags,
   renderCliStatus,
+  resolveStartedLoopState,
   resumeLoop,
   startBackgroundLoop,
   stopLoop,
@@ -309,6 +310,29 @@ describe("pauseLoop", () => {
 });
 
 describe("startBackgroundLoop", () => {
+  test("preserves a newer running state for the same child pid when start bookkeeping lags behind", () => {
+    const latestState = {
+      ...defaultLoopState(),
+      state: "running" as const,
+      pid: 81_234,
+      last_error: "executor already updated the state",
+      current_budget: {
+        limits: {
+          usdPerRound: 1,
+          timeMinutes: 2,
+          actions: 10
+        },
+        usage: {
+          usdUsed: 0.1,
+          elapsedMs: 2_000,
+          actionsUsed: 3
+        }
+      }
+    };
+
+    expect(resolveStartedLoopState(latestState, 81_234)).toEqual(latestState);
+  });
+
   test("collapses duplicate concurrent starts into a single background start", async () => {
     const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-start-duplicate-test-"));
     const homeDir = path.join(workspaceRoot, ".ailoop");
@@ -380,6 +404,38 @@ describe("startBackgroundLoop", () => {
       const state = await readLoopState(paths);
       expect(state.state).toBe("starting");
       expect(state.pid).toBe(81_000);
+    } finally {
+      process.chdir(originalCwd);
+      mock.restore();
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("opens a dedicated background loop log file and redirects stdout/stderr into it", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-start-log-test-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    const paths = buildLoopPaths(homeDir);
+    const originalCwd = process.cwd();
+    let nextPid = 82_000;
+
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(path.join(workspaceRoot, "README.md"), "# Test workspace\n", "utf8");
+    await seedProjectRoles(paths);
+
+    const spawnSpy = spyOn(childProcess, "spawn").mockImplementation(makeSpawnMock(() => nextPid++));
+
+    try {
+      process.chdir(workspaceRoot);
+
+      await startBackgroundLoop(makeTestConfig(homeDir));
+
+      await expect(fs.stat(paths.loopLogPath)).resolves.toBeDefined();
+      const spawnOptions = spawnSpy.mock.calls[0]?.[2];
+      expect(spawnOptions).toBeDefined();
+      expect(Array.isArray(spawnOptions?.stdio)).toBe(true);
+      expect(spawnOptions?.stdio?.[0]).toBe("ignore");
+      expect(typeof spawnOptions?.stdio?.[1]).toBe("number");
+      expect(typeof spawnOptions?.stdio?.[2]).toBe("number");
     } finally {
       process.chdir(originalCwd);
       mock.restore();
