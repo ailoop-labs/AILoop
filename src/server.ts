@@ -63,7 +63,7 @@ interface ConsoleRuntime {
   adminToken: string;
   tokenAuthEnabled: boolean;
   adminTokenIssuedDate: string;
-  db: DatabaseManager;
+  dbPath: string;
 }
 
 interface CreateConsoleFetchOptions {
@@ -82,7 +82,7 @@ function createConsoleRuntime(options: CreateConsoleFetchOptions = {}): ConsoleR
     tokenAuthEnabled: adminToken.length > 0,
     adminTokenIssuedDate:
       options.adminTokenIssuedDate ?? (process.env.AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE ?? "").trim(),
-    db: new DatabaseManager({ dbPath })
+    dbPath
   };
 }
 
@@ -127,7 +127,7 @@ async function serveStaticFromDist(urlPath: string): Promise<Response | null> {
 function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
   return async function fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const { config, adminToken, tokenAuthEnabled, adminTokenIssuedDate, db } = runtime;
+    const { config, adminToken, tokenAuthEnabled, adminTokenIssuedDate, dbPath } = runtime;
     try {
       if (url.pathname === "/api/health" && request.method === "GET") {
         return json({ ok: true, service: "ailoop-console", db: "connected" });
@@ -173,7 +173,12 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
       }
 
       if (url.pathname === "/api/metrics/friction-index" && request.method === "GET") {
-        return json(await db.getFrictionIndex());
+        const db = new DatabaseManager({ dbPath });
+        try {
+          return json(await db.getFrictionIndex());
+        } finally {
+          db.close();
+        }
       }
 
       if (url.pathname === "/api/config" && request.method === "GET") {
@@ -232,37 +237,49 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
         const parts = url.pathname.split("/");
         const requestedId = decodeURIComponent(parts[3] ?? "").trim();
         const numericRoundId = Number(requestedId);
-        const roundId =
-          Number.isInteger(numericRoundId) && numericRoundId > 0
-            ? numericRoundId
-            : await db.getRoundIdByTimestamp(requestedId);
 
-        if (roundId) {
-          return json(await db.getGovernanceDetails(roundId));
+        const db = new DatabaseManager({ dbPath });
+        try {
+          const roundId =
+            Number.isInteger(numericRoundId) && numericRoundId > 0
+              ? numericRoundId
+              : await db.getRoundIdByTimestamp(requestedId);
+
+          if (roundId) {
+            return json(await db.getGovernanceDetails(roundId));
+          }
+
+          return jsonError("Invalid round ID", 400);
+        } finally {
+          db.close();
         }
-
-        return jsonError("Invalid round ID", 400);
       }
 
       if (url.pathname === "/api/runs" && request.method === "GET") {
         const limitRaw = Number(url.searchParams.get("limit") ?? "20");
         const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, limitRaw)) : 20;
         const runs = await listRuns(config, limit);
-        const payload = await Promise.all(
-          runs.map(async (run) => {
-            const governance =
-              run.round > 0
-                ? await db.getGovernanceDetails(run.round)
-                : { leader: null, ccb: null };
 
-            return {
-              ...run,
-              has_governance: Boolean(governance.hot_file_governance || governance.leader || governance.ccb)
-            };
-          })
-        );
+        const db = new DatabaseManager({ dbPath });
+        try {
+          const payload = await Promise.all(
+            runs.map(async (run) => {
+              const governance =
+                run.round > 0
+                  ? await db.getGovernanceDetails(run.round)
+                  : { leader: null, ccb: null };
 
-        return json(payload);
+              return {
+                ...run,
+                has_governance: Boolean(governance.hot_file_governance || governance.leader || governance.ccb)
+              };
+            })
+          );
+
+          return json(payload);
+        } finally {
+          db.close();
+        }
       }
 
       const runArtifactsMatch =
@@ -275,15 +292,21 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
         }
 
         const run = (await listRuns(config, Number.MAX_SAFE_INTEGER)).find((record) => record.timestamp === timestamp);
-        const governance =
-          run && run.round > 0
-            ? await db.getGovernanceDetails(run.round)
-            : { leader: null, ccb: null };
 
-        return json({
-          ...artifacts,
-          governance
-        });
+        const db = new DatabaseManager({ dbPath });
+        try {
+          const governance =
+            run && run.round > 0
+              ? await db.getGovernanceDetails(run.round)
+              : { leader: null, ccb: null };
+
+          return json({
+            ...artifacts,
+            governance
+          });
+        } finally {
+          db.close();
+        }
       }
 
       if (url.pathname === "/api/roles" && request.method === "GET") {
