@@ -373,6 +373,18 @@ export class DatabaseManager {
     };
   }
 
+  async getRoundIdByTimestamp(timestamp: string): Promise<number | null> {
+    const row = this.db.query(`
+      SELECT round_id
+      FROM rounds
+      WHERE run_timestamp = ?
+      ORDER BY round_id DESC
+      LIMIT 1
+    `).get(timestamp) as { round_id: number } | null;
+
+    return typeof row?.round_id === "number" ? row.round_id : null;
+  }
+
   close() {
     this.db.close();
   }

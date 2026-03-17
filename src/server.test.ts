@@ -2115,12 +2115,13 @@ describe("console server API contract", () => {
       hotFileGovernance
     });
 
-    const response = await fetchHandler(
-      createAuthorizedRequest(`http://console.test/api/runs/${timestamp}/artifacts`, token)
-    );
+    const [artifactsResponse, governanceResponse] = await Promise.all([
+      fetchHandler(createAuthorizedRequest(`http://console.test/api/runs/${timestamp}/artifacts`, token)),
+      fetchHandler(createAuthorizedRequest(`http://console.test/api/runs/${timestamp}/governance`, token))
+    ]);
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
+    expect(artifactsResponse.status).toBe(200);
+    expect(await artifactsResponse.json()).toEqual({
       timestamp,
       summary: "Hot-file artifact summary\n",
       metrics: {
@@ -2159,6 +2160,13 @@ describe("console server API contract", () => {
         leader: null,
         ccb: null
       }
+    });
+
+    expect(governanceResponse.status).toBe(200);
+    expect(await governanceResponse.json()).toEqual({
+      hot_file_governance: hotFileGovernance,
+      leader: null,
+      ccb: null
     });
   });
 

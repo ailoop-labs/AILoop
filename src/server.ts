@@ -230,10 +230,17 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
 
       if (url.pathname.startsWith("/api/runs/") && url.pathname.endsWith("/governance") && request.method === "GET") {
         const parts = url.pathname.split("/");
-        const roundId = Number(parts[3]);
-        if (Number.isFinite(roundId)) {
+        const requestedId = decodeURIComponent(parts[3] ?? "").trim();
+        const numericRoundId = Number(requestedId);
+        const roundId =
+          Number.isInteger(numericRoundId) && numericRoundId > 0
+            ? numericRoundId
+            : await db.getRoundIdByTimestamp(requestedId);
+
+        if (roundId) {
           return json(await db.getGovernanceDetails(roundId));
         }
+
         return jsonError("Invalid round ID", 400);
       }
 
