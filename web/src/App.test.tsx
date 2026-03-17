@@ -9,13 +9,14 @@ import {
   LifecycleStatusGrid,
   OperatorReasonPanel,
   RunArtifactEvidenceGrid,
+  RunHistoryCard,
   SystemHealthPanel,
   deriveCliProvider,
   deriveControlAvailability,
   postControlAndRefresh,
   summarizeApiError
 } from "./App";
-import type { RoundReport } from "./run-history";
+import type { RoundReport, RunHistoryItem } from "./run-history";
 
 function makeReport(overrides: Partial<RoundReport> = {}): RoundReport {
   return {
@@ -49,6 +50,53 @@ function makeReport(overrides: Partial<RoundReport> = {}): RoundReport {
     budgetActions: "4",
     dimensionBreakdown: [],
     nextRecommendation: "Continue",
+    ...overrides
+  };
+}
+
+function makeRunHistoryItem(overrides: Partial<RunHistoryItem> = {}): RunHistoryItem {
+  return {
+    timestamp: "2026-03-15T03-00-00.000Z",
+    round: 12,
+    summary: [
+      "- Objective: Keep run-history governance signals scannable",
+      "- Expected Outcome: Operators can distinguish hot-file governance from ordinary failures",
+      "- Tool Status: success",
+      "- Work Summary: Added a first-line governance callout to recent history cards",
+      "- Error: none",
+      "- Decision: fail",
+      "- Justification: The round remained blocked by hot-file governance",
+      "- Root Cause: pressured file growth",
+      "- Evidence: bun test ./web/src/App.test.tsx",
+      "- Cost USD: 0.02",
+      "- Time ms: 2200",
+      "- Actions: 3",
+      "",
+      "## Next Round Recommendation",
+      "Split the next change into a bounded follow-up."
+    ].join("\n"),
+    metrics: {},
+    evaluation: {
+      decision: "fail",
+      justification: "The evaluator blocked more growth in a pressured file.",
+      root_cause: "pressured file growth",
+      evidence: ["bun test ./web/src/App.test.tsx"],
+      aggregate_score: 71,
+      recommended_next_action: "Split the next change into a bounded follow-up.",
+      hot_file_governance: {
+        file_path: "web/src/App.tsx",
+        heuristic_labels: ["recent-touch hot-file pressure", "line-count pressure"],
+        result_class: "hot_file_growth_failure",
+        reason: "continued growth in pressured file without bounded justification",
+        recommended_next_action: "pause and split the next edit into a bounded follow-up"
+      }
+    },
+    artifacts: {
+      kind: "full_bundle",
+      label: "Full evidence bundle",
+      present: ["log", "summary", "metrics", "state_change", "evaluation"],
+      missing: []
+    },
     ...overrides
   };
 }
@@ -220,6 +268,27 @@ describe("HotFileGovernancePanel", () => {
     expect(html).toContain("recent-touch hot-file pressure, line-count pressure");
     expect(html).toContain("the evaluator blocked another inline governance change in the same file");
     expect(html).toContain("pause and split the next edit into a bounded follow-up");
+  });
+});
+
+describe("RunHistoryCard", () => {
+  test("renders a first-line hot-file governance indicator with compact file, class, and reason context", () => {
+    const html = renderToStaticMarkup(
+      <RunHistoryCard
+        run={makeRunHistoryItem()}
+        index={0}
+        startIndex={0}
+        onOpenArtifacts={() => {}}
+      />
+    );
+
+    expect(html).toContain("Hot-File Governance");
+    expect(html).toContain("File: web/src/App.tsx");
+    expect(html).toContain("Class: hot_file_growth_failure");
+    expect(html).toContain("Reason: continued growth in pressured file without bounded justification");
+    expect(html).toContain("Evaluator fail");
+    expect(html.indexOf("Hot-File Governance")).toBeLessThan(html.indexOf("Evaluator fail"));
+    expect(html.indexOf("Hot-File Governance")).toBeLessThan(html.indexOf("Objective:"));
   });
 });
 

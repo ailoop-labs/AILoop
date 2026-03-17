@@ -673,6 +673,24 @@ export function HotFileGovernanceBadge({ signal }: { signal: HotFileGovernanceRe
   );
 }
 
+export function RunHistoryHotFileGovernanceIndicator({ signal }: { signal: HotFileGovernanceResult | null }) {
+  if (!signal) {
+    return null;
+  }
+
+  return (
+    <div className="max-w-sm rounded-xl border border-warning/30 bg-warning/10 px-3 py-3 text-right shadow-[0_0_0_1px_rgba(255,184,77,0.08)]">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-warning">Hot-File Governance</p>
+        <HotFileGovernanceBadge signal={signal} />
+      </div>
+      <p className="mt-2 text-xs font-semibold text-mist">File: {signal.file_path}</p>
+      <p className="mt-1 text-xs text-mist/75">Class: {signal.result_class}</p>
+      <p className="mt-1 text-xs leading-5 text-mist/80">Reason: {signal.reason}</p>
+    </div>
+  );
+}
+
 export function HotFileGovernancePanel({
   signal,
   compact = false
@@ -709,6 +727,155 @@ export function HotFileGovernancePanel({
         </div>
       </div>
     </div>
+  );
+}
+
+export function RunHistoryCard({
+  run,
+  index,
+  startIndex,
+  artifactsBusy = false,
+  selectedArtifactsTimestamp = null,
+  onOpenArtifacts
+}: {
+  run: RunHistoryItem;
+  index: number;
+  startIndex: number;
+  artifactsBusy?: boolean;
+  selectedArtifactsTimestamp?: string | null;
+  onOpenArtifacts: (run: RunHistoryItem) => void | Promise<void>;
+}) {
+  const report = projectRunHistoryReport(run);
+  const artifacts = resolveRunArtifactPresence(run);
+  const hotFileGovernance = run.hot_file_governance ?? run.evaluation?.hot_file_governance ?? null;
+  const incompleteEvidence = artifacts.kind !== "full_bundle";
+  const parsedTimestamp = parseRunTimestamp(run.timestamp);
+  const displayTimestamp = formatRunTimestamp(run.timestamp);
+
+  return (
+    <article className="rounded-2xl border border-white/10 bg-ink/60 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-mist/55">
+            Run {run.round !== undefined ? `#${run.round}` : `#${startIndex + index + 1}`}
+          </p>
+          <p className="text-xs uppercase tracking-[0.2em] text-accent/80">
+            {parsedTimestamp ? displayTimestamp : run.timestamp}
+          </p>
+          <p className="mt-1 text-xs text-mist/55">Raw ID: {run.timestamp}</p>
+        </div>
+        <div className="flex flex-col items-end gap-2">
+          <RunHistoryHotFileGovernanceIndicator signal={hotFileGovernance} />
+          <span
+            className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] ${
+              incompleteEvidence
+                ? "bg-warning/20 text-warning"
+                : report.decision === "pass"
+                  ? "bg-accent/20 text-accent"
+                  : report.decision === "fail"
+                    ? "bg-ember/20 text-ember"
+                    : "bg-slate/70 text-mist/80"
+            }`}
+          >
+            {incompleteEvidence ? "Incomplete evidence" : `Evaluator ${report.decision}`}
+          </span>
+        </div>
+      </div>
+
+      {hotFileGovernance ? (
+        <div className="mt-3">
+          <HotFileGovernancePanel signal={hotFileGovernance} compact />
+        </div>
+      ) : null}
+
+      {incompleteEvidence ? (
+        <>
+          <p className="mt-3 text-sm text-mist/90">
+            This round left reviewable evidence on disk before the full five-file bundle was completed.
+          </p>
+          <div className="mt-3 grid gap-2 text-xs text-mist/70 sm:grid-cols-2">
+            <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">
+              Present: {formatArtifactPresenceList(artifacts.present)}
+            </p>
+            <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">
+              Missing: {artifacts.missing.length > 0 ? formatArtifactPresenceList(artifacts.missing) : "none"}
+            </p>
+          </div>
+          <p className="mt-3 text-xs text-mist/65">
+            Available summary: {run.summary.trim() ? "yes" : "no"} | Metrics: {run.metrics ? "yes" : "no"} | Evaluation: {run.evaluation ? "yes" : "no"}
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="mt-3 text-sm text-mist/90">
+            <span className="text-mist/60">Objective: </span>
+            {report.objective}
+          </p>
+          <p className="mt-2 text-sm text-mist/90">
+            <span className="text-mist/60">Expected: </span>
+            {report.expectedOutcome}
+          </p>
+          <p className="mt-2 text-sm text-mist/90">
+            <span className="text-mist/60">Summary: </span>
+            {report.workSummary}
+          </p>
+          <p className="mt-3 text-xs text-mist/75">
+            Tool: {report.toolStatus} | Error: {report.error}
+          </p>
+          <p className="mt-2 text-xs text-mist/65">Score: {report.aggregateScore}</p>
+          <p className="mt-2 text-xs text-mist/65">Why: {report.justification}</p>
+          {report.decision === "fail" && report.rootCause !== "none" ? (
+            <p className="mt-2 text-xs font-semibold text-ember">Root Cause: {report.rootCause}</p>
+          ) : null}
+          <p className="mt-2 text-xs text-mist/65">Evidence: {report.evidence}</p>
+          {report.dimensionBreakdown.length > 0 ? (
+            <div className="mt-3 grid gap-2 lg:grid-cols-2">
+              {report.dimensionBreakdown.map((dimension) => (
+                <div key={`${run.timestamp}-${dimension.label}`} className="rounded-xl border border-white/10 bg-ink/70 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-mist/70">{dimension.label}</p>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] ${dimension.decision === "pass"
+                        ? "bg-accent/20 text-accent"
+                        : dimension.decision === "fail"
+                          ? "bg-ember/20 text-ember"
+                          : "bg-slate/70 text-mist/80"
+                        }`}
+                    >
+                      {dimension.decision}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs text-mist/65">
+                    Score: {dimension.score} | Confidence: {dimension.confidence}
+                  </p>
+                  <p className="mt-2 text-xs text-mist/65">Why: {dimension.justification}</p>
+                  <p className="mt-2 text-xs text-mist/60">Evidence: {dimension.evidence}</p>
+                  <p className="mt-2 text-xs text-mist/60">Blocking: {dimension.blockingIssues}</p>
+                  <p className="mt-2 text-xs text-mist/60">Next: {dimension.nextRecommendation}</p>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <p className="mt-2 text-xs text-mist/65">Next: {report.nextRecommendation}</p>
+          <div className="mt-3 grid gap-2 text-xs text-mist/70 sm:grid-cols-3">
+            <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">Cost: {report.budgetCost}</p>
+            <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">Time: {report.budgetTime}</p>
+            <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">Actions: {report.budgetActions}</p>
+          </div>
+        </>
+      )}
+      <button
+        onClick={() => void onOpenArtifacts(run)}
+        disabled={artifactsBusy}
+        className="mt-4 rounded-lg border border-white/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-mist/70 transition hover:border-accent hover:text-accent disabled:opacity-50"
+      >
+        {artifactsBusy && selectedArtifactsTimestamp === run.timestamp
+          ? "Loading..."
+          : incompleteEvidence
+            ? "Review Evidence"
+            : "Full Report"}
+      </button>
+    </article>
   );
 }
 
@@ -1853,133 +2020,16 @@ export default function App() {
             <p className="text-sm text-mist/70">No run artifacts yet.</p>
           ) : (
             runHistoryPagination.items.map((run, index) => {
-              const report = projectRunHistoryReport(run);
-              const artifacts = resolveRunArtifactPresence(run);
-              const hotFileGovernance = run.hot_file_governance ?? run.evaluation?.hot_file_governance ?? null;
-              const incompleteEvidence = artifacts.kind !== "full_bundle";
-              const parsedTimestamp = parseRunTimestamp(run.timestamp);
-              const displayTimestamp = formatRunTimestamp(run.timestamp);
               return (
-                <article key={run.timestamp} className="rounded-2xl border border-white/10 bg-ink/60 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-mist/55">
-                        Run {run.round !== undefined ? `#${run.round}` : `#${runHistoryPagination.startIndex + index + 1}`}
-                      </p>
-                      <p className="text-xs uppercase tracking-[0.2em] text-accent/80">
-                        {parsedTimestamp ? displayTimestamp : run.timestamp}
-                      </p>
-                      <p className="mt-1 text-xs text-mist/55">Raw ID: {run.timestamp}</p>
-                    </div>
-                    <span
-                      className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] ${
-                        incompleteEvidence
-                          ? "bg-warning/20 text-warning"
-                          : report.decision === "pass"
-                            ? "bg-accent/20 text-accent"
-                            : report.decision === "fail"
-                              ? "bg-ember/20 text-ember"
-                              : "bg-slate/70 text-mist/80"
-                      }`}
-                    >
-                      {incompleteEvidence ? "Incomplete evidence" : `Evaluator ${report.decision}`}
-                    </span>
-                  </div>
-
-                  {hotFileGovernance ? (
-                    <div className="mt-3">
-                      <HotFileGovernancePanel signal={hotFileGovernance} compact />
-                    </div>
-                  ) : null}
-
-                  {incompleteEvidence ? (
-                    <>
-                      <p className="mt-3 text-sm text-mist/90">
-                        This round left reviewable evidence on disk before the full five-file bundle was completed.
-                      </p>
-                      <div className="mt-3 grid gap-2 text-xs text-mist/70 sm:grid-cols-2">
-                        <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">
-                          Present: {formatArtifactPresenceList(artifacts.present)}
-                        </p>
-                        <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">
-                          Missing: {artifacts.missing.length > 0 ? formatArtifactPresenceList(artifacts.missing) : "none"}
-                        </p>
-                      </div>
-                      <p className="mt-3 text-xs text-mist/65">
-                        Available summary: {run.summary.trim() ? "yes" : "no"} | Metrics: {run.metrics ? "yes" : "no"} | Evaluation: {run.evaluation ? "yes" : "no"}
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="mt-3 text-sm text-mist/90">
-                        <span className="text-mist/60">Objective: </span>
-                        {report.objective}
-                      </p>
-                      <p className="mt-2 text-sm text-mist/90">
-                        <span className="text-mist/60">Expected: </span>
-                        {report.expectedOutcome}
-                      </p>
-                      <p className="mt-2 text-sm text-mist/90">
-                        <span className="text-mist/60">Summary: </span>
-                        {report.workSummary}
-                      </p>
-                      <p className="mt-3 text-xs text-mist/75">
-                        Tool: {report.toolStatus} | Error: {report.error}
-                      </p>
-                      <p className="mt-2 text-xs text-mist/65">Score: {report.aggregateScore}</p>
-                      <p className="mt-2 text-xs text-mist/65">Why: {report.justification}</p>
-                      {report.decision === "fail" && report.rootCause !== "none" ? (
-                        <p className="mt-2 text-xs font-semibold text-ember">Root Cause: {report.rootCause}</p>
-                      ) : null}
-                      <p className="mt-2 text-xs text-mist/65">Evidence: {report.evidence}</p>
-                      {report.dimensionBreakdown.length > 0 ? (
-                        <div className="mt-3 grid gap-2 lg:grid-cols-2">
-                          {report.dimensionBreakdown.map((dimension) => (
-                            <div key={`${run.timestamp}-${dimension.label}`} className="rounded-xl border border-white/10 bg-ink/70 p-3">
-                              <div className="flex items-start justify-between gap-2">
-                                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-mist/70">{dimension.label}</p>
-                                <span
-                                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] ${dimension.decision === "pass"
-                                    ? "bg-accent/20 text-accent"
-                                    : dimension.decision === "fail"
-                                      ? "bg-ember/20 text-ember"
-                                      : "bg-slate/70 text-mist/80"
-                                    }`}
-                                >
-                                  {dimension.decision}
-                                </span>
-                              </div>
-                              <p className="mt-2 text-xs text-mist/65">
-                                Score: {dimension.score} | Confidence: {dimension.confidence}
-                              </p>
-                              <p className="mt-2 text-xs text-mist/65">Why: {dimension.justification}</p>
-                              <p className="mt-2 text-xs text-mist/60">Evidence: {dimension.evidence}</p>
-                              <p className="mt-2 text-xs text-mist/60">Blocking: {dimension.blockingIssues}</p>
-                              <p className="mt-2 text-xs text-mist/60">Next: {dimension.nextRecommendation}</p>
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-                      <p className="mt-2 text-xs text-mist/65">Next: {report.nextRecommendation}</p>
-                      <div className="mt-3 grid gap-2 text-xs text-mist/70 sm:grid-cols-3">
-                        <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">Cost: {report.budgetCost}</p>
-                        <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">Time: {report.budgetTime}</p>
-                        <p className="rounded-lg border border-white/10 bg-ink/70 px-2 py-1">Actions: {report.budgetActions}</p>
-                      </div>
-                    </>
-                  )}
-                  <button
-                    onClick={() => void fetchArtifacts(run)}
-                    disabled={artifactsBusy}
-                    className="mt-4 rounded-lg border border-white/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-mist/70 transition hover:border-accent hover:text-accent disabled:opacity-50"
-                  >
-                    {artifactsBusy && selectedArtifacts?.timestamp === run.timestamp
-                      ? "Loading..."
-                      : incompleteEvidence
-                        ? "Review Evidence"
-                        : "Full Report"}
-                  </button>
-                </article>
+                <RunHistoryCard
+                  key={run.timestamp}
+                  run={run}
+                  index={index}
+                  startIndex={runHistoryPagination.startIndex}
+                  artifactsBusy={artifactsBusy}
+                  selectedArtifactsTimestamp={selectedArtifacts?.timestamp ?? null}
+                  onOpenArtifacts={(targetRun) => void fetchArtifacts(targetRun)}
+                />
               );
             })
           )}
