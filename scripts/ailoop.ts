@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
-import { loadConfig } from "../src/config/env";
+import { loadConfig, loadConfigAsync } from "../src/config/env";
 import { LoopEngine } from "../src/loop/engine";
+import { DatabaseManager } from "../src/utils/db";
+import path from "node:path";
 import {
   ensureProjectRoles,
   getCliStatus,
@@ -15,7 +17,19 @@ import {
 } from "../src/loop/control";
 import { sleep } from "../src/utils/time";
 
-const config = loadConfig();
+// Load config with database support
+async function getConfig() {
+  const baseConfig = loadConfig();
+  const dbPath = path.join(baseConfig.homeDir, "ailoop.db");
+  const db = new DatabaseManager({ dbPath });
+  try {
+    return await loadConfigAsync(process.env, db);
+  } finally {
+    db.close();
+  }
+}
+
+const config = await getConfig();
 
 async function runForeground(): Promise<void> {
   await ensureProjectRoles(config, { workspaceRoot: process.cwd(), autoRefresh: true });

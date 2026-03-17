@@ -16,6 +16,15 @@ export class DatabaseManager {
   }
 
   private initializeSchema() {
+    // Configuration Storage
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+
     // Current Singleton State of the Loop
     this.db.run(`
       CREATE TABLE IF NOT EXISTS system_state (
@@ -383,6 +392,31 @@ export class DatabaseManager {
     `).get(timestamp) as { round_id: number } | null;
 
     return typeof row?.round_id === "number" ? row.round_id : null;
+  }
+
+  async getConfig(key: string): Promise<string | null> {
+    const row = this.db.query("SELECT value FROM config WHERE key = ?").get(key) as { value: string } | null;
+    return row?.value ?? null;
+  }
+
+  async setConfig(key: string, value: string) {
+    const query = this.db.prepare(`
+      INSERT INTO config (key, value, updated_at)
+      VALUES (?, ?, datetime('now'))
+      ON CONFLICT(key) DO UPDATE SET
+        value = excluded.value,
+        updated_at = excluded.updated_at
+    `);
+    query.run(key, value);
+  }
+
+  async getAllConfig(): Promise<Record<string, string>> {
+    const rows = this.db.query("SELECT key, value FROM config").all() as Array<{ key: string; value: string }>;
+    return Object.fromEntries(rows.map(row => [row.key, row.value]));
+  }
+
+  async deleteConfig(key: string) {
+    this.db.run("DELETE FROM config WHERE key = ?", [key]);
   }
 
   close() {

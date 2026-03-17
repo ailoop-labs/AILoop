@@ -185,6 +185,33 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
         return json(await readRuntimeLoopConfig(config));
       }
 
+      if (url.pathname === "/api/base-config" && request.method === "GET") {
+        const db = new DatabaseManager({ dbPath: path.join(config.homeDir, "ailoop.db") });
+        try {
+          const dbConfig = await db.getAllConfig();
+          return json({ ok: true, config: dbConfig });
+        } finally {
+          db.close();
+        }
+      }
+
+      if (url.pathname === "/api/base-config" && request.method === "POST") {
+        const body = await parseBody(request);
+        const db = new DatabaseManager({ dbPath: path.join(config.homeDir, "ailoop.db") });
+        try {
+          if (typeof body === "object" && body !== null) {
+            for (const [key, value] of Object.entries(body)) {
+              if (typeof value === "string") {
+                await db.setConfig(key, value);
+              }
+            }
+          }
+          return json({ ok: true, message: "Configuration saved to database" });
+        } finally {
+          db.close();
+        }
+      }
+
       if (url.pathname === "/api/goal" && request.method === "GET") {
         return json({ goal: await readGoal(config) });
       }
