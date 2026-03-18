@@ -59,7 +59,7 @@ The MVP is organized into six runtime subsystems.
 
 Interfaces used by the operator.
 
-- **CLI** issues direct lifecycle commands such as `start`, `pause`, `resume`, `stop`, and `status`. It manages the production server as a background process using `nohup` and PID-file tracking to ensure full environment inheritance from the user's shell.
+- **CLI** issues direct lifecycle commands such as `start`, `pause`, `resume`, `stop`, and `status`. It manages the production server as a background process using a TypeScript launcher with detached child-process and PID-file tracking, while preserving the user's inherited shell environment.
 - **Web Console** shows current state, budgets, recent rounds, artifacts, and accepts live instructions through summary-first, sectioned views. It should rely on progressive disclosure such as expand/collapse, pagination, and drill-down artifact access instead of rendering full logs or artifact bodies inline by default.
 - **Console Server API** is the transport boundary between user-facing controls and the loop engine.
 

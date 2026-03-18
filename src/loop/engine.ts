@@ -479,7 +479,7 @@ export async function collectOperationalEvidence(
   lines.push(`Push: ${pushOutput}`);
   stateChangeNotes.push(`Shell: git push origin HEAD -> ${pushResult.code === 0 ? "ok" : "failed"} (${pushOutput})`);
 
-  const restartResult = await runner("bash scripts/prod.sh restart");
+  const restartResult = await runner("bun run scripts/prod.ts restart");
   const restartOutput = normalizeCommandOutput(restartResult);
   const restartDetails = parseRestartDetails(restartOutput);
   summaryNotes.push(restartResult.code === 0 ? "restart ok" : "restart failed");
@@ -489,7 +489,7 @@ export async function collectOperationalEvidence(
     lines.push(`Restart: ${restartOutput}`);
   }
   stateChangeNotes.push(
-    `Shell: bash scripts/prod.sh restart -> ${restartResult.code === 0 ? "ok" : "failed"} (${restartOutput})`
+    `Shell: bun run scripts/prod.ts restart -> ${restartResult.code === 0 ? "ok" : "failed"} (${restartOutput})`
   );
 
   const health = await healthChecker();
@@ -499,7 +499,7 @@ export async function collectOperationalEvidence(
     `Health: GET /api/health -> ${health.status} ${health.ok ? "ok" : "failed"} (${health.body.trim() || "no body"})`
   );
 
-  lines.push(`Rollback: git revert --no-edit ${hash} && bash scripts/prod.sh restart`);
+  lines.push(`Rollback: git revert --no-edit ${hash} && bun run scripts/prod.ts restart`);
   await logStep(`Operational evidence collected for commit ${hash}.`);
 
   return {

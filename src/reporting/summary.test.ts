@@ -137,7 +137,7 @@ describe("writeSummaryFile auto rework section", () => {
       "Commit: abc1234 AILoop Round 5: tighten deploy evidence",
       "Restart: PID 4242, log .ailoop/prod.server.log",
       "Health Check: GET /api/health -> 200 OK",
-      "Rollback: git revert --no-edit abc1234 && bash scripts/prod.sh restart"
+      "Rollback: git revert --no-edit abc1234 && bun run scripts/prod.ts restart"
     ];
 
     await writeSummaryFile(summaryPath, input);
@@ -148,7 +148,7 @@ describe("writeSummaryFile auto rework section", () => {
     expect(text).toContain("- Commit: abc1234 AILoop Round 5: tighten deploy evidence");
     expect(text).toContain("- Restart: PID 4242, log .ailoop/prod.server.log");
     expect(text).toContain("- Health Check: GET /api/health -> 200 OK");
-    expect(text).toContain("- Rollback: git revert --no-edit abc1234 && bash scripts/prod.sh restart");
+    expect(text).toContain("- Rollback: git revert --no-edit abc1234 && bun run scripts/prod.ts restart");
 
     await fs.rm(dir, { recursive: true, force: true });
   });

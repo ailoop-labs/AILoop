@@ -1018,12 +1018,12 @@ describe("LoopEngine auto rework", () => {
         "Push: Everything up-to-date",
         "Restart: PID 4242, log .ailoop/prod.server.log",
         "Health Check: GET /api/health -> 200 OK",
-        "Rollback: git revert --no-edit abc1234 && bash scripts/prod.sh restart"
+        "Rollback: git revert --no-edit abc1234 && bun run scripts/prod.ts restart"
       ],
       stateChangeNotes: [
         "Shell: git commit -m ... -> ok",
         "Shell: git push origin HEAD -> ok (Everything up-to-date)",
-        "Shell: bash scripts/prod.sh restart -> ok (PID 4242, log .ailoop/prod.server.log)",
+        "Shell: bun run scripts/prod.ts restart -> ok (PID 4242, log .ailoop/prod.server.log)",
         "Health: GET /api/health -> 200 ok ({\"ok\":true})"
       ]
     });
@@ -1043,13 +1043,13 @@ describe("LoopEngine auto rework", () => {
     expect(summaryText).toContain("- Push: Everything up-to-date");
     expect(summaryText).toContain("- Restart: PID 4242, log .ailoop/prod.server.log");
     expect(summaryText).toContain("- Health Check: GET /api/health -> 200 OK");
-    expect(summaryText).toContain("- Rollback: git revert --no-edit abc1234 && bash scripts/prod.sh restart");
+    expect(summaryText).toContain("- Rollback: git revert --no-edit abc1234 && bun run scripts/prod.ts restart");
 
     const stateChangeText = await fs.readFile(path.join(homeDir, "runs", stateChangeFile as string), "utf8");
     expect(stateChangeText).toContain("### Operational Follow-up");
     expect(stateChangeText).toContain("Shell: git commit -m ... -> ok");
     expect(stateChangeText).toContain("Shell: git push origin HEAD -> ok (Everything up-to-date)");
-    expect(stateChangeText).toContain("Shell: bash scripts/prod.sh restart -> ok (PID 4242, log .ailoop/prod.server.log)");
+    expect(stateChangeText).toContain("Shell: bun run scripts/prod.ts restart -> ok (PID 4242, log .ailoop/prod.server.log)");
     expect(stateChangeText).toContain("Health: GET /api/health -> 200 ok ({\"ok\":true})");
 
     const persistedState = await readLoopState(paths);
@@ -1058,7 +1058,7 @@ describe("LoopEngine auto rework", () => {
       "Push: Everything up-to-date",
       "Restart: PID 4242, log .ailoop/prod.server.log",
       "Health Check: GET /api/health -> 200 OK",
-      "Rollback: git revert --no-edit abc1234 && bash scripts/prod.sh restart"
+      "Rollback: git revert --no-edit abc1234 && bun run scripts/prod.ts restart"
     ]);
 
     await fs.rm(homeDir, { recursive: true, force: true });
@@ -1339,7 +1339,7 @@ describe("LoopEngine auto rework", () => {
         "Push: Everything up-to-date",
         "Restart: PID 4242, log .ailoop/prod.server.log",
         "Health Check: GET /api/health -> 200 OK",
-        "Rollback: git revert --no-edit abc1234 && bash scripts/prod.sh restart"
+        "Rollback: git revert --no-edit abc1234 && bun run scripts/prod.ts restart"
       ],
       stateChangeNotes: ["Shell: git push origin HEAD -> ok (Everything up-to-date)"]
     });
@@ -1497,7 +1497,7 @@ describe("LoopEngine auto rework", () => {
         if (command === "git push origin HEAD") {
           return { code: 0, stdout: "Everything up-to-date", stderr: "" };
         }
-        if (command === "bash scripts/prod.sh restart") {
+        if (command === "bun run scripts/prod.ts restart") {
           return {
             code: 0,
             stdout: [
@@ -1525,7 +1525,7 @@ describe("LoopEngine auto rework", () => {
       "git rev-parse --short HEAD",
       "git log -1 --pretty=%s",
       "git push origin HEAD",
-      "bash scripts/prod.sh restart"
+      "bun run scripts/prod.ts restart"
     ]);
     expect(evidence.summaryNote).toContain("commit abc1234");
     expect(evidence.summaryNote).toContain("push ok");
@@ -1535,7 +1535,7 @@ describe("LoopEngine auto rework", () => {
     expect(evidence.lines).toContain("Push: Everything up-to-date");
     expect(evidence.lines).toContain("Restart: PID 4242, log .ailoop/prod.server.log");
     expect(evidence.lines).toContain("Health Check: GET /api/health -> 200 OK");
-    expect(evidence.lines).toContain("Rollback: git revert --no-edit abc1234 && bash scripts/prod.sh restart");
+    expect(evidence.lines).toContain("Rollback: git revert --no-edit abc1234 && bun run scripts/prod.ts restart");
     expect(evidence.stateChangeNotes).toContain("Shell: git push origin HEAD -> ok (Everything up-to-date)");
   });
 
@@ -1569,7 +1569,7 @@ describe("LoopEngine auto rework", () => {
         if (command === "git push origin HEAD") {
           return { code: 1, stdout: "", stderr: "remote rejected: protected branch hook declined" };
         }
-        if (command === "bash scripts/prod.sh restart") {
+        if (command === "bun run scripts/prod.ts restart") {
           return { code: 1, stdout: "", stderr: "restart failed: service did not come back up" };
         }
         throw new Error(`Unexpected command: ${command}`);
@@ -1589,12 +1589,12 @@ describe("LoopEngine auto rework", () => {
     expect(evidence.lines).toContain("Push: remote rejected: protected branch hook declined");
     expect(evidence.lines).toContain("Restart: restart failed: service did not come back up");
     expect(evidence.lines).toContain("Health Check: GET /api/health -> 503 FAIL");
-    expect(evidence.lines).toContain("Rollback: git revert --no-edit def5678 && bash scripts/prod.sh restart");
+    expect(evidence.lines).toContain("Rollback: git revert --no-edit def5678 && bun run scripts/prod.ts restart");
     expect(evidence.stateChangeNotes).toContain(
       "Shell: git push origin HEAD -> failed (remote rejected: protected branch hook declined)"
     );
     expect(evidence.stateChangeNotes).toContain(
-      "Shell: bash scripts/prod.sh restart -> failed (restart failed: service did not come back up)"
+      "Shell: bun run scripts/prod.ts restart -> failed (restart failed: service did not come back up)"
     );
     expect(evidence.stateChangeNotes).toContain(
       'Health: GET /api/health -> 503 failed ({"ok":false,"error":"service unavailable"})'

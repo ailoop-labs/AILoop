@@ -20,7 +20,7 @@ This checklist maps the MVP success criteria from `README.md` and `ARCHITECTURE.
 
 | ID | Verification check (executable) | Pass evidence | Fail evidence |
 |---|---|---|---|
-| WC-1 | Start UI/API: `bash scripts/prod.sh` | Console binds to `0.0.0.0:3090`; dashboard page responds | Server does not start or wrong bind/port |
+| WC-1 | Start UI/API: `bun run scripts/prod.ts` | Console binds to `0.0.0.0:3090`; dashboard page responds | Server does not start or wrong bind/port |
 | WC-2 | Browser usability smoke test of Dashboard/Controls/History/Log Viewer | Pages render and controls are operable from browser | Missing page sections or non-functional controls |
 | WC-3 | API health/auth endpoints: `curl -sS http://127.0.0.1:3090/api/health`; `curl -sS http://127.0.0.1:3090/api/auth/status` | Health returns success; auth status returns JSON with `tokenRequired` boolean | Non-2xx or schema mismatch |
 | WC-4 | Loop control endpoints: POST `/api/loop/start|pause|resume|stop|instruct` | Responses are 2xx and reflected in `/api/status` state | Endpoint missing, non-2xx, or state not updated |

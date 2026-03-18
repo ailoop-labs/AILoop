@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "up": "bash scripts/prod.sh",
+    "up": "bun run scripts/prod.ts",
     "ailoop": "bun run scripts/ailoop.ts",
     "run": "bun run scripts/ailoop.ts run",
     "start": "bun run scripts/ailoop.ts start",
