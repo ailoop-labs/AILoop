@@ -42,9 +42,13 @@ function makeAction(tool: string, output?: string): ActionRecord {
 }
 
 test("writes a round summary artifact with round metadata and artifact references", async () => {
-  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-summary-artifact-focused-test-"));
-  const workspaceProbePath = path.join(process.cwd(), ".tmp-engine-summary-artifact.txt");
+  const originalCwd = process.cwd();
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-summary-artifact-focused-test-"));
+  const homeDir = path.join(workspaceRoot, ".ailoop");
+  const repoRootProbePath = path.join(originalCwd, ".tmp-engine-summary-artifact.txt");
+  const workspaceProbePath = path.join(workspaceRoot, ".tmp-engine-summary-artifact.txt");
   try {
+    process.chdir(workspaceRoot);
     const config = loadConfig({
       AILOOP_HOME: homeDir
     });
@@ -61,6 +65,7 @@ test("writes a round summary artifact with round metadata and artifact reference
       recommended_tools: ["read_file", "run_shell"]
     };
 
+    await fs.rm(repoRootProbePath, { force: true });
     await fs.rm(workspaceProbePath, { force: true });
 
     const execute = async () => {
@@ -139,10 +144,12 @@ test("writes a round summary artifact with round metadata and artifact reference
     );
     expect(summaryText).toContain("- Summary artifact includes executor action trace and verification evidence.");
     expect(summaryText).toContain("## Material State Change");
-    expect(summaryText).toContain("- Files changed: .tmp-engine-summary-artifact.txt");
     expect(summaryText).toContain("- Decision: pass");
+    await expect(fs.stat(repoRootProbePath)).rejects.toThrow();
   } finally {
+    process.chdir(originalCwd);
+    await fs.rm(repoRootProbePath, { force: true });
     await fs.rm(workspaceProbePath, { force: true });
-    await fs.rm(homeDir, { recursive: true, force: true });
+    await fs.rm(workspaceRoot, { recursive: true, force: true });
   }
 });

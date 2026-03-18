@@ -2019,7 +2019,9 @@ describe("LoopEngine crash recovery on startup", () => {
   });
 
   test("stops immediately when stop flag is set during Leader execution", async () => {
-    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-stop-during-leader-"));
+    const originalCwd = process.cwd();
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-stop-during-leader-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
     const paths = {
       homeDir,
       taskPath: path.join(homeDir, "goal.md"),
@@ -2044,73 +2046,67 @@ describe("LoopEngine crash recovery on startup", () => {
       activeRequirementPath: path.join(homeDir, "product-requirements", "current.md")
     };
 
-    await ensureLoopHome(paths);
-    await fs.writeFile(paths.taskPath, "Test goal", "utf8");
-    await fs.writeFile(path.join(process.cwd(), "README.md"), "Test README", "utf8");
-    await writeActiveRequirementArtifact(paths, "# Test requirement\n\nTest markdown content");
-
-    const initialState = {
-      state: "paused" as const,
-      round: 5,
-      updated_at: new Date().toISOString(),
-      pid: process.pid,
-      goal_reference: {
-        title: "Test Goal",
-        summary: "Test summary"
-      },
-      pause_reason: "Test pause",
-      last_error: "Test error",
-      consecutive_evaluator_failures: 1,
-      previous_tool_result: makeToolResult("Test result"),
-      current_budget: null,
-      previous_evaluation_dimensions: null,
-      previous_hot_file_governance: null
-    };
-
-    await writeLoopState(paths, initialState);
-    await setFlag(paths.pauseFlagPath);
-
-    // Create empty instructions queue
-    await fs.writeFile(paths.instructionsPath, "[]", "utf8");
-
-    const config = await loadConfig();
-    const mutable = new LoopEngine({
-      ...config,
-      homeDir,
-      intervalSeconds: 1
-    });
-
-    let leaderStarted = false;
-    let leaderCompleted = false;
-
-    mutable.leader = {
-      execute: async () => {
-        leaderStarted = true;
-        // Simulate a long-running Leader execution
-        await Bun.sleep(5000);
-        leaderCompleted = true;
-        return {
-          rationale: "Test rationale",
-          action: "resume",
-          diagnosis_type: "implementation_failure",
-          instructions: ["Test instruction"]
-        };
-      }
-    };
-
-    let runPromise: Promise<void> | null = null;
     try {
-      runPromise = mutable.run();
+      process.chdir(workspaceRoot);
+      await ensureLoopHome(paths);
+      await fs.writeFile(paths.taskPath, "Test goal", "utf8");
+      await fs.writeFile(path.join(workspaceRoot, "README.md"), "Test README", "utf8");
+      await writeActiveRequirementArtifact(paths, "# Test requirement\n\nTest markdown content");
 
-      // Wait for Leader to start
+      const initialState = {
+        state: "paused" as const,
+        round: 5,
+        updated_at: new Date().toISOString(),
+        pid: process.pid,
+        goal_reference: {
+          title: "Test Goal",
+          summary: "Test summary"
+        },
+        pause_reason: "Test pause",
+        last_error: "Test error",
+        consecutive_evaluator_failures: 1,
+        previous_tool_result: makeToolResult("Test result"),
+        current_budget: null,
+        previous_evaluation_dimensions: null,
+        previous_hot_file_governance: null
+      };
+
+      await writeLoopState(paths, initialState);
+      await setFlag(paths.pauseFlagPath);
+      await fs.writeFile(paths.instructionsPath, "[]", "utf8");
+
+      const config = await loadConfig();
+      const mutable = new LoopEngine({
+        ...config,
+        homeDir,
+        intervalSeconds: 1
+      });
+
+      let leaderStarted = false;
+      let leaderCompleted = false;
+
+      mutable.leader = {
+        execute: async () => {
+          leaderStarted = true;
+          await Bun.sleep(5000);
+          leaderCompleted = true;
+          return {
+            rationale: "Test rationale",
+            action: "resume",
+            diagnosis_type: "implementation_failure",
+            instructions: ["Test instruction"]
+          };
+        }
+      };
+
+      const runPromise = mutable.run();
+
       while (!leaderStarted) {
         await Bun.sleep(50);
       }
 
-      // Set stop flag while Leader is executing
       await setFlag(paths.stopFlagPath);
 
-      // Wait for the loop to stop
       await Promise.race([
         runPromise,
         Bun.sleep(3000).then(() => {
@@ -2118,22 +2114,13 @@ describe("LoopEngine crash recovery on startup", () => {
         })
       ]);
 
-      // Verify that Leader did not complete (was interrupted)
       expect(leaderCompleted).toBe(false);
 
-      // Verify final state
       const finalState = await readLoopState(paths);
       expect(finalState.state).toBe("idle");
     } finally {
-      if (runPromise) {
-        await Promise.race([
-          runPromise,
-          Bun.sleep(6_000).then(() => {
-            throw new Error("Timed out stopping loop engine.");
-          })
-        ]);
-      }
-      await fs.rm(homeDir, { recursive: true, force: true });
+      process.chdir(originalCwd);
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
     }
   });
 });
