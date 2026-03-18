@@ -534,6 +534,7 @@ export class LoopEngine {
   private readonly redactor = new SecretRedactor(process.env);
   private previousToolResult: ToolResult | null = null;
   private lockHandle: FileHandle | null = null;
+  private humanInterventions = 0;
 
   constructor(private readonly config: AppConfig) {
     this.paths = buildLoopPaths(config.homeDir);
@@ -556,6 +557,7 @@ export class LoopEngine {
   }
 
   async run(): Promise<void> {
+    this.humanInterventions = 0;
     await ensureLoopHome(this.paths);
     await this.acquireLock();
     await writePid(this.paths, process.pid);
@@ -709,6 +711,7 @@ export class LoopEngine {
                 continue;
               } else if (ccbResult.decision === "escalate_to_human") {
                 console.log(`[CCB] EXPERT INCAPACITY. Escalating to human.`);
+                this.humanInterventions++;
                 await this.setState("paused", `CCB Expert requested human intervention: ${ccbResult.rationale}`);
                 break;
               } else {
@@ -812,7 +815,7 @@ export class LoopEngine {
     const startedAt = Date.now();
     const runId = runTimestamp();
     const artifacts = buildRoundArtifactPaths(this.paths.runsDir, runId);
-    
+
     const phaseTimings: RoundPhaseTimings = {
       planning: 0,
       execution: 0,
@@ -1082,7 +1085,9 @@ export class LoopEngine {
           auto_rework_attempts: autoReworkAttempts,
           auto_rework_limit: this.config.evaluatorReworkMaxAttempts
         },
-        phase_timings_ms: phaseTimings
+        phase_timings_ms: phaseTimings,
+        human_interventions: this.humanInterventions,
+        hot_file_growth_lines: evaluation.hot_file_governance ? 1 : 0
       };
 
       await this.finalizeRoundArtifacts(
@@ -1155,7 +1160,9 @@ export class LoopEngine {
           auto_rework_attempts: 0,
           auto_rework_limit: this.config.evaluatorReworkMaxAttempts
         },
-        phase_timings_ms: phaseTimings
+        phase_timings_ms: phaseTimings,
+        human_interventions: this.humanInterventions,
+        hot_file_growth_lines: 0
       };
 
       await writeStateChangeFile(artifacts.stateChangePath, stateChange);
