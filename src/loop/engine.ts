@@ -44,6 +44,7 @@ import { SecretRedactor } from "../utils/redaction";
 import { runTimestamp } from "../utils/time";
 import { readGoalFile, resolveWorkspaceRootFromHome } from "./goal";
 import { cooldownWithControlChecks, waitWhilePaused } from "./scheduler";
+import { shouldTriggerStructuralMaintenance, buildStructuralMaintenanceInstructions } from "./structural-maintenance";
 import {
   buildLoopPaths,
   clearFlag,
@@ -560,6 +561,54 @@ export class LoopEngine {
         const currentStateData = await readLoopState(this.paths);
         const goalContent = await fs.readFile(this.paths.taskPath, "utf8");
         const readmeContent = await fs.readFile(path.join(process.cwd(), "README.md"), "utf8");
+
+        // --- STRUCTURAL MAINTENANCE PASS ---
+        // If the evaluator recommended a structural-maintenance pass, execute it before normal governance
+        if (
+          await hasFlag(this.paths.pauseFlagPath) &&
+          shouldTriggerStructuralMaintenance(currentStateData.previous_hot_file_governance)
+        ) {
+          console.log(`[STRUCTURAL MAINTENANCE] Detected hot-file governance recommendation for structural split.`);
+          console.log(`[STRUCTURAL MAINTENANCE] File: ${currentStateData.previous_hot_file_governance!.file_path}`);
+
+          // Clear pause flag to allow the structural-maintenance round to execute
+          await clearFlag(this.paths.pauseFlagPath);
+
+          // Inject structural-maintenance instructions
+          const baseInstructions = await consumeNextInstruction(this.paths);
+          const maintenanceInstructions = buildStructuralMaintenanceInstructions(
+            currentStateData.previous_hot_file_governance!,
+            baseInstructions
+          );
+
+          for (const instruction of maintenanceInstructions) {
+            await appendInstruction(this.paths, instruction);
+          }
+
+          // Clear hot-file governance state to prevent re-triggering
+          await updateLoopState(this.paths, (current) => ({
+            ...current,
+            previous_hot_file_governance: null,
+            last_error: null
+          }));
+
+          console.log(`[STRUCTURAL MAINTENANCE] Structural-maintenance instructions injected. Proceeding to execute refactoring round.`);
+
+          // Continue to execute the structural-maintenance round
+          const roundOutcome = await this.runRound(currentStateData.round + 1);
+          if (!roundOutcome.success) {
+            await setFlag(this.paths.pauseFlagPath);
+            await this.setState("paused", roundOutcome.errorMessage ?? "structural-maintenance round failed");
+            continue;
+          }
+
+          console.log(`[STRUCTURAL MAINTENANCE] Structural-maintenance round completed successfully.`);
+          await this.setState("cooldown");
+          const cooldownResult = await cooldownWithControlChecks(this.paths, this.config.intervalSeconds);
+          if (cooldownResult === "stop") break;
+          await this.setState("running");
+          continue;
+        }
 
         // --- GOVERNANCE STEP 2/3: Leader Diagnosis & CCB ---
         if (await hasFlag(this.paths.pauseFlagPath)) {

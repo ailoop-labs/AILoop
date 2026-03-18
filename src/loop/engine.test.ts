@@ -15,6 +15,7 @@ import type {
 import { ensureLoopHome, readLoopState, setFlag, type LoopPaths, writeLoopState } from "./state";
 import { writeActiveRequirementArtifact } from "../product/requirements";
 import { WorkspaceManager } from "../environment/workspace";
+import { fileExists } from "../utils/fs";
 import {
   LoopEngine,
   buildEvaluatorReworkInstructions,
@@ -2077,5 +2078,66 @@ describe("LoopEngine crash recovery on startup", () => {
       }
       await fs.rm(homeDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("LoopEngine structural-maintenance pass", () => {
+  test("triggers structural-maintenance round when evaluator recommends split", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-structural-maintenance-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir,
+      AILOOP_MAX_CYCLES: "2"
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    // Seed state with hot-file governance recommendation
+    const seeded = await readLoopState(paths);
+    await writeLoopState(paths, {
+      ...seeded,
+      state: "running",
+      round: 5,
+      previous_hot_file_governance: {
+        file_path: "src/loop/engine.ts",
+        heuristic_labels: ["large_file", "high_churn"],
+        result_class: "hot_file_growth_failure",
+        reason: "File exceeds 1000 lines and has high recent churn",
+        recommended_next_action: "pause and split the next change into a bounded structural-maintenance pass"
+      },
+      last_error: "EvaluatorStrategicBlock: Hot-file governance failure"
+    });
+    await setFlag(paths.pauseFlagPath);
+
+    let runRoundCalls = 0;
+
+    const mutable = engine as unknown as {
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+      run: () => Promise<void>;
+    };
+
+    const originalRunRound = mutable.runRound.bind(engine);
+    mutable.runRound = async (round: number) => {
+      runRoundCalls += 1;
+
+      // Stop after structural-maintenance round
+      if (runRoundCalls === 1) {
+        await setFlag(paths.stopFlagPath);
+      }
+
+      return { success: true };
+    };
+
+    await mutable.run();
+
+    // Verify structural-maintenance round was triggered
+    expect(runRoundCalls).toBe(1);
+
+    // Verify hot-file governance was cleared (null or undefined)
+    const finalState = await readLoopState(paths);
+    expect(finalState.previous_hot_file_governance ?? null).toBeNull();
+    expect(finalState.last_error ?? null).toBeNull();
+
+    await fs.rm(homeDir, { recursive: true, force: true });
   });
 });
