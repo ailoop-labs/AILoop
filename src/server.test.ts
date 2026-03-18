@@ -464,12 +464,22 @@ describe("console server API contract", () => {
   });
 
   test("reports auth status when token auth is enabled", async () => {
-    const fetchHandler = await loadHandler({
-      AILOOP_CONSOLE_HOST: "127.0.0.1",
-      AILOOP_CONSOLE_PORT: "0",
-      AILOOP_CONSOLE_ADMIN_TOKEN: "test-token",
-      AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE: currentUtcDateString()
-    });
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-server-auth-status-"));
+    tempDirs.add(workspaceRoot);
+
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    await fs.mkdir(homeDir, { recursive: true });
+    process.chdir(workspaceRoot);
+
+    const db = new DatabaseManager({ dbPath: path.join(homeDir, "ailoop.db") });
+    let fetchHandler;
+    try {
+      await db.setConfig("AILOOP_CONSOLE_ADMIN_TOKEN", "test-token");
+      await db.setConfig("AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE", currentUtcDateString());
+      fetchHandler = await loadHandler({});
+    } finally {
+      db.close();
+    }
 
     const response = await fetchHandler(new Request("http://console.test/api/auth/status"));
 
@@ -480,13 +490,69 @@ describe("console server API contract", () => {
     });
   });
 
+  test("loads console auth settings from the workspace database instead of process env", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-server-db-config-"));
+    tempDirs.add(workspaceRoot);
+
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    await fs.mkdir(homeDir, { recursive: true });
+    process.chdir(workspaceRoot);
+
+    const db = new DatabaseManager({ dbPath: path.join(homeDir, "ailoop.db") });
+    try {
+      await db.setConfig("AILOOP_CONSOLE_ADMIN_TOKEN", "db-token");
+      await db.setConfig("AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE", currentUtcDateString());
+
+      const fetchHandler = await loadHandler({
+        AILOOP_HOME: "/tmp/not-the-workspace-home",
+        AILOOP_CONSOLE_ADMIN_TOKEN: "env-token",
+        AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE: "2000-01-01"
+      });
+
+      const statusResponse = await fetchHandler(new Request("http://console.test/api/auth/status"));
+      expect(statusResponse.status).toBe(200);
+      expect(await statusResponse.json()).toEqual({
+        tokenRequired: true,
+        tokenExpired: false
+      });
+
+      const loginResponse = await fetchHandler(
+        new Request("http://console.test/api/auth/login", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({ token: "db-token" })
+        })
+      );
+
+      expect(loginResponse.status).toBe(200);
+      expect(await loginResponse.json()).toEqual({
+        ok: true,
+        tokenRequired: true
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("rejects protected API access without a valid admin token", async () => {
-    const fetchHandler = await loadHandler({
-      AILOOP_CONSOLE_HOST: "127.0.0.1",
-      AILOOP_CONSOLE_PORT: "0",
-      AILOOP_CONSOLE_ADMIN_TOKEN: "test-token",
-      AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE: currentUtcDateString()
-    });
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-server-auth-reject-"));
+    tempDirs.add(workspaceRoot);
+
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    await fs.mkdir(homeDir, { recursive: true });
+    process.chdir(workspaceRoot);
+
+    const db = new DatabaseManager({ dbPath: path.join(homeDir, "ailoop.db") });
+    let fetchHandler;
+    try {
+      await db.setConfig("AILOOP_CONSOLE_ADMIN_TOKEN", "test-token");
+      await db.setConfig("AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE", currentUtcDateString());
+      fetchHandler = await loadHandler({});
+    } finally {
+      db.close();
+    }
 
     const response = await fetchHandler(new Request("http://console.test/api/status"));
 

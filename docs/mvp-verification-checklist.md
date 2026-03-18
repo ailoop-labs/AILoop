@@ -4,8 +4,8 @@ This checklist maps the MVP success criteria from `README.md` and `ARCHITECTURE.
 
 ## Preconditions
 - Use workspace root: `/root/projects/AILoop`
-- Use clean runtime home for repeatability: `export AILOOP_HOME=.ailoop`
-- Start from dependencies installed and env configured.
+- Use the default workspace runtime home for repeatability: `./.ailoop`
+- Start from dependencies installed and database config prepared.
 
 ## 1) Core Loop End-to-End
 

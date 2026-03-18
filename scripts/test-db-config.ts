@@ -1,45 +1,32 @@
 #!/usr/bin/env bun
 /**
- * Test script to verify database configuration is working
+ * Inspect the current workspace database-backed configuration.
  */
 
-import { loadConfig, loadConfigAsync } from "../src/config/env";
+import { loadConfig, resolveAiloopHome, resolveConfigDbPath } from "../src/config/env";
 import { DatabaseManager } from "../src/utils/db";
-import path from "node:path";
 
 async function main() {
-  console.log("Testing database configuration loading...\n");
-
-  // Load config without database (from env only)
-  const envConfig = loadConfig();
-  console.log("1. Config from environment variables:");
-  console.log(`   CODEX_BIN: ${envConfig.codex.bin}`);
-  console.log(`   BUDGET_USD: ${envConfig.budget.usdPerRound}`);
-  console.log(`   TIMEOUT_MS: ${envConfig.codex.timeoutMs}`);
-
-  // Load config with database
-  const dbPath = path.join(envConfig.homeDir, "ailoop.db");
+  const homeDir = resolveAiloopHome();
+  const dbPath = resolveConfigDbPath(homeDir);
   const db = new DatabaseManager({ dbPath });
 
   try {
-    const dbConfig = await loadConfigAsync(process.env, db);
-    console.log("\n2. Config from database (with env fallback):");
-    console.log(`   CODEX_BIN: ${dbConfig.codex.bin}`);
-    console.log(`   BUDGET_USD: ${dbConfig.budget.usdPerRound}`);
-    console.log(`   TIMEOUT_MS: ${dbConfig.codex.timeoutMs}`);
+    const storedConfig = await db.getAllConfig();
+    const resolvedConfig = loadConfig();
 
-    // Check database values directly
-    console.log("\n3. Direct database values:");
-    const allConfig = await db.getAllConfig();
-    console.log(`   Total keys in DB: ${Object.keys(allConfig).length}`);
-    console.log(`   AILOOP_CODEX_BIN: ${allConfig.AILOOP_CODEX_BIN}`);
-    console.log(`   AILOOP_BUDGET_USD_PER_ROUND: ${allConfig.AILOOP_BUDGET_USD_PER_ROUND}`);
+    console.log("Workspace home:", homeDir);
+    console.log("Database path:", dbPath);
+    console.log("Stored config keys:", Object.keys(storedConfig).length);
+    console.log("Resolved AI CLI bin:", resolvedConfig.ai.bin);
+    console.log("Resolved console port:", resolvedConfig.consolePort);
+    console.log("Resolved round budget:", resolvedConfig.budget.usdPerRound);
+    console.log("");
+    console.log("Database entries:");
 
-    // Verify Claude CLI is configured
-    if (dbConfig.codex.bin.includes("claude")) {
-      console.log("\n✓ SUCCESS: Claude CLI is configured in database!");
-    } else {
-      console.log("\n✗ WARNING: Claude CLI not found in config");
+    for (const [key, value] of Object.entries(storedConfig).sort(([left], [right]) => left.localeCompare(right))) {
+      const displayValue = key.includes("TOKEN") || key.includes("KEY") || key.includes("SECRET") ? "***" : value;
+      console.log(`  ${key}: ${displayValue}`);
     }
   } finally {
     db.close();
@@ -47,6 +34,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("Test failed:", error);
+  console.error("Configuration inspection failed:", error);
   process.exit(1);
 });

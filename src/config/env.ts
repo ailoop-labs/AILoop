@@ -1,12 +1,14 @@
 import path from "node:path";
-import { hydrateEnvFromShell } from "../utils/env";
 import type { BudgetLimits, EvaluationDimension } from "../types/contracts";
-import type { DatabaseManager } from "../utils/db";
+import { DatabaseManager } from "../utils/db";
 
 export type AISandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 
 // Backward compatibility
 export type CodexSandboxMode = AISandboxMode;
+
+export const DEFAULT_AILOOP_HOME_DIRNAME = ".ailoop";
+export const CONFIG_DB_FILENAME = "ailoop.db";
 
 export const DEFAULT_LLM_EVALUATOR_DIMENSIONS: EvaluationDimension[] = [
   "goal_alignment",
@@ -48,6 +50,14 @@ export interface AppConfig {
   // Backward compatibility
   codex: AIConfig;
 }
+
+export interface LoadConfigOptions {
+  homeDir?: string;
+  workspaceRoot?: string;
+  db?: DatabaseManager;
+}
+
+type ConfigRecord = Record<string, string | undefined>;
 
 function parseNumber(value: string | undefined, fallback: number): number {
   if (!value) {
@@ -98,180 +108,150 @@ function parseLlmEvaluatorDimensions(value: string | undefined): EvaluationDimen
   return Array.from(new Set(parsed));
 }
 
-async function getConfigValue(
-  key: string,
-  env: NodeJS.ProcessEnv,
-  db?: DatabaseManager
-): Promise<string | undefined> {
-  // Priority: 1. Database, 2. Environment variable
-  if (db) {
-    const dbValue = await db.getConfig(key);
-    if (dbValue !== null) {
-      return dbValue;
+export function resolveAiloopHome(workspaceRoot = process.cwd()): string {
+  return path.resolve(workspaceRoot, DEFAULT_AILOOP_HOME_DIRNAME);
+}
+
+export function resolveConfigDbPath(homeDir = resolveAiloopHome()): string {
+  return path.join(homeDir, CONFIG_DB_FILENAME);
+}
+
+function isConfigRecordInput(value: unknown): value is ConfigRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const keys = Object.keys(value);
+  return keys.length === 0 || keys.some((key) => key.startsWith("AILOOP_"));
+}
+
+function resolveHomeDirForConfigRecord(record: ConfigRecord): string {
+  return path.resolve(record.AILOOP_HOME ?? resolveAiloopHome());
+}
+
+function resolveHomeDirFromOptions(options: LoadConfigOptions | undefined): string {
+  if (options?.homeDir) {
+    return path.resolve(options.homeDir);
+  }
+
+  return resolveAiloopHome(options?.workspaceRoot);
+}
+
+function buildConfig(values: ConfigRecord, homeDir: string): AppConfig {
+  const intervalSeconds = parseNumber(values.AILOOP_INTERVAL_SECONDS, 1200);
+  const maxCycles = parseNumber(values.AILOOP_MAX_CYCLES, 0);
+  const exitOnError = (values.AILOOP_EXIT_ON_ERROR ?? "0") === "1";
+  const evaluatorReworkMaxAttempts = Math.max(
+    0,
+    Math.min(5, Math.round(parseNumber(values.AILOOP_EVAL_REWORK_MAX_ATTEMPTS, 1)))
+  );
+  const consoleHost = values.AILOOP_CONSOLE_HOST ?? "0.0.0.0";
+  const consolePort = parseNumber(values.AILOOP_CONSOLE_PORT, 3090);
+  const consoleAdminToken = values.AILOOP_CONSOLE_ADMIN_TOKEN ?? "";
+  const maxRetainRuns = parseNumber(values.AILOOP_MAX_RETAIN_RUNS, 50);
+
+  const aiBin = values.AILOOP_AI_CLI_BIN ?? values.AILOOP_CODEX_BIN ?? "codex";
+  const aiModel = values.AILOOP_AI_CLI_MODEL ?? values.AILOOP_CODEX_MODEL ?? defaultCliModelForBin(aiBin);
+  const aiProfile = values.AILOOP_AI_CLI_PROFILE ?? values.AILOOP_CODEX_PROFILE ?? "";
+  const plannerSandbox = parseSandboxMode(
+    values.AILOOP_AI_CLI_PLANNER_SANDBOX ?? values.AILOOP_CODEX_PLANNER_SANDBOX,
+    "read-only"
+  );
+  const executorSandbox = parseSandboxMode(
+    values.AILOOP_AI_CLI_EXECUTOR_SANDBOX ?? values.AILOOP_CODEX_EXECUTOR_SANDBOX,
+    "danger-full-access"
+  );
+  const evaluatorSandbox = parseSandboxMode(
+    values.AILOOP_AI_CLI_EVALUATOR_SANDBOX ?? values.AILOOP_CODEX_EVALUATOR_SANDBOX,
+    "danger-full-access"
+  );
+  const timeoutMs = parseNumber(values.AILOOP_AI_CLI_TIMEOUT_MS ?? values.AILOOP_CODEX_TIMEOUT_MS, 180_000);
+
+  const aiConfig: AIConfig = {
+    bin: aiBin,
+    model: aiModel,
+    profile: aiProfile,
+    plannerSandbox,
+    executorSandbox,
+    evaluatorSandbox,
+    timeoutMs,
+    llmEvaluatorDimensions: parseLlmEvaluatorDimensions(values.AILOOP_LLM_EVALUATOR_DIMENSIONS),
+    llmEvaluatorMinPassScore: Math.max(
+      0,
+      Math.min(100, parseNumber(values.AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE, 75))
+    )
+  };
+
+  return {
+    homeDir,
+    intervalSeconds,
+    maxCycles,
+    exitOnError,
+    evaluatorReworkMaxAttempts,
+    consoleHost,
+    consolePort,
+    consoleAdminToken,
+    maxRetainRuns,
+    budget: {
+      usdPerRound: parseNumber(values.AILOOP_BUDGET_USD_PER_ROUND, 0.5),
+      timeMinutes: parseNumber(values.AILOOP_BUDGET_TIME_MINUTES, 60),
+      actions: parseNumber(values.AILOOP_BUDGET_ACTIONS, 30)
+    },
+    ai: aiConfig,
+    codex: aiConfig
+  };
+}
+
+function readConfigRecordSync(homeDir: string, db?: DatabaseManager): ConfigRecord {
+  const effectiveDb = db ?? new DatabaseManager({ dbPath: resolveConfigDbPath(homeDir) });
+
+  try {
+    return effectiveDb.getAllConfigSync();
+  } finally {
+    if (!db) {
+      effectiveDb.close();
     }
   }
-  return env[key];
+}
+
+async function readConfigRecordAsync(homeDir: string, db?: DatabaseManager): Promise<ConfigRecord> {
+  const effectiveDb = db ?? new DatabaseManager({ dbPath: resolveConfigDbPath(homeDir) });
+
+  try {
+    return await effectiveDb.getAllConfig();
+  } finally {
+    if (!db) {
+      effectiveDb.close();
+    }
+  }
 }
 
 export async function loadConfigAsync(
-  env: NodeJS.ProcessEnv = process.env,
+  input?: ConfigRecord | LoadConfigOptions,
   db?: DatabaseManager
 ): Promise<AppConfig> {
-  if (env === process.env) {
-    hydrateEnvFromShell();
+  if (isConfigRecordInput(input)) {
+    return buildConfig(input, resolveHomeDirForConfigRecord(input));
   }
 
-  const get = async (key: string): Promise<string | undefined> => {
-    return await getConfigValue(key, env, db);
-  };
-
-  const homeDir = path.resolve((await get("AILOOP_HOME")) ?? "./.ailoop");
-  const intervalSeconds = parseNumber(await get("AILOOP_INTERVAL_SECONDS"), 1200);
-  const maxCycles = parseNumber(await get("AILOOP_MAX_CYCLES"), 0);
-  const exitOnError = ((await get("AILOOP_EXIT_ON_ERROR")) ?? "0") === "1";
-  const evaluatorReworkMaxAttempts = Math.max(
-    0,
-    Math.min(5, Math.round(parseNumber(await get("AILOOP_EVAL_REWORK_MAX_ATTEMPTS"), 1)))
-  );
-  const consoleHost = (await get("AILOOP_CONSOLE_HOST")) ?? "0.0.0.0";
-  const consolePort = parseNumber(await get("AILOOP_CONSOLE_PORT"), 3090);
-  const consoleAdminToken = (await get("AILOOP_CONSOLE_ADMIN_TOKEN")) ?? "";
-  const maxRetainRuns = parseNumber(await get("AILOOP_MAX_RETAIN_RUNS"), 50);
-
-  // Support both new (AI_CLI_*) and legacy (CODEX_*) environment variables.
-  const aiBin = (await get("AILOOP_AI_CLI_BIN")) ?? (await get("AILOOP_CODEX_BIN")) ?? "codex";
-  const aiModel = (await get("AILOOP_AI_CLI_MODEL")) ?? (await get("AILOOP_CODEX_MODEL")) ?? defaultCliModelForBin(aiBin);
-  const aiProfile = (await get("AILOOP_AI_CLI_PROFILE")) ?? (await get("AILOOP_CODEX_PROFILE")) ?? "";
-  const plannerSandbox = parseSandboxMode(
-    (await get("AILOOP_AI_CLI_PLANNER_SANDBOX")) ?? (await get("AILOOP_CODEX_PLANNER_SANDBOX")),
-    "read-only"
-  );
-  const executorSandbox = parseSandboxMode(
-    (await get("AILOOP_AI_CLI_EXECUTOR_SANDBOX")) ?? (await get("AILOOP_CODEX_EXECUTOR_SANDBOX")),
-    "danger-full-access"
-  );
-  const evaluatorSandbox = parseSandboxMode(
-    (await get("AILOOP_AI_CLI_EVALUATOR_SANDBOX")) ?? (await get("AILOOP_CODEX_EVALUATOR_SANDBOX")),
-    "danger-full-access"
-  );
-  const timeoutMs = parseNumber(
-    (await get("AILOOP_AI_CLI_TIMEOUT_MS")) ?? (await get("AILOOP_CODEX_TIMEOUT_MS")),
-    180_000
-  );
-
-  const aiConfig: AIConfig = {
-    bin: aiBin,
-    model: aiModel,
-    profile: aiProfile,
-    plannerSandbox,
-    executorSandbox,
-    evaluatorSandbox,
-    timeoutMs,
-    llmEvaluatorDimensions: parseLlmEvaluatorDimensions(await get("AILOOP_LLM_EVALUATOR_DIMENSIONS")),
-    llmEvaluatorMinPassScore: Math.max(
-      0,
-      Math.min(100, parseNumber(await get("AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE"), 75))
-    )
-  };
-
-  return {
-    homeDir,
-    intervalSeconds,
-    maxCycles,
-    exitOnError,
-    evaluatorReworkMaxAttempts,
-    consoleHost,
-    consolePort,
-    consoleAdminToken,
-    maxRetainRuns,
-    budget: {
-      usdPerRound: parseNumber(await get("AILOOP_BUDGET_USD_PER_ROUND"), 0.5),
-      timeMinutes: parseNumber(await get("AILOOP_BUDGET_TIME_MINUTES"), 60),
-      actions: parseNumber(await get("AILOOP_BUDGET_ACTIONS"), 30)
-    },
-    ai: aiConfig,
-    codex: aiConfig // Backward compatibility
-  };
+  const options = input;
+  const homeDir = resolveHomeDirFromOptions(options);
+  const values = await readConfigRecordAsync(homeDir, options?.db ?? db);
+  return buildConfig(values, homeDir);
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  if (env === process.env) {
-    hydrateEnvFromShell();
+export function loadConfig(input?: ConfigRecord | LoadConfigOptions): AppConfig {
+  if (isConfigRecordInput(input)) {
+    return buildConfig(input, resolveHomeDirForConfigRecord(input));
   }
 
-  const get = (key: string): string | undefined => env[key];
-
-  const homeDir = path.resolve(get("AILOOP_HOME") ?? "./.ailoop");
-  const intervalSeconds = parseNumber(get("AILOOP_INTERVAL_SECONDS"), 1200);
-  const maxCycles = parseNumber(get("AILOOP_MAX_CYCLES"), 0);
-  const exitOnError = (get("AILOOP_EXIT_ON_ERROR") ?? "0") === "1";
-  const evaluatorReworkMaxAttempts = Math.max(
-    0,
-    Math.min(5, Math.round(parseNumber(get("AILOOP_EVAL_REWORK_MAX_ATTEMPTS"), 1)))
-  );
-  const consoleHost = get("AILOOP_CONSOLE_HOST") ?? "0.0.0.0";
-  const consolePort = parseNumber(get("AILOOP_CONSOLE_PORT"), 3090);
-  const consoleAdminToken = get("AILOOP_CONSOLE_ADMIN_TOKEN") ?? "";
-  const maxRetainRuns = parseNumber(get("AILOOP_MAX_RETAIN_RUNS"), 50);
-
-  // Support both new (AI_CLI_*) and legacy (CODEX_*) environment variables.
-  const aiBin = get("AILOOP_AI_CLI_BIN") ?? get("AILOOP_CODEX_BIN") ?? "codex";
-  const aiModel = get("AILOOP_AI_CLI_MODEL") ?? get("AILOOP_CODEX_MODEL") ?? defaultCliModelForBin(aiBin);
-  const aiProfile = get("AILOOP_AI_CLI_PROFILE") ?? get("AILOOP_CODEX_PROFILE") ?? "";
-  const plannerSandbox = parseSandboxMode(
-    get("AILOOP_AI_CLI_PLANNER_SANDBOX") ?? get("AILOOP_CODEX_PLANNER_SANDBOX"),
-    "read-only"
-  );
-  const executorSandbox = parseSandboxMode(
-    get("AILOOP_AI_CLI_EXECUTOR_SANDBOX") ?? get("AILOOP_CODEX_EXECUTOR_SANDBOX"),
-    "danger-full-access"
-  );
-  const evaluatorSandbox = parseSandboxMode(
-    get("AILOOP_AI_CLI_EVALUATOR_SANDBOX") ?? get("AILOOP_CODEX_EVALUATOR_SANDBOX"),
-    "danger-full-access"
-  );
-  const timeoutMs = parseNumber(
-    get("AILOOP_AI_CLI_TIMEOUT_MS") ?? get("AILOOP_CODEX_TIMEOUT_MS"),
-    180_000
-  );
-
-  const aiConfig: AIConfig = {
-    bin: aiBin,
-    model: aiModel,
-    profile: aiProfile,
-    plannerSandbox,
-    executorSandbox,
-    evaluatorSandbox,
-    timeoutMs,
-    llmEvaluatorDimensions: parseLlmEvaluatorDimensions(get("AILOOP_LLM_EVALUATOR_DIMENSIONS")),
-    llmEvaluatorMinPassScore: Math.max(
-      0,
-      Math.min(100, parseNumber(get("AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE"), 75))
-    )
-  };
-
-  return {
-    homeDir,
-    intervalSeconds,
-    maxCycles,
-    exitOnError,
-    evaluatorReworkMaxAttempts,
-    consoleHost,
-    consolePort,
-    consoleAdminToken,
-    maxRetainRuns,
-    budget: {
-      usdPerRound: parseNumber(get("AILOOP_BUDGET_USD_PER_ROUND"), 0.5),
-      timeMinutes: parseNumber(get("AILOOP_BUDGET_TIME_MINUTES"), 60),
-      actions: parseNumber(get("AILOOP_BUDGET_ACTIONS"), 30)
-    },
-    ai: aiConfig,
-    codex: aiConfig // Backward compatibility
-  };
+  const homeDir = resolveHomeDirFromOptions(input);
+  const values = readConfigRecordSync(homeDir, input?.db);
+  return buildConfig(values, homeDir);
 }
 
 export async function saveConfigToDb(config: AppConfig, db: DatabaseManager): Promise<void> {
-  await db.setConfig("AILOOP_HOME", config.homeDir);
+  await db.deleteConfig("AILOOP_HOME");
   await db.setConfig("AILOOP_INTERVAL_SECONDS", config.intervalSeconds.toString());
   await db.setConfig("AILOOP_MAX_CYCLES", config.maxCycles.toString());
   await db.setConfig("AILOOP_EXIT_ON_ERROR", config.exitOnError ? "1" : "0");
@@ -284,7 +264,6 @@ export async function saveConfigToDb(config: AppConfig, db: DatabaseManager): Pr
   await db.setConfig("AILOOP_BUDGET_TIME_MINUTES", config.budget.timeMinutes.toString());
   await db.setConfig("AILOOP_BUDGET_ACTIONS", config.budget.actions.toString());
 
-  // Save with new naming convention (AI_CLI_*)
   await db.setConfig("AILOOP_AI_CLI_BIN", config.ai.bin);
   await db.setConfig("AILOOP_AI_CLI_MODEL", config.ai.model);
   await db.setConfig("AILOOP_AI_CLI_PROFILE", config.ai.profile);

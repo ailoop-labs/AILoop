@@ -5,11 +5,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 RUN_DIR=".ailoop"
+DB_FILE="$RUN_DIR/ailoop.db"
 PID_FILE="$RUN_DIR/prod.server.pid"
 LOG_FILE="$RUN_DIR/prod.server.log"
 TOKEN_CACHE_FILE="$RUN_DIR/console.admin.token.cache"
 START_LOCK_DIR="$RUN_DIR/prod.server.start.lock"
-CONSOLE_PORT="${AILOOP_CONSOLE_PORT:-3090}"
 STOP_TIMEOUT_SECONDS="${AILOOP_PROD_STOP_TIMEOUT_SECONDS:-20}"
 START_LOCK_WAIT_SECONDS="${AILOOP_PROD_START_LOCK_WAIT_SECONDS:-30}"
 STARTUP_TIMEOUT_SECONDS="${AILOOP_PROD_STARTUP_TIMEOUT_SECONDS:-20}"
@@ -19,6 +19,51 @@ if [[ -z "$BUN_BIN" ]]; then
   echo "bun is required but was not found in PATH."
   exit 1
 fi
+
+db_get_config() {
+  local key="$1"
+  local fallback="${2:-}"
+  NO_COLOR=1 "$BUN_BIN" -e '
+    import { Database } from "bun:sqlite";
+    const [dbPath, key, fallback] = process.argv.slice(2);
+    try {
+      const db = new Database(dbPath, { create: true });
+      const row = db.query("SELECT value FROM config WHERE key = ?").get(key) as { value?: string } | null;
+      db.close();
+      console.log(row?.value ?? fallback ?? "");
+    } catch {
+      console.log(fallback ?? "");
+    }
+  ' "$DB_FILE" "$key" "$fallback"
+}
+
+db_set_config() {
+  local key="$1"
+  local value="$2"
+  mkdir -p "$RUN_DIR"
+  NO_COLOR=1 "$BUN_BIN" -e '
+    import { Database } from "bun:sqlite";
+    const [dbPath, key, value] = process.argv.slice(2);
+    const db = new Database(dbPath, { create: true });
+    db.run(`
+      CREATE TABLE IF NOT EXISTS config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+    db.run(`
+      INSERT INTO config (key, value, updated_at)
+      VALUES (?, ?, datetime("now"))
+      ON CONFLICT(key) DO UPDATE SET
+        value = excluded.value,
+        updated_at = excluded.updated_at
+    `, [key, value]);
+    db.close();
+  ' "$DB_FILE" "$key" "$value"
+}
+
+CONSOLE_PORT="$(db_get_config "AILOOP_CONSOLE_PORT" "3090")"
 
 if ! [[ "$STOP_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
   echo "AILOOP_PROD_STOP_TIMEOUT_SECONDS must be a non-negative integer."
@@ -175,8 +220,15 @@ if [[ ! -d "web/node_modules" ]]; then
   bun --cwd=web install
 fi
 
-if [[ -z "${AILOOP_CONSOLE_ADMIN_TOKEN:-}" ]]; then
-  today_utc="$(NO_COLOR=1 bun -e 'console.log(new Date().toISOString().split("T")[0])')"
+stored_admin_token="$(db_get_config "AILOOP_CONSOLE_ADMIN_TOKEN" "")"
+stored_issued_date="$(db_get_config "AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE" "")"
+if [[ -z "$stored_admin_token" || -z "$stored_issued_date" ]]; then
+  today_utc="$(NO_COLOR=1 "$BUN_BIN" -e 'console.log(new Date().toISOString().split("T")[0])')"
+else
+  today_utc="$(NO_COLOR=1 "$BUN_BIN" -e 'console.log(new Date().toISOString().split("T")[0])')"
+fi
+
+if [[ -z "$stored_admin_token" || -z "$stored_issued_date" ]]; then
   today_epoch="$(NO_COLOR=1 bun -e 'console.log(Math.floor(new Date(process.argv[1] + "T00:00:00Z").getTime() / 1000))' "$today_utc")"
   cached_issued_date=""
   cached_token=""
@@ -201,7 +253,7 @@ if [[ -z "${AILOOP_CONSOLE_ADMIN_TOKEN:-}" ]]; then
   if [[ "$token_age_days" -ge 0 && "$token_age_days" -lt 7 ]]; then
     generated_admin_token="$cached_token"
     issued_date="$cached_issued_date"
-    echo "AILOOP_CONSOLE_ADMIN_TOKEN is empty; reusing token issued on ${cached_issued_date} (age: ${token_age_days} days)."
+    echo "Console admin token missing from database; reusing token issued on ${cached_issued_date} (age: ${token_age_days} days)."
   else
     if command -v openssl >/dev/null 2>&1; then
       generated_admin_token="$(openssl rand -hex 24)"
@@ -211,18 +263,46 @@ if [[ -z "${AILOOP_CONSOLE_ADMIN_TOKEN:-}" ]]; then
     mkdir -p "$RUN_DIR"
     printf "%s %s\n" "$today_utc" "$generated_admin_token" >"$TOKEN_CACHE_FILE"
     chmod 600 "$TOKEN_CACHE_FILE" || true
-    echo "AILOOP_CONSOLE_ADMIN_TOKEN is empty; generated new token (issued on ${today_utc})."
+    echo "Console admin token missing from database; generated new token (issued on ${today_utc})."
   fi
 
-  export AILOOP_CONSOLE_ADMIN_TOKEN="$generated_admin_token"
-  export AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE="$issued_date"
+  db_set_config "AILOOP_CONSOLE_ADMIN_TOKEN" "$generated_admin_token"
+  db_set_config "AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE" "$issued_date"
   token_expiry_date="$(NO_COLOR=1 bun -e 'const d=new Date(process.argv[1]+"T00:00:00Z"); d.setUTCDate(d.getUTCDate()+7); console.log(Number.isNaN(d.getTime()) ? "" : d.toISOString().split("T")[0])' "$issued_date" 2>/dev/null || true)"
   if [[ -n "$token_expiry_date" ]]; then
     echo "This token is valid for 7 UTC days (expires on ${token_expiry_date} UTC)."
   else
     echo "This token is valid for 7 UTC days from issuance."
   fi
-  echo "${AILOOP_CONSOLE_ADMIN_TOKEN}"
+  echo "${generated_admin_token}"
+  echo "(Tip: copy this token and paste it into the web login page.)"
+else
+  token_age_days="$(
+    NO_COLOR=1 "$BUN_BIN" -e '
+      const [today, issued] = process.argv.slice(2);
+      const todayMs = Date.parse(`${today}T00:00:00.000Z`);
+      const issuedMs = Date.parse(`${issued}T00:00:00.000Z`);
+      if (Number.isNaN(todayMs) || Number.isNaN(issuedMs)) {
+        console.log("999999");
+      } else {
+        console.log(String(Math.floor((todayMs - issuedMs) / 86400000)));
+      }
+    ' "$today_utc" "$stored_issued_date"
+  )"
+  if [[ "$token_age_days" -lt 0 || "$token_age_days" -ge 7 ]]; then
+    rm -f "$TOKEN_CACHE_FILE"
+    db_set_config "AILOOP_CONSOLE_ADMIN_TOKEN" ""
+    db_set_config "AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE" ""
+    exec "$0" "$MODE"
+  fi
+  token_expiry_date="$(NO_COLOR=1 "$BUN_BIN" -e 'const d=new Date(process.argv[1]+"T00:00:00Z"); d.setUTCDate(d.getUTCDate()+7); console.log(Number.isNaN(d.getTime()) ? "" : d.toISOString().split("T")[0])' "$stored_issued_date" 2>/dev/null || true)"
+  echo "Using console admin token from database (issued on ${stored_issued_date})."
+  if [[ -n "$token_expiry_date" ]]; then
+    echo "This token is valid for 7 UTC days (expires on ${token_expiry_date} UTC)."
+  else
+    echo "This token is valid for 7 UTC days from issuance."
+  fi
+  echo "${stored_admin_token}"
   echo "(Tip: copy this token and paste it into the web login page.)"
 fi
 

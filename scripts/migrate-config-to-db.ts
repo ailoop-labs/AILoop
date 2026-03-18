@@ -1,52 +1,45 @@
 #!/usr/bin/env bun
 /**
- * Migration script to move configuration from .env file to SQLite database
+ * Legacy entrypoint retained for operator convenience.
+ * Configuration is already database-only; this script now removes stale
+ * legacy config keys from the current workspace database.
  */
 
-import { loadConfig, saveConfigToDb } from "../src/config/env";
+import { resolveAiloopHome, resolveConfigDbPath } from "../src/config/env";
 import { DatabaseManager } from "../src/utils/db";
-import path from "node:path";
+
+const LEGACY_KEYS = [
+  "AILOOP_HOME",
+  "AILOOP_CODEX_BIN",
+  "AILOOP_CODEX_MODEL",
+  "AILOOP_CODEX_PROFILE",
+  "AILOOP_CODEX_PLANNER_SANDBOX",
+  "AILOOP_CODEX_EXECUTOR_SANDBOX",
+  "AILOOP_CODEX_EVALUATOR_SANDBOX",
+  "AILOOP_CODEX_TIMEOUT_MS"
+] as const;
 
 async function main() {
-  console.log("Starting configuration migration to database...");
-
-  // Load config from environment variables
-  const config = loadConfig();
-  console.log(`Loaded configuration from environment`);
-  console.log(`Home directory: ${config.homeDir}`);
-
-  // Initialize database
-  const dbPath = path.join(config.homeDir, "ailoop.db");
+  const homeDir = resolveAiloopHome();
+  const dbPath = resolveConfigDbPath(homeDir);
   const db = new DatabaseManager({ dbPath });
-  console.log(`Database initialized at: ${dbPath}`);
 
   try {
-    // Save all config to database
-    await saveConfigToDb(config, db);
-    console.log("✓ Configuration successfully migrated to database");
+    for (const key of LEGACY_KEYS) {
+      await db.deleteConfig(key);
+    }
 
-    // Verify by reading back
-    const savedConfig = await db.getAllConfig();
-    console.log(`\n✓ Verified ${Object.keys(savedConfig).length} configuration keys in database:`);
-    for (const [key, value] of Object.entries(savedConfig)) {
-      // Mask sensitive values
-      const displayValue = key.includes("TOKEN") || key.includes("KEY")
-        ? "***"
-        : value;
-      console.log(`  ${key}: ${displayValue}`);
+    console.log("Configuration is already database-only.");
+    console.log(`Cleaned legacy keys in ${dbPath}:`);
+    for (const key of LEGACY_KEYS) {
+      console.log(`  - ${key}`);
     }
   } finally {
     db.close();
   }
-
-  console.log("\n✓ Migration complete!");
-  console.log("\nNext steps:");
-  console.log("1. Restart AILoop to use database configuration");
-  console.log("2. You can now manage config via the web console or API");
-  console.log("3. Environment variables will still work as fallback");
 }
 
 main().catch((error) => {
-  console.error("Migration failed:", error);
+  console.error("Legacy config cleanup failed:", error);
   process.exit(1);
 });

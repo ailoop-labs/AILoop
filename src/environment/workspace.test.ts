@@ -4,7 +4,7 @@ import path from "node:path";
 import { execSync } from "node:child_process";
 import { describe, expect, test } from "bun:test";
 import type { LoopPaths } from "../types/contracts";
-import { WorkspaceManager } from "./workspace";
+import { WorkspaceManager, isValidGitRepository } from "./workspace";
 
 function run(cmd: string, cwd: string): void {
   execSync(cmd, {
@@ -37,6 +37,28 @@ function createLoopPaths(homeDir: string): LoopPaths {
     dbPath: path.join(homeDir, "ailoop.db")
   };
 }
+
+describe("isValidGitRepository", () => {
+  test("returns true for valid git repository", async () => {
+    const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-valid-repo-"));
+    run("git init", repoDir);
+    const result = await isValidGitRepository(repoDir);
+    expect(result).toBe(true);
+    await fs.rm(repoDir, { recursive: true, force: true });
+  });
+
+  test("returns false for directory without .git", async () => {
+    const nonRepoDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-non-repo-"));
+    const result = await isValidGitRepository(nonRepoDir);
+    expect(result).toBe(false);
+    await fs.rm(nonRepoDir, { recursive: true, force: true });
+  });
+
+  test("returns false for nonexistent path", async () => {
+    const result = await isValidGitRepository("/nonexistent/path/that/does/not/exist");
+    expect(result).toBe(false);
+  });
+});
 
 describe("WorkspaceManager.buildStateChange", () => {
   test("uses current .ailoop goal and state filenames", () => {

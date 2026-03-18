@@ -1,100 +1,29 @@
-# Configuration Migration Summary
+# Configuration Storage Summary
 
-## What Was Done
+AILoop configuration has been fully converged onto the workspace SQLite database at `./.ailoop/ailoop.db`.
 
-Successfully migrated AILoop configuration from environment variables to SQLite database storage.
+## Current State
 
-## Changes Made
+- `loadConfig()` resolves application settings from the workspace database only.
+- The console server reads admin token metadata from the database instead of process environment.
+- Runtime AI CLI settings are stored as `AILOOP_AI_CLI_*` in the database and injected into new loop processes when they start.
+- Compatibility `AILOOP_CODEX_*` variables are still exported to child processes, but only as derived compatibility output.
+- `AILOOP_HOME` is no longer treated as an editable configuration key.
 
-### 1. Database Schema (`src/utils/db.ts`)
-- Added `config` table to store key-value configuration pairs
-- Added methods: `getConfig()`, `setConfig()`, `getAllConfig()`, `deleteConfig()`
+## Operational Impact
 
-### 2. Configuration Loading (`src/config/env.ts`)
-- Added `loadConfigAsync()` function that loads from database first, then falls back to environment variables
-- Added `saveConfigToDb()` function to persist configuration to database
-- Maintained backward compatibility with existing `loadConfig()` function
+- Editing `.env` does not change AILoop configuration.
+- Updating config through `/api/base-config` or direct SQLite writes changes the authoritative source.
+- Restart the console server or loop after base-config changes so new processes pick them up.
 
-### 3. Main Script (`scripts/ailoop.ts`)
-- Updated to use `loadConfigAsync()` with database support
-- Configuration now loaded from database on startup
+## Helper Scripts
 
-### 4. Server API (`src/server.ts`)
-- Added `/api/base-config` GET endpoint to retrieve all configuration
-- Added `/api/base-config` POST endpoint to update configuration
+- `bun run scripts/test-db-config.ts`
+  - inspect the current workspace database and resolved runtime config
+- `bun run scripts/migrate-config-to-db.ts`
+  - remove stale legacy keys such as `AILOOP_HOME` and `AILOOP_CODEX_*`
 
-### 5. Migration Script (`scripts/migrate-config-to-db.ts`)
-- Created script to migrate existing .env configuration to database
-- Successfully migrated 21 configuration keys
+## Remaining Boundaries
 
-### 6. Test Script (`scripts/test-db-config.ts`)
-- Created verification script to test database configuration loading
-
-### 7. Documentation (`docs/configuration-management.md`)
-- Comprehensive guide on using the new configuration system
-- API examples and troubleshooting tips
-
-## Configuration Priority
-
-1. **SQLite Database** (highest priority)
-2. **Environment Variables** (fallback)
-3. **Default Values** (lowest priority)
-
-## Current Status
-
-✓ Configuration successfully stored in database at `.ailoop/ailoop.db`
-✓ Claude CLI path configured: `/opt/homebrew/bin/claude`
-✓ All 21 configuration keys migrated
-✓ Backward compatibility maintained
-✓ AILoop restarted and running with database configuration
-
-## Benefits
-
-1. **Dynamic Configuration**: Change settings without editing files
-2. **API Management**: Update configuration via REST API
-3. **Audit Trail**: Track when configuration was last updated
-4. **Centralized Storage**: All settings in one queryable database
-5. **Backward Compatible**: Environment variables still work as fallback
-
-## Usage Examples
-
-### View Configuration
-\`\`\`bash
-sqlite3 .ailoop/ailoop.db "SELECT * FROM config;"
-\`\`\`
-
-### Update Configuration
-\`\`\`bash
-sqlite3 .ailoop/ailoop.db "UPDATE config SET value='1.0' WHERE key='AILOOP_BUDGET_USD_PER_ROUND';"
-\`\`\`
-
-### Via API (requires authentication)
-\`\`\`bash
-curl -X POST http://localhost:3090/api/base-config \\
-  -H "Content-Type: application/json" \\
-  -d '{"AILOOP_CODEX_BIN": "/opt/homebrew/bin/claude"}'
-\`\`\`
-
-### Test Configuration
-\`\`\`bash
-bun run scripts/test-db-config.ts
-\`\`\`
-
-## Next Steps
-
-1. Configuration can now be managed via web console (future enhancement)
-2. Add configuration history/versioning (future enhancement)
-3. Add configuration validation (future enhancement)
-
-## Files Modified
-
-- `src/utils/db.ts` - Added config table and methods
-- `src/config/env.ts` - Added async config loading
-- `src/server.ts` - Added config API endpoints
-- `scripts/ailoop.ts` - Updated to use database config
-
-## Files Created
-
-- `scripts/migrate-config-to-db.ts` - Migration script
-- `scripts/test-db-config.ts` - Test script
-- `docs/configuration-management.md` - Documentation
+- Process environment is still inherited for non-config concerns such as `PATH`, API credentials consumed by external tools, and secret redaction inputs.
+- Historical docs or old test helpers may still mention `AILOOP_HOME` as a conceptual persistence root, but runtime configuration itself is database-backed.

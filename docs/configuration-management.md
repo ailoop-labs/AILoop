@@ -1,148 +1,129 @@
 # Configuration Management
 
-AILoop now supports storing configuration in SQLite database, providing a more flexible and manageable way to handle settings.
+AILoop now treats the workspace database as the only configuration source of truth.
 
-## Configuration Priority
+## Source of Truth
 
-Configuration values are loaded in the following priority order:
+- Runtime configuration is stored in `./.ailoop/ailoop.db`.
+- `loadConfig()` and the console server read from that database only.
+- `.env` and ordinary `AILOOP_*` process environment variables are not used to resolve application configuration.
+- The workspace home is fixed to `./.ailoop` for the current working directory. `AILOOP_HOME` is no longer an editable config key.
 
-1. **SQLite Database** (highest priority)
-2. **Environment Variables** (fallback)
-3. **Default Values** (lowest priority)
+## What Still Uses Process Environment
 
-This means you can override database settings with environment variables if needed.
+The process environment is still inherited for non-config purposes such as:
 
-## Migration from .env to Database
+- `PATH` and shell command discovery
+- external API credentials used by tools or CLIs
+- secret redaction inputs
 
-To migrate your existing `.env` configuration to the database:
-
-```bash
-bun run scripts/migrate-config-to-db.ts
-```
-
-This will:
-- Read all configuration from environment variables
-- Store them in the SQLite database at `.ailoop/ailoop.db`
-- Preserve all existing settings
+That is separate from AILoop application configuration.
 
 ## Managing Configuration
 
 ### Via API
 
-**Get all base configuration:**
+Get all database-backed configuration:
+
 ```bash
 curl http://localhost:3090/api/base-config
 ```
 
-**Update configuration:**
+Update configuration:
+
 ```bash
 curl -X POST http://localhost:3090/api/base-config \
   -H "Content-Type: application/json" \
   -d '{
-    "AILOOP_CODEX_BIN": "/opt/homebrew/bin/claude",
+    "AILOOP_AI_CLI_BIN": "/opt/homebrew/bin/claude",
     "AILOOP_BUDGET_USD_PER_ROUND": "1.0"
   }'
 ```
 
-### Via Database
-
-You can also directly query or update the database:
+### Via SQLite
 
 ```bash
 # View all configuration
-sqlite3 .ailoop/ailoop.db "SELECT * FROM config;"
+sqlite3 .ailoop/ailoop.db "SELECT * FROM config ORDER BY key;"
 
 # Update a specific value
-sqlite3 .ailoop/ailoop.db "UPDATE config SET value='/path/to/claude' WHERE key='AILOOP_CODEX_BIN';"
+sqlite3 .ailoop/ailoop.db "UPDATE config SET value='1.0' WHERE key='AILOOP_BUDGET_USD_PER_ROUND';"
 ```
 
-### Via Environment Variables
+### Via Helper Scripts
 
-Environment variables still work as a fallback:
+Inspect the effective database-backed configuration:
 
 ```bash
-AILOOP_CODEX_BIN=/opt/homebrew/bin/claude bun run scripts/ailoop.ts run
+bun run scripts/test-db-config.ts
 ```
 
-## Configuration Keys
+Remove stale legacy config keys:
 
-All standard AILoop configuration keys are supported:
+```bash
+bun run scripts/migrate-config-to-db.ts
+```
+
+## Supported Keys
 
 ### General Settings
-- `AILOOP_HOME` - Home directory for AILoop data
-- `AILOOP_INTERVAL_SECONDS` - Interval between loop iterations
-- `AILOOP_MAX_CYCLES` - Maximum number of cycles (0 = unlimited)
-- `AILOOP_EXIT_ON_ERROR` - Exit on error (0 or 1)
-- `AILOOP_MAX_RETAIN_RUNS` - Maximum number of runs to retain
+
+- `AILOOP_INTERVAL_SECONDS`
+- `AILOOP_MAX_CYCLES`
+- `AILOOP_EXIT_ON_ERROR`
+- `AILOOP_MAX_RETAIN_RUNS`
 
 ### Budget Settings
-- `AILOOP_BUDGET_USD_PER_ROUND` - USD budget per round
-- `AILOOP_BUDGET_TIME_MINUTES` - Time budget in minutes
-- `AILOOP_BUDGET_ACTIONS` - Action count budget
 
-### CLI Settings
-- `AILOOP_CODEX_BIN` - Path to AI CLI binary (codex, claude, etc.)
-- `AILOOP_CODEX_MODEL` - Model to use
-- `AILOOP_CODEX_PROFILE` - Profile name
-- `AILOOP_CODEX_PLANNER_SANDBOX` - Planner sandbox mode
-- `AILOOP_CODEX_EXECUTOR_SANDBOX` - Executor sandbox mode
-- `AILOOP_CODEX_EVALUATOR_SANDBOX` - Evaluator sandbox mode
-- `AILOOP_CODEX_TIMEOUT_MS` - Timeout in milliseconds
+- `AILOOP_BUDGET_USD_PER_ROUND`
+- `AILOOP_BUDGET_TIME_MINUTES`
+- `AILOOP_BUDGET_ACTIONS`
+
+### AI CLI Settings
+
+- `AILOOP_AI_CLI_BIN`
+- `AILOOP_AI_CLI_MODEL`
+- `AILOOP_AI_CLI_PROFILE`
+- `AILOOP_AI_CLI_PLANNER_SANDBOX`
+- `AILOOP_AI_CLI_EXECUTOR_SANDBOX`
+- `AILOOP_AI_CLI_EVALUATOR_SANDBOX`
+- `AILOOP_AI_CLI_TIMEOUT_MS`
+
+Legacy `AILOOP_CODEX_*` keys are exported to loop child processes for compatibility, but they are not stored as authoritative config.
 
 ### Evaluator Settings
-- `AILOOP_EVAL_REWORK_MAX_ATTEMPTS` - Max rework attempts
-- `AILOOP_LLM_EVALUATOR_DIMENSIONS` - Evaluation dimensions (comma-separated)
-- `AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE` - Minimum passing score
+
+- `AILOOP_EVAL_REWORK_MAX_ATTEMPTS`
+- `AILOOP_LLM_EVALUATOR_DIMENSIONS`
+- `AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE`
+- `AILOOP_UI_EVALUATOR_CMD`
 
 ### Console Settings
-- `AILOOP_CONSOLE_HOST` - Console server host
-- `AILOOP_CONSOLE_PORT` - Console server port
-- `AILOOP_CONSOLE_ADMIN_TOKEN` - Admin authentication token
 
-## Benefits of Database Configuration
+- `AILOOP_CONSOLE_HOST`
+- `AILOOP_CONSOLE_PORT`
+- `AILOOP_CONSOLE_ADMIN_TOKEN`
+- `AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE`
 
-1. **Dynamic Updates**: Change configuration without editing files
-2. **API Access**: Manage settings via REST API
-3. **Audit Trail**: Track when configuration was last updated
-4. **Centralized**: All settings in one queryable location
-5. **Backward Compatible**: Environment variables still work
+## Restart Behavior
 
-## Restart Required
-
-After changing configuration in the database, you must restart AILoop for changes to take effect:
+After changing base configuration in the database, restart AILoop so the console server and new loop processes pick up the updated values.
 
 ```bash
-# Stop the loop
 bun run scripts/ailoop.ts stop
-
-# Start again
 bun run scripts/ailoop.ts start
-```
-
-## Database Schema
-
-The configuration table schema:
-
-```sql
-CREATE TABLE config (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
 ```
 
 ## Troubleshooting
 
-**Configuration not loading from database:**
-- Ensure the database file exists at `.ailoop/ailoop.db`
-- Check file permissions
-- Verify the config table exists: `sqlite3 .ailoop/ailoop.db ".schema config"`
+Configuration appears stale:
 
-**Want to reset to environment variables:**
-- Delete specific keys: `sqlite3 .ailoop/ailoop.db "DELETE FROM config WHERE key='AILOOP_CODEX_BIN';"`
-- Or clear all: `sqlite3 .ailoop/ailoop.db "DELETE FROM config;"`
+- verify the current working directory is the intended workspace
+- inspect `./.ailoop/ailoop.db`
+- confirm the `config` table exists: `sqlite3 .ailoop/ailoop.db ".schema config"`
 
-**Verify current configuration:**
+Need to clear a bad key:
+
 ```bash
-curl http://localhost:3090/api/base-config
+sqlite3 .ailoop/ailoop.db "DELETE FROM config WHERE key='AILOOP_AI_CLI_BIN';"
 ```

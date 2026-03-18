@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { loadConfig, type AppConfig } from "./config/env";
+import { loadConfig, resolveConfigDbPath, type AppConfig } from "./config/env";
 import { patchRuntimeLoopConfig, readRuntimeLoopConfig, resetRuntimeLoopConfig } from "./config/runtime";
 import { isDateBasedAdminTokenExpired } from "./auth/admin-token";
 import { DatabaseManager } from "./utils/db";
@@ -74,14 +74,22 @@ interface CreateConsoleFetchOptions {
 function createConsoleRuntime(options: CreateConsoleFetchOptions = {}): ConsoleRuntime {
   const config = options.config ?? loadConfig();
   const adminToken = config.consoleAdminToken.trim();
-  const dbPath = path.join(config.homeDir, "ailoop.db");
+  const dbPath = resolveConfigDbPath(config.homeDir);
+  const db = new DatabaseManager({ dbPath });
+
+  let adminTokenIssuedDate = "";
+  try {
+    adminTokenIssuedDate =
+      options.adminTokenIssuedDate ?? (db.getConfigSync("AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE") ?? "").trim();
+  } finally {
+    db.close();
+  }
 
   return {
     config,
     adminToken,
     tokenAuthEnabled: adminToken.length > 0,
-    adminTokenIssuedDate:
-      options.adminTokenIssuedDate ?? (process.env.AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE ?? "").trim(),
+    adminTokenIssuedDate,
     dbPath
   };
 }
@@ -186,9 +194,10 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
       }
 
       if (url.pathname === "/api/base-config" && request.method === "GET") {
-        const db = new DatabaseManager({ dbPath: path.join(config.homeDir, "ailoop.db") });
+        const db = new DatabaseManager({ dbPath });
         try {
           const dbConfig = await db.getAllConfig();
+          delete dbConfig.AILOOP_HOME;
           return json({ ok: true, config: dbConfig });
         } finally {
           db.close();
@@ -197,10 +206,13 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
 
       if (url.pathname === "/api/base-config" && request.method === "POST") {
         const body = await parseBody(request);
-        const db = new DatabaseManager({ dbPath: path.join(config.homeDir, "ailoop.db") });
+        const db = new DatabaseManager({ dbPath });
         try {
           if (typeof body === "object" && body !== null) {
             for (const [key, value] of Object.entries(body)) {
+              if (key === "AILOOP_HOME") {
+                continue;
+              }
               if (typeof value === "string") {
                 await db.setConfig(key, value);
               }

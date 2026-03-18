@@ -88,6 +88,20 @@ function uniquePaths(paths: string[]): string[] {
   return Array.from(new Set(paths));
 }
 
+/**
+ * Validates if a given path is a valid git repository.
+ * Used for external validation path to confirm target is suitable for AILoop.
+ */
+export async function isValidGitRepository(targetPath: string): Promise<boolean> {
+  try {
+    const gitDir = path.join(targetPath, ".git");
+    const stats = await fs.lstat(gitDir);
+    return stats.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 function normalizeSnapshotTargets(
   workspaceRoot: string,
   taskPath: string,

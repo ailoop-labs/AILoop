@@ -395,6 +395,10 @@ export class DatabaseManager {
   }
 
   async getConfig(key: string): Promise<string | null> {
+    return this.getConfigSync(key);
+  }
+
+  getConfigSync(key: string): string | null {
     const row = this.db.query("SELECT value FROM config WHERE key = ?").get(key) as { value: string } | null;
     return row?.value ?? null;
   }
@@ -411,6 +415,10 @@ export class DatabaseManager {
   }
 
   async getAllConfig(): Promise<Record<string, string>> {
+    return this.getAllConfigSync();
+  }
+
+  getAllConfigSync(): Record<string, string> {
     const rows = this.db.query("SELECT key, value FROM config").all() as Array<{ key: string; value: string }>;
     return Object.fromEntries(rows.map(row => [row.key, row.value]));
   }
