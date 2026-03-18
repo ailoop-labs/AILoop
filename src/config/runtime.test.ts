@@ -2,8 +2,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
+import { DatabaseManager } from "../utils/db";
 import {
   extractRuntimeLoopConfig,
+  saveRuntimeLoopConfig,
   patchRuntimeLoopConfig,
   readRuntimeLoopConfig,
   resetRuntimeLoopConfig,
@@ -65,7 +67,88 @@ describe("runtime codex bin persistence", () => {
 
   test("runtimeLoopConfigToEnv exports AILOOP_CODEX_BIN", () => {
     const env = runtimeLoopConfigToEnv(extractRuntimeLoopConfig(makeConfig()));
+    expect(env.AILOOP_AI_CLI_BIN).toBe("/Users/test/.bun/bin/codex");
     expect(env.AILOOP_CODEX_BIN).toBe("/Users/test/.bun/bin/codex");
+  });
+
+  test("readRuntimeLoopConfig hydrates AI CLI overrides from the database", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-runtime-config-db-"));
+    tempDirs.add(homeDir);
+
+    const config = {
+      ...makeConfig(),
+      homeDir
+    };
+    const db = new DatabaseManager({ dbPath: path.join(homeDir, "ailoop.db") });
+
+    try {
+      await db.setConfig("AILOOP_AI_CLI_BIN", "/opt/homebrew/bin/claude");
+      await db.setConfig("AILOOP_AI_CLI_MODEL", "claude-opus-4-6");
+      await db.setConfig("AILOOP_AI_CLI_TIMEOUT_MS", "600000");
+
+      await fs.writeFile(
+        path.join(homeDir, "runtime-config.json"),
+        JSON.stringify(
+          {
+            intervalSeconds: 75,
+            budget: {
+              actions: 44
+            }
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      await expect(readRuntimeLoopConfig(config)).resolves.toMatchObject({
+        intervalSeconds: 75,
+        budget: {
+          usdPerRound: 0.5,
+          timeMinutes: 60,
+          actions: 44
+        },
+        codex: {
+          bin: "/opt/homebrew/bin/claude",
+          model: "claude-opus-4-6",
+          timeoutMs: 600000
+        }
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("saveRuntimeLoopConfig persists AI CLI overrides in the database instead of runtime-config.json", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-runtime-config-save-"));
+    tempDirs.add(homeDir);
+
+    const config = {
+      ...makeConfig(),
+      homeDir
+    };
+
+    await saveRuntimeLoopConfig(config, {
+      intervalSeconds: 75,
+      codex: {
+        bin: "/opt/homebrew/bin/claude",
+        model: "claude-opus-4-6",
+        timeoutMs: 600000
+      }
+    });
+
+    const db = new DatabaseManager({ dbPath: path.join(homeDir, "ailoop.db") });
+
+    try {
+      await expect(db.getConfig("AILOOP_AI_CLI_BIN")).resolves.toBe("/opt/homebrew/bin/claude");
+      await expect(db.getConfig("AILOOP_AI_CLI_MODEL")).resolves.toBe("claude-opus-4-6");
+      await expect(db.getConfig("AILOOP_AI_CLI_TIMEOUT_MS")).resolves.toBe("600000");
+    } finally {
+      db.close();
+    }
+
+    const raw = JSON.parse(await fs.readFile(path.join(homeDir, "runtime-config.json"), "utf8")) as Record<string, unknown>;
+    expect(raw).not.toHaveProperty("codex");
   });
 
   test("patchRuntimeLoopConfig persists partial overrides without dropping defaults", async () => {

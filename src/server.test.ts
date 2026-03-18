@@ -1180,6 +1180,8 @@ describe("console server API contract", () => {
             timeMinutes: 25
           },
           codex: {
+            bin: "/opt/homebrew/bin/claude",
+            model: "claude-opus-4-6",
             profile: "saved-from-console",
             timeoutMs: 240_000
           }
@@ -1201,10 +1203,22 @@ describe("console server API contract", () => {
         actions: 30
       },
       codex: {
+        bin: "/opt/homebrew/bin/claude",
+        model: "claude-opus-4-6",
         profile: "saved-from-console",
         timeoutMs: 240_000
       }
     });
+
+    const db = new DatabaseManager({ dbPath: path.join(config.homeDir, "ailoop.db") });
+    try {
+      await expect(db.getConfig("AILOOP_AI_CLI_BIN")).resolves.toBe("/opt/homebrew/bin/claude");
+      await expect(db.getConfig("AILOOP_AI_CLI_MODEL")).resolves.toBe("claude-opus-4-6");
+      await expect(db.getConfig("AILOOP_AI_CLI_PROFILE")).resolves.toBe("saved-from-console");
+      await expect(db.getConfig("AILOOP_AI_CLI_TIMEOUT_MS")).resolves.toBe("240000");
+    } finally {
+      db.close();
+    }
   });
 
   test("restores default runtime config through the authenticated reset endpoint", async () => {

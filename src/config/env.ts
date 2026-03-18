@@ -292,15 +292,13 @@ export async function saveConfigToDb(config: AppConfig, db: DatabaseManager): Pr
   await db.setConfig("AILOOP_AI_CLI_EXECUTOR_SANDBOX", config.ai.executorSandbox);
   await db.setConfig("AILOOP_AI_CLI_EVALUATOR_SANDBOX", config.ai.evaluatorSandbox);
   await db.setConfig("AILOOP_AI_CLI_TIMEOUT_MS", config.ai.timeoutMs.toString());
-
-  // Also save with legacy naming for backward compatibility
-  await db.setConfig("AILOOP_CODEX_BIN", config.ai.bin);
-  await db.setConfig("AILOOP_CODEX_MODEL", config.ai.model);
-  await db.setConfig("AILOOP_CODEX_PROFILE", config.ai.profile);
-  await db.setConfig("AILOOP_CODEX_PLANNER_SANDBOX", config.ai.plannerSandbox);
-  await db.setConfig("AILOOP_CODEX_EXECUTOR_SANDBOX", config.ai.executorSandbox);
-  await db.setConfig("AILOOP_CODEX_EVALUATOR_SANDBOX", config.ai.evaluatorSandbox);
-  await db.setConfig("AILOOP_CODEX_TIMEOUT_MS", config.ai.timeoutMs.toString());
+  await db.deleteConfig("AILOOP_CODEX_BIN");
+  await db.deleteConfig("AILOOP_CODEX_MODEL");
+  await db.deleteConfig("AILOOP_CODEX_PROFILE");
+  await db.deleteConfig("AILOOP_CODEX_PLANNER_SANDBOX");
+  await db.deleteConfig("AILOOP_CODEX_EXECUTOR_SANDBOX");
+  await db.deleteConfig("AILOOP_CODEX_EVALUATOR_SANDBOX");
+  await db.deleteConfig("AILOOP_CODEX_TIMEOUT_MS");
 
   await db.setConfig("AILOOP_LLM_EVALUATOR_DIMENSIONS", config.ai.llmEvaluatorDimensions.join(","));
   await db.setConfig("AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE", config.ai.llmEvaluatorMinPassScore.toString());

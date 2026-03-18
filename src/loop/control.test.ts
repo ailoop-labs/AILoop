@@ -441,6 +441,44 @@ describe("startBackgroundLoop", () => {
       await fs.rm(workspaceRoot, { recursive: true, force: true });
     }
   });
+
+  test("injects DB-backed AI CLI variables into the background loop environment", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-start-ai-env-test-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    const paths = buildLoopPaths(homeDir);
+    const originalCwd = process.cwd();
+
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(path.join(workspaceRoot, "README.md"), "# Test workspace\n", "utf8");
+    await seedProjectRoles(paths);
+
+    await saveRuntimeLoopConfig(makeTestConfig(homeDir), {
+      intervalSeconds: 90,
+      codex: {
+        bin: "/opt/homebrew/bin/claude",
+        model: "claude-opus-4-6",
+        timeoutMs: 600_000
+      }
+    });
+
+    const spawnSpy = spyOn(childProcess, "spawn").mockImplementation(makeSpawnMock(() => 83_000));
+
+    try {
+      process.chdir(workspaceRoot);
+
+      await startBackgroundLoop(makeTestConfig(homeDir));
+
+      const spawnOptions = spawnSpy.mock.calls[0]?.[2];
+      expect(spawnOptions?.env?.AILOOP_AI_CLI_BIN).toBe("/opt/homebrew/bin/claude");
+      expect(spawnOptions?.env?.AILOOP_AI_CLI_MODEL).toBe("claude-opus-4-6");
+      expect(spawnOptions?.env?.AILOOP_AI_CLI_TIMEOUT_MS).toBe("600000");
+      expect(spawnOptions?.env?.AILOOP_CODEX_BIN).toBe("/opt/homebrew/bin/claude");
+    } finally {
+      process.chdir(originalCwd);
+      mock.restore();
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("tailLatestLog", () => {
