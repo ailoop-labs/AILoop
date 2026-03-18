@@ -2,6 +2,7 @@ node_modules/
 *.log
 .env
 .ailoop/
+.claude/
 web/dist/
 
 .DS_Store
