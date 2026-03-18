@@ -25,7 +25,7 @@ db_get_config() {
   local fallback="${2:-}"
   NO_COLOR=1 "$BUN_BIN" -e '
     import { Database } from "bun:sqlite";
-    const [dbPath, key, fallback] = process.argv.slice(2);
+    const [dbPath, key, fallback] = process.argv.slice(1);
     try {
       const db = new Database(dbPath, { create: true });
       const row = db.query("SELECT value FROM config WHERE key = ?").get(key) as { value?: string } | null;
@@ -43,7 +43,7 @@ db_set_config() {
   mkdir -p "$RUN_DIR"
   NO_COLOR=1 "$BUN_BIN" -e '
     import { Database } from "bun:sqlite";
-    const [dbPath, key, value] = process.argv.slice(2);
+    const [dbPath, key, value] = process.argv.slice(1);
     const db = new Database(dbPath, { create: true });
     db.run(`
       CREATE TABLE IF NOT EXISTS config (
@@ -61,6 +61,18 @@ db_set_config() {
     `, [key, value]);
     db.close();
   ' "$DB_FILE" "$key" "$value"
+}
+
+db_delete_config() {
+  local key="$1"
+  mkdir -p "$RUN_DIR"
+  NO_COLOR=1 "$BUN_BIN" -e '
+    import { Database } from "bun:sqlite";
+    const [dbPath, key] = process.argv.slice(1);
+    const db = new Database(dbPath, { create: true });
+    db.run("DELETE FROM config WHERE key = ?", [key]);
+    db.close();
+  ' "$DB_FILE" "$key"
 }
 
 CONSOLE_PORT="$(db_get_config "AILOOP_CONSOLE_PORT" "3090")"
@@ -291,8 +303,8 @@ else
   )"
   if [[ "$token_age_days" -lt 0 || "$token_age_days" -ge 7 ]]; then
     rm -f "$TOKEN_CACHE_FILE"
-    db_set_config "AILOOP_CONSOLE_ADMIN_TOKEN" ""
-    db_set_config "AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE" ""
+    db_delete_config "AILOOP_CONSOLE_ADMIN_TOKEN"
+    db_delete_config "AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE"
     exec "$0" "$MODE"
   fi
   token_expiry_date="$(NO_COLOR=1 "$BUN_BIN" -e 'const d=new Date(process.argv[1]+"T00:00:00Z"); d.setUTCDate(d.getUTCDate()+7); console.log(Number.isNaN(d.getTime()) ? "" : d.toISOString().split("T")[0])' "$stored_issued_date" 2>/dev/null || true)"
