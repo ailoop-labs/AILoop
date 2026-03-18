@@ -1817,23 +1817,24 @@ export default function App() {
                   />
                 </label>
                 <label className="text-sm text-mist/80">
-                  CLI Timeout (ms)
+                  CLI Timeout (seconds)
                   <input
                     type="number"
-                    min={10000}
-                    value={runtimeConfig.ai?.timeoutMs ?? runtimeConfig.codex.timeoutMs}
+                    min={10}
+                    value={Math.round((runtimeConfig.ai?.timeoutMs ?? runtimeConfig.codex.timeoutMs) / 1000)}
                     onChange={(event) => {
-                      const value = Number.parseInt(event.target.value, 10);
-                      if (Number.isFinite(value)) {
+                      const seconds = Number.parseInt(event.target.value, 10);
+                      if (Number.isFinite(seconds)) {
+                        const timeoutMs = seconds * 1000;
                         setRuntimeConfig({
                           ...runtimeConfig,
                           ai: {
                             ...(runtimeConfig.ai ?? runtimeConfig.codex),
-                            timeoutMs: value
+                            timeoutMs
                           },
                           codex: {
                             ...runtimeConfig.codex,
-                            timeoutMs: value
+                            timeoutMs
                           }
                         });
                       }
