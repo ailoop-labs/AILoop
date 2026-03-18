@@ -32,7 +32,7 @@ async function getConfig() {
 const config = await getConfig();
 
 async function runForeground(): Promise<void> {
-  await ensureProjectRoles(config, { workspaceRoot: process.cwd(), autoRefresh: true });
+  await ensureProjectRoles(config, { workspaceRoot: process.cwd(), autoRefresh: false });
   const engine = new LoopEngine(config);
   await engine.run();
 }
