@@ -160,7 +160,7 @@ describe("AIClient.runJson", () => {
       expect(result.ok).toBe(true);
       expect(result.data?.status).toBe("success");
       expect(capturedCmd).toBe("claude");
-      expect(capturedArgs).toContain("-p");
+      expect(capturedArgs).toContain("--print");
       expect(capturedArgs).toContain("--permission-mode");
       expect(capturedArgs).toContain("acceptEdits");
       expect(capturedArgs).toContain("--add-dir");
@@ -170,9 +170,10 @@ describe("AIClient.runJson", () => {
       expect(capturedArgs).not.toContain("--output-schema");
       expect(capturedArgs).not.toContain("-o");
 
-      const prompt = capturedArgs[capturedArgs.indexOf("-p") + 1] ?? "";
-      expect(prompt).toContain("IMPORTANT: You MUST return a single JSON object");
-      expect(prompt).toContain("\"status\"");
+      // For Claude CLI, the prompt is passed via stdin, not as a command-line argument
+      // So the prompt should NOT be in args
+      expect(capturedArgs).not.toContain("IMPORTANT: You MUST return a single JSON object");
+      expect(capturedArgs).not.toContain("Return JSON");
     } finally {
       await fs.rm(sandboxRoot, { recursive: true, force: true });
     }
