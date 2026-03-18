@@ -301,6 +301,11 @@ export function summarizeGovernanceFailureForState(message: string): string {
   const diagnosticsPath = diagnosticsMatch?.[1]?.trim() ?? null;
   const base = normalized.split(/\s+\|\s+(?:stderr|raw|diagnostics):/i)[0]?.trim() || normalized;
   const detailMarkers = [
+    "402",
+    "requires more credits",
+    "insufficient credits",
+    "max_tokens",
+    "quota",
     "429 too many requests",
     "502 bad gateway",
     "503 service unavailable",
@@ -311,7 +316,21 @@ export function summarizeGovernanceFailureForState(message: string): string {
     "too many requests"
   ];
   const lower = normalized.toLowerCase();
-  const detail = detailMarkers.find((marker) => lower.includes(marker)) ?? null;
+  const detailMarker = detailMarkers.find((marker) => lower.includes(marker)) ?? null;
+  const detail = (() => {
+    if (!detailMarker) {
+      return null;
+    }
+
+    const index = lower.indexOf(detailMarker);
+    if (index < 0) {
+      return detailMarker;
+    }
+
+    const start = Math.max(0, index - 16);
+    const end = Math.min(normalized.length, index + 120);
+    return normalized.slice(start, end).trim();
+  })();
 
   const segments = [base];
   if (detail && !base.toLowerCase().includes(detail)) {
@@ -729,16 +748,30 @@ export class LoopEngine {
             // Check if this is a network/upstream error (502, 503, timeout, etc.)
             // For these errors, we should exit cleanly and let the operator restart
             // rather than holding the lock indefinitely in waitWhilePaused
-            const isNetworkError = errorMessage.includes("502 Bad Gateway") ||
-                                   errorMessage.includes("503 Service Unavailable") ||
-                                   errorMessage.includes("Upstream request failed") ||
-                                   errorMessage.includes("ECONNREFUSED") ||
-                                   errorMessage.includes("ETIMEDOUT");
+            const isNetworkError =
+              errorMessage.includes("402") ||
+              errorMessage.includes("requires more credits") ||
+              errorMessage.includes("insufficient credits") ||
+              errorMessage.includes("max_tokens") ||
+              errorMessage.includes("quota") ||
+              errorMessage.includes("429 Too Many Requests") ||
+              errorMessage.includes("502 Bad Gateway") ||
+              errorMessage.includes("503 Service Unavailable") ||
+              errorMessage.includes("Upstream request failed") ||
+              errorMessage.includes("ECONNREFUSED") ||
+              errorMessage.includes("ETIMEDOUT");
 
             if (isNetworkError) {
-              await this.setState("paused", `Governance failed due to network error: ${summarizeGovernanceFailureForState(errorMessage)}. Please check network connectivity and restart.`);
-              console.log(`[GOVERNANCE] Network error detected. Exiting to release lock. Operator should restart when network is stable.`);
-              break;
+              await this.setState(
+                "paused",
+                `Governance failed due to provider/network error: ${summarizeGovernanceFailureForState(
+                  errorMessage
+                )}. Please repair provider access or connectivity and restart.`
+              );
+              console.log(
+                `[GOVERNANCE] Provider/network error detected. Exiting to release lock. Operator should restart when provider access is healthy.`
+              );
+              return;
             }
 
             // For other errors, pause and wait for operator intervention

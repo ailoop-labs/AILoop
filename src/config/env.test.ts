@@ -53,4 +53,20 @@ describe("loadConfig llm evaluator options", () => {
 
     expect(config.codex.bin).toBe("/tmp/override-codex");
   });
+
+  test("defaults the model to a codex-compatible value when the provider bin is codex", () => {
+    const config = loadConfig({
+      AILOOP_AI_CLI_BIN: "codex"
+    });
+
+    expect(config.codex.model).toBe("gpt-5.4");
+  });
+
+  test("defaults the model to a claude-compatible value when the provider bin is claude", () => {
+    const config = loadConfig({
+      AILOOP_AI_CLI_BIN: "claude"
+    });
+
+    expect(config.codex.model).toBe("claude-opus-4-6");
+  });
 });

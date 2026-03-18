@@ -39,6 +39,11 @@ function extractUsefulDiagnosticExcerpt(value: string | undefined, redactor: Sec
   }
 
   const markers = [
+    "402",
+    "requires more credits",
+    "insufficient credits",
+    "max_tokens",
+    "quota",
     "429 too many requests",
     "too many requests",
     "502 bad gateway",
@@ -87,6 +92,15 @@ function compactLeaderEvidence(value: string | null | undefined): string {
 
 function classifyLeaderFailure(result: CodexJsonCallResult<LeaderDecision>): string {
   const combined = `${result.error ?? ""}\n${result.stderr}\n${result.rawMessage}`.toLowerCase();
+  if (
+    combined.includes("402") ||
+    combined.includes("requires more credits") ||
+    combined.includes("insufficient credits") ||
+    combined.includes("max_tokens") ||
+    combined.includes("quota")
+  ) {
+    return "provider_quota";
+  }
   if (combined.includes("429 too many requests") || combined.includes("too many requests")) {
     return "provider_rate_limit";
   }
@@ -258,7 +272,7 @@ export class LeaderAgent {
   private readonly sandbox: AppConfig["ai"]["executorSandbox"];
 
   constructor(private readonly config: AppConfig) {
-    this.ai = new AIClient(config.ai);
+    this.codex = new AIClient(config.ai);
     this.sandbox = "workspace-write";
   }
 
@@ -273,7 +287,7 @@ export class LeaderAgent {
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const result = await this.ai.runJson<LeaderDecision>({
+        const result = await this.codex.runJson<LeaderDecision>({
           prompt,
           schema: LEADER_DECISION_SCHEMA,
           cwd: process.cwd(),
@@ -288,7 +302,10 @@ export class LeaderAgent {
 
         if (!result.ok || !result.data) {
           const classification = classifyLeaderFailure(result);
-          const isTransient = classification === "provider_upstream_error" || classification === "provider_rate_limit" || classification === "timeout";
+          const isTransient =
+            classification === "provider_upstream_error" ||
+            classification === "provider_rate_limit" ||
+            classification === "timeout";
 
           if (isTransient && attempt < MAX_RETRIES) {
             const delay = RETRY_DELAY_MS * attempt;

@@ -11,8 +11,11 @@ import {
   RunArtifactEvidenceGrid,
   RunHistoryCard,
   SystemHealthPanel,
+  applyCliProvider,
   deriveCliProvider,
   deriveControlAvailability,
+  getCliModelOptions,
+  resolveCliModel,
   postControlAndRefresh,
   summarizeApiError
 } from "./App";
@@ -139,6 +142,56 @@ describe("deriveCliProvider", () => {
     expect(deriveCliProvider("claude")).toBe("claude");
     expect(deriveCliProvider("/usr/local/bin/claude")).toBe("claude");
     expect(deriveCliProvider("codex")).toBe("codex");
+  });
+});
+
+describe("CLI provider/model helpers", () => {
+  test("returns codex-specific model options for the codex provider", () => {
+    expect(getCliModelOptions("codex").map((option) => option.value)).toEqual(["gpt-5.4", "gpt-5.3-codex"]);
+  });
+
+  test("falls back to the provider default model when the saved model belongs to another provider", () => {
+    expect(resolveCliModel("codex", "claude-opus-4-6")).toBe("gpt-5.4");
+    expect(resolveCliModel("claude", "gpt-5.4")).toBe("claude-opus-4-6");
+  });
+
+  test("switching providers updates both the bin and the CLI model", () => {
+    const next = applyCliProvider(
+      {
+        intervalSeconds: 30,
+        maxCycles: 0,
+        exitOnError: false,
+        budget: {
+          usdPerRound: 0.5,
+          timeMinutes: 15,
+          actions: 30
+        },
+        ai: {
+          bin: "claude",
+          model: "claude-sonnet-4-6",
+          profile: "",
+          plannerSandbox: "read-only",
+          executorSandbox: "workspace-write",
+          evaluatorSandbox: "workspace-write",
+          timeoutMs: 180_000
+        },
+        codex: {
+          bin: "claude",
+          model: "claude-sonnet-4-6",
+          profile: "",
+          plannerSandbox: "read-only",
+          executorSandbox: "workspace-write",
+          evaluatorSandbox: "workspace-write",
+          timeoutMs: 180_000
+        }
+      },
+      "codex"
+    );
+
+    expect(next.ai.bin).toBe("codex");
+    expect(next.codex.bin).toBe("codex");
+    expect(next.ai.model).toBe("gpt-5.4");
+    expect(next.codex.model).toBe("gpt-5.4");
   });
 });
 
@@ -462,6 +515,7 @@ describe("LifecycleStatusGrid", () => {
           pid_alive: true,
           pending_instruction_count: 4,
           pause_reason: "Budget breach",
+          hot_file_governance: null,
           crash_recovery: null,
           operator_reason: null,
           artifact_completeness: {
@@ -510,6 +564,7 @@ describe("LifecycleStatusGrid", () => {
           pid_alive: true,
           pending_instruction_count: 0,
           pause_reason: null,
+          hot_file_governance: null,
           crash_recovery: null,
           operator_reason: null,
           artifact_completeness: {

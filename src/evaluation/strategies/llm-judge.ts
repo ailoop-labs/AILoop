@@ -430,8 +430,18 @@ const CODEX_TOOLING_FAILURE_PATTERNS: RegExp[] = [
   /no such file or directory/i
 ];
 
+const PROVIDER_QUOTA_FAILURE_PATTERNS: RegExp[] = [
+  /\b402\b/i,
+  /requires more credits/i,
+  /insufficient credits/i,
+  /fewer max_tokens/i,
+  /\bmax_tokens\b/i,
+  /credit limit/i,
+  /quota/i
+];
+
 const CODEX_PROCESS_FAILURE_PATTERNS: RegExp[] = [
-  /codex exited with code [1-9]\d*/i,
+  /(?:codex|ai cli) exited with code [1-9]\d*/i,
   /prompt likely exceeded/i,
   /context length/i,
   /too large/i
@@ -878,6 +888,24 @@ function detectEvaluatorInfrastructureFailure(
       rootCause: "evaluator_infrastructure:codex_tooling",
       recommendedNextAction:
         "pause and repair evaluator Codex tooling (binary path, executable permissions, and sandbox environment) before retrying evaluation"
+    };
+  }
+
+  const providerQuotaFailures = assessments.filter((assessment) => {
+    if (assessment.decision !== "unknown") {
+      return false;
+    }
+
+    return hasPattern(PROVIDER_QUOTA_FAILURE_PATTERNS, toAssessmentText(assessment));
+  });
+  if (providerQuotaFailures.length > 0) {
+    const dimensions = providerQuotaFailures.map((assessment) => assessment.dimension).join(", ");
+    return {
+      matchedAssessments: providerQuotaFailures,
+      justification: `Evaluator infrastructure failure: provider credits or token limits blocked evaluation while checking ${dimensions}.`,
+      rootCause: "evaluator_infrastructure:provider_quota",
+      recommendedNextAction:
+        "pause and repair evaluator provider credits/quota or reduce requested max_tokens/prompt size before retrying evaluation"
     };
   }
 

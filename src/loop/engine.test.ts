@@ -176,6 +176,18 @@ describe("summarizeGovernanceFailureForState", () => {
     expect(summary).not.toContain("# LeaderAgent Role Contract");
     expect(summary).not.toContain("OpenAI Codex v0.114.0");
   });
+
+  test("preserves provider credit exhaustion details without dumping the full raw error", () => {
+    const summary = summarizeGovernanceFailureForState(
+      "AI CLI exited with code 1 | stderr: API Error: 402 This request requires more credits, or fewer max_tokens. You requested up to 64000 tokens, but can only afford 44565. | diagnostics: /tmp/leader.debug.json"
+    );
+
+    expect(summary).toContain("AI CLI exited with code 1");
+    expect(summary).toContain("detail:");
+    expect(summary).toContain("more credits");
+    expect(summary).toContain("max_tokens");
+    expect(summary).toContain("/tmp/leader.debug.json");
+  });
 });
 
 describe("buildEvaluatorReworkInstructions", () => {
@@ -306,6 +318,51 @@ describe("LoopEngine auto rework", () => {
 
     const finalState = await readLoopState(paths);
     expect(finalState.last_error).toBe("Governance failed: Codex exited with code 1 | diagnostics: /tmp/leader.debug.json");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("keeps the run paused when governance fails due to provider credit exhaustion", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-governance-quota-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir,
+      AILOOP_MAX_CYCLES: "1"
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const seeded = await readLoopState(paths);
+    await writeLoopState(paths, {
+      ...seeded,
+      state: "paused",
+      round: 24,
+      last_error: "Evaluator blocked the round."
+    });
+    await setFlag(paths.pauseFlagPath);
+
+    const mutable = engine as unknown as {
+      leader: {
+        execute: (input: { paths: LoopPaths }) => Promise<never>;
+      };
+      run: () => Promise<void>;
+    };
+
+    mutable.leader = {
+      execute: async () => {
+        throw new Error(
+          "AI CLI exited with code 1 | stderr: API Error: 402 This request requires more credits, or fewer max_tokens. You requested up to 64000 tokens, but can only afford 44565. | diagnostics: /tmp/leader.debug.json"
+        );
+      }
+    };
+
+    await mutable.run();
+
+    const finalState = await readLoopState(paths);
+    expect(finalState.state).toBe("paused");
+    expect(finalState.last_error).toContain("Governance failed due to provider/network error:");
+    expect(finalState.last_error).toContain("more credits");
+    expect(finalState.last_error).toContain("/tmp/leader.debug.json");
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });

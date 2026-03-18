@@ -57,6 +57,18 @@ function makeRoundContext(): RoundEvaluationContext {
 }
 
 function makeLlmConfig(dimensions: AppConfig["codex"]["llmEvaluatorDimensions"] = ["goal_alignment"]): AppConfig {
+  const aiConfig = {
+    bin: "codex",
+    model: "",
+    profile: "",
+    plannerSandbox: "read-only",
+    executorSandbox: "workspace-write",
+    evaluatorSandbox: "workspace-write",
+    timeoutMs: 30_000,
+    llmEvaluatorDimensions: dimensions,
+    llmEvaluatorMinPassScore: 70
+  };
+
   return {
     homeDir: "/tmp/ailoop-test",
     intervalSeconds: 1,
@@ -74,19 +86,6 @@ function makeLlmConfig(dimensions: AppConfig["codex"]["llmEvaluatorDimensions"] 
     },
     ai: aiConfig,
     codex: aiConfig // Backward compatibility
-  };
-
-  const aiConfig = {
-      bin: "codex",
-      model: "",
-      profile: "",
-      plannerSandbox: "read-only",
-      executorSandbox: "workspace-write",
-      evaluatorSandbox: "workspace-write",
-      timeoutMs: 30_000,
-      llmEvaluatorDimensions: dimensions,
-      llmEvaluatorMinPassScore: 70
-    }
   };
 }
 
@@ -240,6 +239,52 @@ describe("aggregateDimensionAssessments", () => {
     expect(result.justification).toContain("Evaluator infrastructure failure");
     expect(result.root_cause).toBe("evaluator_infrastructure:codex_process_failure");
     expect(result.recommended_next_action).toContain("prompt");
+    expect(result.recovery_path).toBe("strategic_governance");
+  });
+
+  test("surfaces provider credit and token-limit failures as evaluator infrastructure blockers", () => {
+    const result = aggregateDimensionAssessments(
+      [
+        makeAssessment({
+          dimension: "goal_alignment",
+          decision: "unknown",
+          score: 0,
+          confidence: 0,
+          justification: "Dimension evaluator call failed.",
+          evidence: [
+            "AI CLI exited with code 1",
+            "API Error: 402 This request requires more credits, or fewer max_tokens. You requested up to 64000 tokens, but can only afford 44565."
+          ],
+          recommended_next_action: "pause and inspect evaluator failure"
+        }),
+        makeAssessment({
+          dimension: "causal_validity",
+          decision: "unknown",
+          score: 0,
+          confidence: 0,
+          justification: "Dimension evaluator call failed.",
+          evidence: ["AI CLI exited with code 1"],
+          recommended_next_action: "pause and inspect evaluator failure"
+        }),
+        makeAssessment({
+          dimension: "constraint_compliance",
+          decision: "unknown",
+          score: 0,
+          confidence: 0,
+          justification: "Dimension evaluator call failed.",
+          evidence: ["AI CLI exited with code 1"],
+          recommended_next_action: "pause and inspect evaluator failure"
+        })
+      ],
+      75
+    );
+
+    expect(result.decision).toBe("fail");
+    expect(result.justification).toContain("Evaluator infrastructure failure");
+    expect(result.root_cause).toBe("evaluator_infrastructure:provider_quota");
+    expect(result.evidence.some((line) => line.includes("more credits"))).toBe(true);
+    expect(result.recommended_next_action).toContain("credits");
+    expect(result.recommended_next_action).toContain("max_tokens");
     expect(result.recovery_path).toBe("strategic_governance");
   });
 

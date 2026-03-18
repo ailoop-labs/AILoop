@@ -50,6 +50,10 @@ afterEach(async () => {
   tempDirs.clear();
 });
 
+function currentUtcDateString(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 async function loadHandler(env: Record<string, string>) {
   for (const [key, value] of Object.entries(env)) {
     process.env[key] = value;
@@ -124,7 +128,7 @@ async function createFixture(options: {
     config,
     fetchHandler: module.createConsoleFetch({
       config,
-      adminTokenIssuedDate: options.adminTokenIssuedDate ?? "2026-03-11"
+      adminTokenIssuedDate: options.adminTokenIssuedDate ?? currentUtcDateString()
     }),
     paths: buildLoopPaths(homeDir),
     workspaceRoot
@@ -464,7 +468,7 @@ describe("console server API contract", () => {
       AILOOP_CONSOLE_HOST: "127.0.0.1",
       AILOOP_CONSOLE_PORT: "0",
       AILOOP_CONSOLE_ADMIN_TOKEN: "test-token",
-      AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE: "2026-03-11"
+      AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE: currentUtcDateString()
     });
 
     const response = await fetchHandler(new Request("http://console.test/api/auth/status"));
@@ -481,7 +485,7 @@ describe("console server API contract", () => {
       AILOOP_CONSOLE_HOST: "127.0.0.1",
       AILOOP_CONSOLE_PORT: "0",
       AILOOP_CONSOLE_ADMIN_TOKEN: "test-token",
-      AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE: "2026-03-11"
+      AILOOP_CONSOLE_ADMIN_TOKEN_ISSUED_DATE: currentUtcDateString()
     });
 
     const response = await fetchHandler(new Request("http://console.test/api/status"));

@@ -60,6 +60,20 @@ function parseNumber(value: string | undefined, fallback: number): number {
   return fallback;
 }
 
+function defaultCliModelForBin(bin: string): string {
+  const basename = path.basename(bin).toLowerCase();
+  if (basename === "claude" || basename.includes("claude")) {
+    return "claude-opus-4-6";
+  }
+  if (basename === "gemini" || basename.includes("gemini")) {
+    return "";
+  }
+  if (basename === "opencode" || basename.includes("opencode")) {
+    return "";
+  }
+  return "gpt-5.4";
+}
+
 function parseSandboxMode(value: string | undefined, fallback: AISandboxMode): AISandboxMode {
   if (value === "read-only" || value === "workspace-write" || value === "danger-full-access") {
     return value;
@@ -124,10 +138,9 @@ export async function loadConfigAsync(
   const consoleAdminToken = (await get("AILOOP_CONSOLE_ADMIN_TOKEN")) ?? "";
   const maxRetainRuns = parseNumber(await get("AILOOP_MAX_RETAIN_RUNS"), 50);
 
-  // Support both new (AI_CLI_*) and legacy (CODEX_*) environment variables
-  // Default to claude-opus-4-6 if no model is specified
+  // Support both new (AI_CLI_*) and legacy (CODEX_*) environment variables.
   const aiBin = (await get("AILOOP_AI_CLI_BIN")) ?? (await get("AILOOP_CODEX_BIN")) ?? "codex";
-  const aiModel = (await get("AILOOP_AI_CLI_MODEL")) ?? (await get("AILOOP_CODEX_MODEL")) ?? "claude-opus-4-6";
+  const aiModel = (await get("AILOOP_AI_CLI_MODEL")) ?? (await get("AILOOP_CODEX_MODEL")) ?? defaultCliModelForBin(aiBin);
   const aiProfile = (await get("AILOOP_AI_CLI_PROFILE")) ?? (await get("AILOOP_CODEX_PROFILE")) ?? "";
   const plannerSandbox = parseSandboxMode(
     (await get("AILOOP_AI_CLI_PLANNER_SANDBOX")) ?? (await get("AILOOP_CODEX_PLANNER_SANDBOX")),
@@ -201,10 +214,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const consoleAdminToken = get("AILOOP_CONSOLE_ADMIN_TOKEN") ?? "";
   const maxRetainRuns = parseNumber(get("AILOOP_MAX_RETAIN_RUNS"), 50);
 
-  // Support both new (AI_CLI_*) and legacy (CODEX_*) environment variables
-  // Default to claude-opus-4-6 if no model is specified
+  // Support both new (AI_CLI_*) and legacy (CODEX_*) environment variables.
   const aiBin = get("AILOOP_AI_CLI_BIN") ?? get("AILOOP_CODEX_BIN") ?? "codex";
-  const aiModel = get("AILOOP_AI_CLI_MODEL") ?? get("AILOOP_CODEX_MODEL") ?? "claude-opus-4-6";
+  const aiModel = get("AILOOP_AI_CLI_MODEL") ?? get("AILOOP_CODEX_MODEL") ?? defaultCliModelForBin(aiBin);
   const aiProfile = get("AILOOP_AI_CLI_PROFILE") ?? get("AILOOP_CODEX_PROFILE") ?? "";
   const plannerSandbox = parseSandboxMode(
     get("AILOOP_AI_CLI_PLANNER_SANDBOX") ?? get("AILOOP_CODEX_PLANNER_SANDBOX"),
@@ -293,4 +305,3 @@ export async function saveConfigToDb(config: AppConfig, db: DatabaseManager): Pr
   await db.setConfig("AILOOP_LLM_EVALUATOR_DIMENSIONS", config.ai.llmEvaluatorDimensions.join(","));
   await db.setConfig("AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE", config.ai.llmEvaluatorMinPassScore.toString());
 }
-
