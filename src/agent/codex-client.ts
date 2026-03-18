@@ -46,7 +46,8 @@ export type ProcessRunner = (
     onStdoutChunk?: (chunk: string) => void;
     onStderrChunk?: (chunk: string) => void;
   },
-  env?: NodeJS.ProcessEnv
+  env?: NodeJS.ProcessEnv,
+  stdin?: string
 ) => Promise<ProcessRunResult>;
 
 type SleepFn = (ms: number) => Promise<void>;
@@ -350,8 +351,7 @@ function buildArgs(config: CodexConfig, options: CodexJsonCallOptions, schemaPat
 
   if (provider === "claude") {
     const args = [
-      "-p",
-      options.prompt,
+      "--print",
       "--permission-mode",
       claudePermissionModeForSandbox(options.sandbox),
       "--add-dir",
@@ -421,13 +421,20 @@ async function runProcess(
     onStdoutChunk?: (chunk: string) => void;
     onStderrChunk?: (chunk: string) => void;
   },
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  stdin?: string
 ): Promise<ProcessRunResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
       cwd,
       env
     });
+
+    // Write stdin if provided (for Claude CLI)
+    if (stdin && child.stdin) {
+      child.stdin.write(stdin);
+      child.stdin.end();
+    }
 
     let stdout = "";
     let stderr = "";
@@ -549,6 +556,7 @@ export class CodexClient {
 
         await fs.writeFile(outputPath, "", "utf8");
         const args = buildArgs(this.config, attemptOptions, schemaPath, outputPath);
+        const stdin = provider === "claude" ? attemptOptions.prompt : undefined;
         const runResult = await this.processRunner(
           this.config.bin,
           args,
@@ -558,7 +566,8 @@ export class CodexClient {
             onStdoutChunk: attemptOptions.onStdoutChunk,
             onStderrChunk: attemptOptions.onStderrChunk
           },
-          processEnv
+          processEnv,
+          stdin
         );
 
         let effectiveStdout = runResult.stdout;
