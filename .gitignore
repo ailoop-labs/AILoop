@@ -4,3 +4,4 @@ node_modules/
 .ailoop/
 web/dist/
 
+.DS_Store
