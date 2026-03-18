@@ -68,9 +68,16 @@ Note on terminology:
 * **Silent Tooling over Narration**: Focus on executing tools and returning structured results. Do not generate unnecessary explanatory text unless requested.
 * **Single-Task Rounds**: Each Round should pursue only one atomic goal. Avoid hidden, multi-step scope expansions.
 * **Anti-Hallucination Measures**: Before modifying files or databases, the Executor *must* use a "read" tool to confirm the current state of the target. Blind writing is strictly prohibited.
-* **Compact Handoffs**: When one role hands off to another, prefer a concise summary, artifact manifest, and targeted evidence excerpts. Do not force downstream roles to ingest entire logs or massive raw diffs unless a narrow excerpt is strictly necessary.
+* **Compact Handoffs**: When one role hands off to another, prefer a concise summary, artifact manifest, and targeted evidence excerpts. Do not force downstream roles to ingest entire logs or massive raw diffs unless a narrow excerpt is strictly necessary. This summary-first rule applies to Planner, ProductManager, Evaluator, Leader, and any operator-facing diagnostic derived from the same artifacts.
+* **Progressive Disclosure for Humans**: When runtime data is surfaced to human operators, start with sectioned summaries and navigational cues. Full logs, complete diffs, and large artifact bodies should remain available for drill-down, but should not be dumped into the primary status view by default.
 * **Runtime Instruction Isolation**: Internal AILoop agents must not inherit repository-local `AGENTS.md` files, external skill catalogs, or collaborative workflows intended for AI coding assistants helping humans modify the AILoop repository.
 * **Tiered Source Reading**: Runtime roles should read a fixed canonical source set first, then expand only when they can name the missing information and the exact source likely to resolve it.
+
+Terminology alignment:
+
+- use `summary-first` for compact overviews that precede deep detail
+- use `navigational handoff` for role-to-role packages built from summaries, artifact references, and targeted excerpts
+- use `progressive disclosure` for human-facing UI that exposes full evidence through drill-down instead of default dumps
 
 ## 3. Core Workflow and Sequence (The Loop Sequence)
 
@@ -114,6 +121,7 @@ Evaluation handoff rules:
 - `State Change Artifact` should emphasize intentional workspace mutations and concise evidence notes
 - if the Evaluator itself cannot complete because its Codex call fails, the engine must record that as evaluator infrastructure failure instead of pretending the round merely lacked ordinary evidence
 - evaluator runtime sessions must not inherit development-assistant instructions from the repository root
+- the same compact evidence shape should flow into Leader diagnostics and Web Console summaries unless a human explicitly drills down into the raw artifact
 
 ProductManager handoff rules:
 - start from the mandatory source manifest before exploring optional material
@@ -133,7 +141,7 @@ Rework handoff rule:
 
 ### Phase 6: Leader / CCB Intervention
 1. When the loop is set to `paused` (whether due to human intervention or severe failure), the engine awakens the **LeaderAgent** (and potentially introduces CCB experts like SeniorDev, QALead, ProductOwner for consultation).
-2. The Leader reads the failure logs through a secure sandbox, analyzes the Friction Index, and decides whether to guide the Executor, reduce scope, or issue a Clarification Request to the human. It waits for new intervention instructions from the human before continuing.
+2. The Leader reads a compact pause diagnostic, artifact map, and targeted evidence excerpts first, with raw logs still available through drill-down when necessary. It then analyzes the Friction Index and decides whether to guide the Executor, reduce scope, or issue a Clarification Request to the human. It waits for new intervention instructions from the human before continuing.
 
 ## 4. External Intervention & State Alignment
 

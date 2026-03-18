@@ -19,8 +19,13 @@ Design principles:
 - **Outcome First:** Prioritize measurable user value over cosmetic activity. Value can include business impact, time saved, error reduction, reduced context switching, and reduced cognitive load.
 - **Small, Safe Iterations:** Each round should be bounded by time, cost, and action limits, producing a reviewable result.
 - **Human-in-Control:** Pause, resume, stop, override, or inject real-time feedback (instructions) at any time.
-- **Transparent History:** Every run has structured logs, decisions, state changes, evaluation scores, and a summary.
+- **Transparent History:** Every run has structured logs, decisions, state changes, evaluation scores, and a summary. Raw evidence must remain reviewable, but agent and operator-facing handoffs should start from concise summaries, navigational references, and targeted excerpts rather than wholesale dumps.
 - **Environment Agnostic:** Operate across local codebases, external APIs, databases, or headless browsers through a unified Tool Registry.
+
+Preferred terminology across product and architecture docs:
+- **Summary-First:** show the smallest useful overview before any deep detail.
+- **Navigational Handoff:** pass summaries, artifact paths, and targeted excerpts instead of dumping full raw context into the next role.
+- **Progressive Disclosure:** keep full evidence available, but reveal it through sectioning, expand/collapse, pagination, or drill-down.
 
 ## 2. Safety and Quality Gates
 
@@ -38,7 +43,7 @@ Design principles:
 - **Recoverable Rounds:** Where the environment permits (e.g., Git repositories, transactional databases), the engine must attempt to rollback state changes if evaluation fails catastrophically or budgets are broken.
 - **Silent Secret Redaction:** Logs and artifacts must automatically mask known environment secrets (e.g., variables containing `TOKEN`, `KEY`, `SECRET`) before writing to disk, allowing the agent to use API keys without leaking them.
 - **Evaluation Loop:** Pause automatically on repeated evaluator failures (e.g., failing to meet the success criteria after the full governance cycle).
-- **Observability Parity & High-Bandwidth UX:** The Web Console is a first-class citizen for human governance. Because human information bandwidth is narrow, the UI must prioritize **pattern recognition** (e.g., visual timelines, color-coded health dashboards, semantic diffs) over raw text parsing. Any changes to core state logic (SQLite schema, governance flows) MUST be reflected in the Web Console with these usability principles in mind. Failure to maintain UI alignment or degrading human UX is a constitutional violation.
+- **Observability Parity & High-Bandwidth UX:** The Web Console is a first-class citizen for human governance. Because human information bandwidth is narrow, the UI must prioritize **pattern recognition** and progressive disclosure (e.g., visual timelines, color-coded health dashboards, semantic diffs, clear sectioning, expand/collapse, and pagination) over raw text parsing or unbounded data dumps. Any changes to core state logic (SQLite schema, governance flows) MUST be reflected in the Web Console with these usability principles in mind. Failure to maintain UI alignment or degrading human UX is a constitutional violation.
 - **Crash Recovery:** If the engine process dies during a round, it must detect the interrupted state on restart and safely pause or revert to prevent corruption.
 
 ## 3. Scope

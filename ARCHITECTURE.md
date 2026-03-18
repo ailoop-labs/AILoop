@@ -14,16 +14,23 @@ This document is the technical contract for implementing the MVP described in `R
 
 ## 2. Architectural Principles
 
-The MVP follows five implementation principles derived from the product goal:
+The MVP follows nine implementation principles derived from the product goal:
 
 1. **One measurable round at a time.** The system advances through small, atomic rounds instead of open-ended autonomous execution.
 2. **Control plane separated from execution plane.** UI and CLI issue commands, while the loop engine owns scheduling, budgets, and state transitions.
 3. **Product definition, project planning, execution, and evaluation are distinct contracts.** Requirement shaping, round-level task selection, acting, and judging must be swappable and independently testable.
 4. **Artifacts are first-class outputs.** Each round must leave behind reviewable files that explain what happened.
-5. **Cross-agent handoffs must stay compact and navigational.** Agents should receive concise evidence briefs, artifact manifests, and targeted excerpts by default instead of raw log dumps or full artifact bodies.
-6. **Mandatory source sets must be explicit and tiered.** Runtime roles should read a small, fixed canonical set first, then expand only when a declared information gap remains.
-7. **Pause is the default safety response.** Budget breaches, repeated evaluator failures, crash recovery, and explicit human intervention all converge on a paused state.
-8. **Internal runtime agents must be isolated from external development-assistant guides.** Repository-local `AGENTS.md` files, skill catalogs, and collaborative coding workflows intended for humans building AILoop must not silently alter the behavior of ProductManager, ProjectPlanner, Evaluator, or other internal runtime agents.
+5. **Cross-agent and operator-facing handoffs must stay compact and navigational.** Agents and human governance surfaces should receive concise evidence briefs, artifact manifests, and targeted excerpts by default instead of raw log dumps or full artifact bodies.
+6. **Human-facing observability must use progressive disclosure.** The Web Console should present summary-first status, clear sectioning, expand/collapse, pagination, and drill-down artifact access instead of dumping all available data into one view.
+7. **Mandatory source sets must be explicit and tiered.** Runtime roles should read a small, fixed canonical set first, then expand only when a declared information gap remains.
+8. **Pause is the default safety response.** Budget breaches, repeated evaluator failures, crash recovery, and explicit human intervention all converge on a paused state.
+9. **Internal runtime agents must be isolated from external development-assistant guides.** Repository-local `AGENTS.md` files, skill catalogs, and collaborative coding workflows intended for humans building AILoop must not silently alter the behavior of ProductManager, ProjectPlanner, Evaluator, or other internal runtime agents.
+
+Normalized terminology used throughout this document:
+
+- **Summary-first** means the system presents the smallest useful overview before deeper detail.
+- **Navigational handoff** means one role passes concise summaries, artifact manifests, and targeted excerpts instead of wholesale raw context.
+- **Progressive disclosure** means full evidence stays available, but human-facing surfaces reveal it through sectioning, expand/collapse, pagination, or explicit drill-down.
 
 ## 3. MVP System Boundaries
 
@@ -53,7 +60,7 @@ The MVP is organized into six runtime subsystems.
 Interfaces used by the operator.
 
 - **CLI** issues direct lifecycle commands such as `start`, `pause`, `resume`, `stop`, and `status`. It manages the production server as a background process using `nohup` and PID-file tracking to ensure full environment inheritance from the user's shell.
-- **Web Console** shows current state, budgets, recent rounds, artifacts, and accepts live instructions.
+- **Web Console** shows current state, budgets, recent rounds, artifacts, and accepts live instructions through summary-first, sectioned views. It should rely on progressive disclosure such as expand/collapse, pagination, and drill-down artifact access instead of rendering full logs or artifact bodies inline by default.
 - **Console Server API** is the transport boundary between user-facing controls and the loop engine.
 
 The control plane never executes round logic directly. It writes commands and instructions into engine-managed state.
@@ -136,7 +143,7 @@ It persists:
 - evaluator results,
 - and current run state.
 
-Artifact storage must preserve reviewable raw evidence, but cross-agent prompts should reference those artifacts through compact manifests and summaries rather than inlining full files by default.
+Artifact storage must preserve reviewable raw evidence, but cross-agent prompts and operator-facing console views should reference those artifacts through compact manifests, summaries, and drill-down navigation rather than inlining full files by default.
 
 ### 4.7 Runtime Agent Session Isolation
 
@@ -186,6 +193,7 @@ Evaluator handoff rule:
 - include artifact paths and small, high-signal excerpts,
 - avoid embedding full `round.log` or multi-hundred-kilobyte `state_change` bodies directly into evaluator prompts unless a narrow excerpt is required to resolve ambiguity.
 - evaluator and other internal runtime roles must receive only the AILoop runtime role contract and engine-supplied context, not repository-local coding-assistant workflows.
+- leader diagnostics and operator-facing summaries derived from the same artifacts should keep this summary-first, navigational shape by default.
 
 ## 6. Loop State Machine
 
@@ -311,6 +319,8 @@ The evaluation context should be compact by default:
 - compact state-change summary,
 - artifact manifest with concrete paths to the round log, state-change file, metrics, and summary,
 - and only the smallest targeted excerpts needed for judgment.
+
+The same compact-by-default rule should apply when the engine packages pause diagnostics, leader handoffs, or operator-facing round summaries from the same evidence.
 
 The engine must not treat engine-managed run artifacts such as `.ailoop/runs/*.round.log` as ordinary product workspace diffs when constructing the evaluator handoff.
 
@@ -500,7 +510,8 @@ Artifact composition requirements:
 
 - `*.round.state_change.txt` should focus on intentional workspace mutations and concise evidence notes,
 - engine-managed observability artifacts under `.ailoop/runs/` should not recursively dominate the state-change body,
-- large artifacts remain on disk for human review, but downstream agent prompts should receive compact summaries plus artifact paths.
+- large artifacts remain on disk for human review, but downstream agent prompts should receive compact summaries plus artifact paths,
+- operator-facing console surfaces should expose large artifacts through sectioned summaries, expand/collapse, pagination, or explicit drill-down instead of dumping full bodies into the primary view.
 - `*.round.evaluation.json`: evaluator decision and evidence.
 
 ### 10.3 Secret Redaction
