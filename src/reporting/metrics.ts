@@ -26,6 +26,8 @@ export interface RoundMetrics {
   tool_status: "success" | "failure";
   retries: RoundRetryCounts;
   phase_timings_ms: RoundPhaseTimings;
+  human_interventions: number;
+  hot_file_growth_lines: number;
 }
 
 export async function writeMetricsFile(metricsPath: string, metrics: RoundMetrics): Promise<void> {
