@@ -120,7 +120,10 @@ const HOT_FILE_CONTEXT_PATTERNS: RegExp[] = [
   /pressured-file/i,
   /recent-touch hot-file pressure/i,
   /line-count pressure/i,
-  /recent-touch pressure/i
+  /recent-touch pressure/i,
+  /repeated modification/i,
+  /repeatedly modified/i,
+  /modification pressure/i
 ];
 
 const HOT_FILE_FAILURE_PATTERNS: RegExp[] = [
@@ -138,7 +141,8 @@ const HOT_FILE_LABEL_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
   { label: "refactor candidate", pattern: /refactor candidate/i },
   { label: "recent-touch hot-file pressure", pattern: /recent-touch hot-file pressure/i },
   { label: "line-count pressure", pattern: /line-count pressure/i },
-  { label: "recent-touch pressure", pattern: /recent-touch pressure/i }
+  { label: "recent-touch pressure", pattern: /recent-touch pressure/i },
+  { label: "repeated modification pressure", pattern: /repeated modification pressure/i }
 ];
 
 function clamp(value: number, min: number, max: number): number {
