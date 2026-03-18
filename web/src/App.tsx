@@ -1411,25 +1411,6 @@ export default function App() {
     });
   };
 
-  const updateCodexNumber = (key: "timeoutMs", raw: string): void => {
-    if (!runtimeConfig) {
-      return;
-    }
-    const next = Number(raw);
-    const aiConfig = runtimeConfig.ai ?? runtimeConfig.codex;
-    setRuntimeConfig({
-      ...runtimeConfig,
-      ai: {
-        ...aiConfig,
-        [key]: Number.isFinite(next) ? next : aiConfig[key]
-      },
-      codex: {
-        ...runtimeConfig.codex,
-        [key]: Number.isFinite(next) ? next : runtimeConfig.codex[key]
-      }
-    });
-  };
-
   const saveRuntimeConfig = async (): Promise<void> => {
     if (!runtimeConfig) {
       return;
@@ -1690,203 +1671,251 @@ export default function App() {
         {!runtimeConfig ? (
           <p className="mt-4 text-sm text-mist/70">Loading settings...</p>
         ) : (
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <label className="text-sm text-mist/80">
-              Interval Seconds
-              <input
-                type="number"
-                min={1}
-                value={runtimeConfig.intervalSeconds}
-                onChange={(event) => updateTopLevelNumber("intervalSeconds", event.target.value)}
-                className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
-              />
-            </label>
-            <label className="text-sm text-mist/80">
-              Stop After Rounds (0 = unlimited)
-              <input
-                type="number"
-                min={0}
-                value={runtimeConfig.maxCycles}
-                onChange={(event) => updateTopLevelNumber("maxCycles", event.target.value)}
-                className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
-              />
-            </label>
-            <label className="text-sm text-mist/80">
-              Budget USD / Round
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                value={runtimeConfig.budget.usdPerRound}
-                onChange={(event) => updateBudgetNumber("usdPerRound", event.target.value)}
-                className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
-              />
-            </label>
-            <label className="text-sm text-mist/80">
-              Budget Time (minutes)
-              <input
-                type="number"
-                min={1}
-                value={runtimeConfig.budget.timeMinutes}
-                onChange={(event) => updateBudgetNumber("timeMinutes", event.target.value)}
-                className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
-              />
-            </label>
-            <label className="text-sm text-mist/80">
-              Budget Actions
-              <input
-                type="number"
-                min={1}
-                value={runtimeConfig.budget.actions}
-                onChange={(event) => updateBudgetNumber("actions", event.target.value)}
-                className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
-              />
-            </label>
-            <label className="text-sm text-mist/80">
-              Exit On Error
-              <select
-                value={runtimeConfig.exitOnError ? "true" : "false"}
-                onChange={(event) =>
-                  setRuntimeConfig({
-                    ...runtimeConfig,
-                    exitOnError: event.target.value === "true"
-                  })
-                }
-                className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
-              >
-                <option value="false">false</option>
-                <option value="true">true</option>
-              </select>
-            </label>
-            <label className="text-sm text-mist/80">
-              Execution Provider
-              <select
-                value={deriveCliProvider(runtimeConfig.codex.bin)}
-                onChange={(event) =>
-                  setRuntimeConfig({
-                    ...runtimeConfig,
-                    codex: {
-                      ...runtimeConfig.codex,
-                      bin: event.target.value === "claude" ? "claude" : "codex"
+          <>
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <label className="text-sm text-mist/80">
+                Interval Seconds
+                <input
+                  type="number"
+                  min={1}
+                  value={runtimeConfig.intervalSeconds}
+                  onChange={(event) => updateTopLevelNumber("intervalSeconds", event.target.value)}
+                  className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
+                />
+              </label>
+              <label className="text-sm text-mist/80">
+                Stop After Rounds (0 = unlimited)
+                <input
+                  type="number"
+                  min={0}
+                  value={runtimeConfig.maxCycles}
+                  onChange={(event) => updateTopLevelNumber("maxCycles", event.target.value)}
+                  className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
+                />
+              </label>
+              <label className="text-sm text-mist/80">
+                Budget USD / Round
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={runtimeConfig.budget.usdPerRound}
+                  onChange={(event) => updateBudgetNumber("usdPerRound", event.target.value)}
+                  className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
+                />
+              </label>
+              <label className="text-sm text-mist/80">
+                Budget Time (minutes)
+                <input
+                  type="number"
+                  min={1}
+                  value={runtimeConfig.budget.timeMinutes}
+                  onChange={(event) => updateBudgetNumber("timeMinutes", event.target.value)}
+                  className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
+                />
+              </label>
+              <label className="text-sm text-mist/80">
+                Budget Actions
+                <input
+                  type="number"
+                  min={1}
+                  value={runtimeConfig.budget.actions}
+                  onChange={(event) => updateBudgetNumber("actions", event.target.value)}
+                  className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
+                />
+              </label>
+              <label className="text-sm text-mist/80">
+                Exit On Error
+                <select
+                  value={runtimeConfig.exitOnError ? "true" : "false"}
+                  onChange={(event) =>
+                    setRuntimeConfig({
+                      ...runtimeConfig,
+                      exitOnError: event.target.value === "true"
+                    })
+                  }
+                  className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
+                >
+                  <option value="false">false</option>
+                  <option value="true">true</option>
+                </select>
+              </label>
+            </div>
+
+            <details className="mt-6 rounded-2xl border border-white/10 bg-ink/40" open>
+              <summary className="cursor-pointer px-4 py-3 text-base font-semibold text-mist hover:text-accent">
+                AI CLI Configuration
+              </summary>
+              <div className="grid gap-4 px-4 pb-4 md:grid-cols-2">
+                <label className="text-sm text-mist/80">
+                  Execution Provider
+                  <select
+                    value={deriveCliProvider(runtimeConfig.codex.bin)}
+                    onChange={(event) =>
+                      setRuntimeConfig({
+                        ...runtimeConfig,
+                        ai: {
+                          ...(runtimeConfig.ai ?? runtimeConfig.codex),
+                          bin: event.target.value === "claude" ? "claude" : "codex"
+                        },
+                        codex: {
+                          ...runtimeConfig.codex,
+                          bin: event.target.value === "claude" ? "claude" : "codex"
+                        }
+                      })
                     }
-                  })
-                }
-                className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
-              >
-                <option value="codex">Codex CLI</option>
-                <option value="claude">Claude CLI</option>
-              </select>
-              <span className="mt-2 block text-xs text-mist/60">Uses the selected CLI from your PATH by default.</span>
-            </label>
-            <label className="text-sm text-mist/80">
-              CLI Model
-              <input
-                value={runtimeConfig.ai?.model ?? runtimeConfig.codex.model}
-                onChange={(event) =>
-                  setRuntimeConfig({
-                    ...runtimeConfig,
-                    ai: {
-                      ...(runtimeConfig.ai ?? runtimeConfig.codex),
-                      model: event.target.value
-                    },
-                    codex: {
-                      ...runtimeConfig.codex,
-                      model: event.target.value
+                    className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
+                  >
+                    <option value="codex">Codex CLI</option>
+                    <option value="claude">Claude CLI</option>
+                  </select>
+                  <span className="mt-2 block text-xs text-mist/60">Uses the selected CLI from your PATH by default.</span>
+                </label>
+                <label className="text-sm text-mist/80">
+                  CLI Model
+                  <select
+                    value={(runtimeConfig.ai?.model ?? runtimeConfig.codex.model) || "claude-opus-4-6"}
+                    onChange={(event) =>
+                      setRuntimeConfig({
+                        ...runtimeConfig,
+                        ai: {
+                          ...(runtimeConfig.ai ?? runtimeConfig.codex),
+                          model: event.target.value
+                        },
+                        codex: {
+                          ...runtimeConfig.codex,
+                          model: event.target.value
+                        }
+                      })
                     }
-                  })
-                }
-                placeholder="claude-opus-4-6 (default)"
-                className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
-              />
-              <p className="mt-1 text-xs text-mist/60">Default: claude-opus-4-6</p>
-            </label>
-            <label className="text-sm text-mist/80">
-              CLI Profile
-              <input
-                value={runtimeConfig.codex.profile}
-                onChange={(event) =>
-                  setRuntimeConfig({
-                    ...runtimeConfig,
-                    codex: {
-                      ...runtimeConfig.codex,
-                      profile: event.target.value
+                    className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
+                  >
+                    <option value="claude-opus-4-6">claude-opus-4-6 (default)</option>
+                    <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
+                    <option value="claude-haiku-4-5-20251001">claude-haiku-4-5-20251001</option>
+                  </select>
+                  <p className="mt-1 text-xs text-mist/60">Default: claude-opus-4-6</p>
+                </label>
+                <label className="text-sm text-mist/80">
+                  CLI Profile
+                  <input
+                    value={runtimeConfig.ai?.profile ?? runtimeConfig.codex.profile}
+                    onChange={(event) =>
+                      setRuntimeConfig({
+                        ...runtimeConfig,
+                        ai: {
+                          ...(runtimeConfig.ai ?? runtimeConfig.codex),
+                          profile: event.target.value
+                        },
+                        codex: {
+                          ...runtimeConfig.codex,
+                          profile: event.target.value
+                        }
+                      })
                     }
-                  })
-                }
-                className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
-              />
-            </label>
-            <label className="text-sm text-mist/80">
-              Project Planner Sandbox
-              <select
-                value={runtimeConfig.codex.plannerSandbox}
-                onChange={(event) =>
-                  setRuntimeConfig({
-                    ...runtimeConfig,
-                    codex: {
-                      ...runtimeConfig.codex,
-                      plannerSandbox: event.target.value as SandboxMode
+                    className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
+                  />
+                </label>
+                <label className="text-sm text-mist/80">
+                  CLI Timeout (ms)
+                  <input
+                    type="number"
+                    min={10000}
+                    value={runtimeConfig.ai?.timeoutMs ?? runtimeConfig.codex.timeoutMs}
+                    onChange={(event) => {
+                      const value = Number.parseInt(event.target.value, 10);
+                      if (Number.isFinite(value)) {
+                        setRuntimeConfig({
+                          ...runtimeConfig,
+                          ai: {
+                            ...(runtimeConfig.ai ?? runtimeConfig.codex),
+                            timeoutMs: value
+                          },
+                          codex: {
+                            ...runtimeConfig.codex,
+                            timeoutMs: value
+                          }
+                        });
+                      }
+                    }}
+                    className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
+                  />
+                </label>
+                <label className="text-sm text-mist/80">
+                  Project Planner Sandbox
+                  <select
+                    value={runtimeConfig.ai?.plannerSandbox ?? runtimeConfig.codex.plannerSandbox}
+                    onChange={(event) =>
+                      setRuntimeConfig({
+                        ...runtimeConfig,
+                        ai: {
+                          ...(runtimeConfig.ai ?? runtimeConfig.codex),
+                          plannerSandbox: event.target.value as SandboxMode
+                        },
+                        codex: {
+                          ...runtimeConfig.codex,
+                          plannerSandbox: event.target.value as SandboxMode
+                        }
+                      })
                     }
-                  })
-                }
-                className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
-              >
-                <option value="read-only">read-only</option>
-                <option value="workspace-write">workspace-write</option>
-                <option value="danger-full-access">danger-full-access</option>
-              </select>
-            </label>
-            <label className="text-sm text-mist/80">
-              Executor Sandbox
-              <select
-                value={runtimeConfig.codex.executorSandbox}
-                onChange={(event) =>
-                  setRuntimeConfig({
-                    ...runtimeConfig,
-                    codex: {
-                      ...runtimeConfig.codex,
-                      executorSandbox: event.target.value as SandboxMode
+                    className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
+                  >
+                    <option value="read-only">read-only</option>
+                    <option value="workspace-write">workspace-write</option>
+                    <option value="danger-full-access">danger-full-access</option>
+                  </select>
+                </label>
+                <label className="text-sm text-mist/80">
+                  Executor Sandbox
+                  <select
+                    value={runtimeConfig.ai?.executorSandbox ?? runtimeConfig.codex.executorSandbox}
+                    onChange={(event) =>
+                      setRuntimeConfig({
+                        ...runtimeConfig,
+                        ai: {
+                          ...(runtimeConfig.ai ?? runtimeConfig.codex),
+                          executorSandbox: event.target.value as SandboxMode
+                        },
+                        codex: {
+                          ...runtimeConfig.codex,
+                          executorSandbox: event.target.value as SandboxMode
+                        }
+                      })
                     }
-                  })
-                }
-                className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
-              >
-                <option value="read-only">read-only</option>
-                <option value="workspace-write">workspace-write</option>
-                <option value="danger-full-access">danger-full-access</option>
-              </select>
-            </label>
-            <label className="text-sm text-mist/80">
-              Evaluator Sandbox
-              <select
-                value={runtimeConfig.codex.evaluatorSandbox}
-                onChange={(event) =>
-                  setRuntimeConfig({
-                    ...runtimeConfig,
-                    codex: {
-                      ...runtimeConfig.codex,
-                      evaluatorSandbox: event.target.value as SandboxMode
+                    className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
+                  >
+                    <option value="read-only">read-only</option>
+                    <option value="workspace-write">workspace-write</option>
+                    <option value="danger-full-access">danger-full-access</option>
+                  </select>
+                </label>
+                <label className="text-sm text-mist/80">
+                  Evaluator Sandbox
+                  <select
+                    value={runtimeConfig.ai?.evaluatorSandbox ?? runtimeConfig.codex.evaluatorSandbox}
+                    onChange={(event) =>
+                      setRuntimeConfig({
+                        ...runtimeConfig,
+                        ai: {
+                          ...(runtimeConfig.ai ?? runtimeConfig.codex),
+                          evaluatorSandbox: event.target.value as SandboxMode
+                        },
+                        codex: {
+                          ...runtimeConfig.codex,
+                          evaluatorSandbox: event.target.value as SandboxMode
+                        }
+                      })
                     }
-                  })
-                }
-                className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
-              >
-                <option value="read-only">read-only</option>
-                <option value="workspace-write">workspace-write</option>
-                <option value="danger-full-access">danger-full-access</option>
-              </select>
-            </label>
-            <label className="text-sm text-mist/80">
-              CLI Timeout (ms)
-              <input
-                type="number"
-                min={10000}
-                value={runtimeConfig.codex.timeoutMs}
-                onChange={(event) => updateCodexNumber("timeoutMs", event.target.value)}
-                className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
-              />
-            </label>
-          </div>
+                    className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
+                  >
+                    <option value="read-only">read-only</option>
+                    <option value="workspace-write">workspace-write</option>
+                    <option value="danger-full-access">danger-full-access</option>
+                  </select>
+                </label>
+              </div>
+            </details>
+          </>
         )}
       </section>
 
