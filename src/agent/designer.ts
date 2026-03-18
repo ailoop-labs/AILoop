@@ -2,7 +2,7 @@ import type { AppConfig } from "../config/env";
 import type { LoopPaths } from "../types/contracts";
 import type { ActionRecord, SubTask, ToolResult } from "../types/contracts";
 import type { Guardrails } from "./guardrails";
-import { CodexClient, type JsonSchema } from "./codex-client";
+import { AIClient, type JsonSchema } from "./ai-client";
 import { loadProjectRoleDefinition } from "./role-definitions";
 import { buildInternalRuntimeSessionGuide, REPOSITORY_ROOT_SESSION_INSTRUCTION } from "./runtime-policy";
 import { ToolRegistry } from "./tool-registry";
@@ -164,18 +164,18 @@ export function buildDesignerPrompt(input: DesignerPromptInput, designerRoleDefi
 }
 
 export class DesignerAgent {
-  private readonly codex: Pick<CodexClient, "runJson">;
-  private readonly sandbox: AppConfig["codex"]["executorSandbox"]; // Reusing executor sandbox for now
+  private readonly ai: Pick<AIClient, "runJson">;
+  private readonly sandbox: AppConfig["ai"]["executorSandbox"]; // Reusing executor sandbox for now
   private readonly homeDir: string;
   private readonly workspaceRoot: string;
 
   constructor(
     private readonly tools: ToolRegistry,
     config: AppConfig,
-    codexClient?: Pick<CodexClient, "runJson">
+    aiClient?: Pick<AIClient, "runJson">
   ) {
-    this.codex = codexClient ?? new CodexClient(config.codex);
-    this.sandbox = config.codex.executorSandbox;
+    this.ai = aiClient ?? new AIClient(config.ai);
+    this.sandbox = config.ai.executorSandbox;
     this.homeDir = config.homeDir;
     this.workspaceRoot = process.cwd();
   }
@@ -205,14 +205,14 @@ export class DesignerAgent {
       designerRoleDefinition
     );
 
-    emitLog(options, "Designer started Codex execution.");
+    emitLog(options, "Designer started AI CLI execution.");
     const heartbeatStartedAt = Date.now();
     const heartbeat = setInterval(() => {
       const elapsedSeconds = Math.floor((Date.now() - heartbeatStartedAt) / 1000);
       emitLog(options, `Designer running... ${elapsedSeconds}s elapsed.`);
     }, 15_000);
 
-    const codexResult = await this.codex
+    const aiResult = await this.ai
       .runJson<CodexDesignerResponse>({
         prompt,
         schema: DESIGNER_RESPONSE_SCHEMA,
@@ -236,9 +236,9 @@ export class DesignerAgent {
       .finally(() => {
         clearInterval(heartbeat);
       });
-    emitLog(options, `Designer Codex execution finished (ok=${codexResult.ok}).`);
+    emitLog(options, `Designer AI CLI execution finished (ok=${aiResult.ok}).`);
 
-    if (!codexResult.ok || !codexResult.data) {
+    if (!aiResult.ok || !aiResult.data) {
       options.guardrails.recordAction(0);
       return {
         actions: [
@@ -246,30 +246,30 @@ export class DesignerAgent {
             tool: "codex_exec",
             args: { round: options.round },
             ok: false,
-            output: codexResult.stdout,
-            error: codexResult.error ?? codexResult.stderr ?? "Codex execution failed"
+            output: aiResult.stdout,
+            error: aiResult.error ?? aiResult.stderr ?? "AI CLI execution failed"
           }
         ],
         toolResult: {
           status: "failure",
-          summary: "Designer could not complete the task because Codex execution failed.",
+          summary: "Designer could not complete the task because AI CLI execution failed.",
           artifacts: {
             state_change_path: options.paths.runsDir,
             log_path: options.paths.runsDir
           },
           error: {
-            type: "CodexExecError",
-            message: codexResult.error ?? codexResult.stderr ?? "Unknown Codex execution error"
+            type: "AIExecError",
+            message: aiResult.error ?? aiResult.stderr ?? "Unknown AI CLI execution error"
           },
           next_state_hint: "pause"
         }
       };
     }
 
-    const safeStatus = codexResult.data.status === "success" ? "success" : "failure";
-    const safeErrorMessage = String(codexResult.data.error_message ?? "").trim();
-    const safeErrorType = String(codexResult.data.error_type ?? "").trim() || "DesignerFailure";
-    const normalizedActions = normalizeActions(codexResult.data.actions ?? [], safeStatus, safeErrorMessage);
+    const safeStatus = aiResult.data.status === "success" ? "success" : "failure";
+    const safeErrorMessage = String(aiResult.data.error_message ?? "").trim();
+    const safeErrorType = String(aiResult.data.error_type ?? "").trim() || "DesignerFailure";
+    const normalizedActions = normalizeActions(aiResult.data.actions ?? [], safeStatus, safeErrorMessage);
     const countedActions = Math.max(1, normalizedActions.length);
     for (let index = 0; index < countedActions; index += 1) {
       options.guardrails.recordAction(0);
@@ -287,13 +287,13 @@ export class DesignerAgent {
       actions: normalizedActions,
       toolResult: {
         status: safeStatus,
-        summary: String(codexResult.data.summary || "No summary provided by Codex designer."),
+        summary: String(aiResult.data.summary || "No summary provided by AI designer."),
         artifacts: {
           state_change_path: options.paths.runsDir,
           log_path: options.paths.runsDir
         },
         error: safeError ?? undefined,
-        next_state_hint: codexResult.data.next_state_hint ?? (safeStatus === "success" ? "continue" : "pause")
+        next_state_hint: aiResult.data.next_state_hint ?? (safeStatus === "success" ? "continue" : "pause")
       }
     };
   }

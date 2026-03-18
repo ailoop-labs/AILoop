@@ -3,7 +3,11 @@ import { hydrateEnvFromShell } from "../utils/env";
 import type { BudgetLimits, EvaluationDimension } from "../types/contracts";
 import type { DatabaseManager } from "../utils/db";
 
-export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
+export type AISandboxMode = "read-only" | "workspace-write" | "danger-full-access";
+
+// Backward compatibility
+export type CodexSandboxMode = AISandboxMode;
+
 export const DEFAULT_LLM_EVALUATOR_DIMENSIONS: EvaluationDimension[] = [
   "goal_alignment",
   "causal_validity",
@@ -14,17 +18,20 @@ export const DEFAULT_LLM_EVALUATOR_DIMENSIONS: EvaluationDimension[] = [
 ];
 const VALID_EVALUATION_DIMENSIONS = new Set<EvaluationDimension>(DEFAULT_LLM_EVALUATOR_DIMENSIONS);
 
-export interface CodexConfig {
+export interface AIConfig {
   bin: string;
   model: string;
   profile: string;
-  plannerSandbox: CodexSandboxMode;
-  executorSandbox: CodexSandboxMode;
-  evaluatorSandbox: CodexSandboxMode;
+  plannerSandbox: AISandboxMode;
+  executorSandbox: AISandboxMode;
+  evaluatorSandbox: AISandboxMode;
   timeoutMs: number;
   llmEvaluatorDimensions: EvaluationDimension[];
   llmEvaluatorMinPassScore: number;
 }
+
+// Backward compatibility
+export type CodexConfig = AIConfig;
 
 export interface AppConfig {
   homeDir: string;
@@ -37,7 +44,9 @@ export interface AppConfig {
   consoleAdminToken: string;
   maxRetainRuns: number;
   budget: BudgetLimits;
-  codex: CodexConfig;
+  ai: AIConfig;
+  // Backward compatibility
+  codex: AIConfig;
 }
 
 function parseNumber(value: string | undefined, fallback: number): number {
@@ -51,7 +60,7 @@ function parseNumber(value: string | undefined, fallback: number): number {
   return fallback;
 }
 
-function parseSandboxMode(value: string | undefined, fallback: CodexSandboxMode): CodexSandboxMode {
+function parseSandboxMode(value: string | undefined, fallback: AISandboxMode): AISandboxMode {
   if (value === "read-only" || value === "workspace-write" || value === "danger-full-access") {
     return value;
   }
@@ -115,6 +124,42 @@ export async function loadConfigAsync(
   const consoleAdminToken = (await get("AILOOP_CONSOLE_ADMIN_TOKEN")) ?? "";
   const maxRetainRuns = parseNumber(await get("AILOOP_MAX_RETAIN_RUNS"), 50);
 
+  // Support both new (AI_CLI_*) and legacy (CODEX_*) environment variables
+  const aiBin = (await get("AILOOP_AI_CLI_BIN")) ?? (await get("AILOOP_CODEX_BIN")) ?? "codex";
+  const aiModel = (await get("AILOOP_AI_CLI_MODEL")) ?? (await get("AILOOP_CODEX_MODEL")) ?? "";
+  const aiProfile = (await get("AILOOP_AI_CLI_PROFILE")) ?? (await get("AILOOP_CODEX_PROFILE")) ?? "";
+  const plannerSandbox = parseSandboxMode(
+    (await get("AILOOP_AI_CLI_PLANNER_SANDBOX")) ?? (await get("AILOOP_CODEX_PLANNER_SANDBOX")),
+    "read-only"
+  );
+  const executorSandbox = parseSandboxMode(
+    (await get("AILOOP_AI_CLI_EXECUTOR_SANDBOX")) ?? (await get("AILOOP_CODEX_EXECUTOR_SANDBOX")),
+    "danger-full-access"
+  );
+  const evaluatorSandbox = parseSandboxMode(
+    (await get("AILOOP_AI_CLI_EVALUATOR_SANDBOX")) ?? (await get("AILOOP_CODEX_EVALUATOR_SANDBOX")),
+    "danger-full-access"
+  );
+  const timeoutMs = parseNumber(
+    (await get("AILOOP_AI_CLI_TIMEOUT_MS")) ?? (await get("AILOOP_CODEX_TIMEOUT_MS")),
+    180_000
+  );
+
+  const aiConfig: AIConfig = {
+    bin: aiBin,
+    model: aiModel,
+    profile: aiProfile,
+    plannerSandbox,
+    executorSandbox,
+    evaluatorSandbox,
+    timeoutMs,
+    llmEvaluatorDimensions: parseLlmEvaluatorDimensions(await get("AILOOP_LLM_EVALUATOR_DIMENSIONS")),
+    llmEvaluatorMinPassScore: Math.max(
+      0,
+      Math.min(100, parseNumber(await get("AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE"), 75))
+    )
+  };
+
   return {
     homeDir,
     intervalSeconds,
@@ -130,20 +175,8 @@ export async function loadConfigAsync(
       timeMinutes: parseNumber(await get("AILOOP_BUDGET_TIME_MINUTES"), 60),
       actions: parseNumber(await get("AILOOP_BUDGET_ACTIONS"), 30)
     },
-    codex: {
-      bin: (await get("AILOOP_CODEX_BIN")) ?? "codex",
-      model: (await get("AILOOP_CODEX_MODEL")) ?? "",
-      profile: (await get("AILOOP_CODEX_PROFILE")) ?? "",
-      plannerSandbox: parseSandboxMode(await get("AILOOP_CODEX_PLANNER_SANDBOX"), "read-only"),
-      executorSandbox: parseSandboxMode(await get("AILOOP_CODEX_EXECUTOR_SANDBOX"), "danger-full-access"),
-      evaluatorSandbox: parseSandboxMode(await get("AILOOP_CODEX_EVALUATOR_SANDBOX"), "danger-full-access"),
-      timeoutMs: parseNumber(await get("AILOOP_CODEX_TIMEOUT_MS"), 180_000),
-      llmEvaluatorDimensions: parseLlmEvaluatorDimensions(await get("AILOOP_LLM_EVALUATOR_DIMENSIONS")),
-      llmEvaluatorMinPassScore: Math.max(
-        0,
-        Math.min(100, parseNumber(await get("AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE"), 75))
-      )
-    }
+    ai: aiConfig,
+    codex: aiConfig // Backward compatibility
   };
 }
 
@@ -167,6 +200,42 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const consoleAdminToken = get("AILOOP_CONSOLE_ADMIN_TOKEN") ?? "";
   const maxRetainRuns = parseNumber(get("AILOOP_MAX_RETAIN_RUNS"), 50);
 
+  // Support both new (AI_CLI_*) and legacy (CODEX_*) environment variables
+  const aiBin = get("AILOOP_AI_CLI_BIN") ?? get("AILOOP_CODEX_BIN") ?? "codex";
+  const aiModel = get("AILOOP_AI_CLI_MODEL") ?? get("AILOOP_CODEX_MODEL") ?? "";
+  const aiProfile = get("AILOOP_AI_CLI_PROFILE") ?? get("AILOOP_CODEX_PROFILE") ?? "";
+  const plannerSandbox = parseSandboxMode(
+    get("AILOOP_AI_CLI_PLANNER_SANDBOX") ?? get("AILOOP_CODEX_PLANNER_SANDBOX"),
+    "read-only"
+  );
+  const executorSandbox = parseSandboxMode(
+    get("AILOOP_AI_CLI_EXECUTOR_SANDBOX") ?? get("AILOOP_CODEX_EXECUTOR_SANDBOX"),
+    "danger-full-access"
+  );
+  const evaluatorSandbox = parseSandboxMode(
+    get("AILOOP_AI_CLI_EVALUATOR_SANDBOX") ?? get("AILOOP_CODEX_EVALUATOR_SANDBOX"),
+    "danger-full-access"
+  );
+  const timeoutMs = parseNumber(
+    get("AILOOP_AI_CLI_TIMEOUT_MS") ?? get("AILOOP_CODEX_TIMEOUT_MS"),
+    180_000
+  );
+
+  const aiConfig: AIConfig = {
+    bin: aiBin,
+    model: aiModel,
+    profile: aiProfile,
+    plannerSandbox,
+    executorSandbox,
+    evaluatorSandbox,
+    timeoutMs,
+    llmEvaluatorDimensions: parseLlmEvaluatorDimensions(get("AILOOP_LLM_EVALUATOR_DIMENSIONS")),
+    llmEvaluatorMinPassScore: Math.max(
+      0,
+      Math.min(100, parseNumber(get("AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE"), 75))
+    )
+  };
+
   return {
     homeDir,
     intervalSeconds,
@@ -182,20 +251,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       timeMinutes: parseNumber(get("AILOOP_BUDGET_TIME_MINUTES"), 60),
       actions: parseNumber(get("AILOOP_BUDGET_ACTIONS"), 30)
     },
-    codex: {
-      bin: get("AILOOP_CODEX_BIN") ?? "codex",
-      model: get("AILOOP_CODEX_MODEL") ?? "",
-      profile: get("AILOOP_CODEX_PROFILE") ?? "",
-      plannerSandbox: parseSandboxMode(get("AILOOP_CODEX_PLANNER_SANDBOX"), "read-only"),
-      executorSandbox: parseSandboxMode(get("AILOOP_CODEX_EXECUTOR_SANDBOX"), "danger-full-access"),
-      evaluatorSandbox: parseSandboxMode(get("AILOOP_CODEX_EVALUATOR_SANDBOX"), "danger-full-access"),
-      timeoutMs: parseNumber(get("AILOOP_CODEX_TIMEOUT_MS"), 180_000),
-      llmEvaluatorDimensions: parseLlmEvaluatorDimensions(get("AILOOP_LLM_EVALUATOR_DIMENSIONS")),
-      llmEvaluatorMinPassScore: Math.max(
-        0,
-        Math.min(100, parseNumber(get("AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE"), 75))
-      )
-    }
+    ai: aiConfig,
+    codex: aiConfig // Backward compatibility
   };
 }
 
@@ -212,14 +269,26 @@ export async function saveConfigToDb(config: AppConfig, db: DatabaseManager): Pr
   await db.setConfig("AILOOP_BUDGET_USD_PER_ROUND", config.budget.usdPerRound.toString());
   await db.setConfig("AILOOP_BUDGET_TIME_MINUTES", config.budget.timeMinutes.toString());
   await db.setConfig("AILOOP_BUDGET_ACTIONS", config.budget.actions.toString());
-  await db.setConfig("AILOOP_CODEX_BIN", config.codex.bin);
-  await db.setConfig("AILOOP_CODEX_MODEL", config.codex.model);
-  await db.setConfig("AILOOP_CODEX_PROFILE", config.codex.profile);
-  await db.setConfig("AILOOP_CODEX_PLANNER_SANDBOX", config.codex.plannerSandbox);
-  await db.setConfig("AILOOP_CODEX_EXECUTOR_SANDBOX", config.codex.executorSandbox);
-  await db.setConfig("AILOOP_CODEX_EVALUATOR_SANDBOX", config.codex.evaluatorSandbox);
-  await db.setConfig("AILOOP_CODEX_TIMEOUT_MS", config.codex.timeoutMs.toString());
-  await db.setConfig("AILOOP_LLM_EVALUATOR_DIMENSIONS", config.codex.llmEvaluatorDimensions.join(","));
-  await db.setConfig("AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE", config.codex.llmEvaluatorMinPassScore.toString());
+
+  // Save with new naming convention (AI_CLI_*)
+  await db.setConfig("AILOOP_AI_CLI_BIN", config.ai.bin);
+  await db.setConfig("AILOOP_AI_CLI_MODEL", config.ai.model);
+  await db.setConfig("AILOOP_AI_CLI_PROFILE", config.ai.profile);
+  await db.setConfig("AILOOP_AI_CLI_PLANNER_SANDBOX", config.ai.plannerSandbox);
+  await db.setConfig("AILOOP_AI_CLI_EXECUTOR_SANDBOX", config.ai.executorSandbox);
+  await db.setConfig("AILOOP_AI_CLI_EVALUATOR_SANDBOX", config.ai.evaluatorSandbox);
+  await db.setConfig("AILOOP_AI_CLI_TIMEOUT_MS", config.ai.timeoutMs.toString());
+
+  // Also save with legacy naming for backward compatibility
+  await db.setConfig("AILOOP_CODEX_BIN", config.ai.bin);
+  await db.setConfig("AILOOP_CODEX_MODEL", config.ai.model);
+  await db.setConfig("AILOOP_CODEX_PROFILE", config.ai.profile);
+  await db.setConfig("AILOOP_CODEX_PLANNER_SANDBOX", config.ai.plannerSandbox);
+  await db.setConfig("AILOOP_CODEX_EXECUTOR_SANDBOX", config.ai.executorSandbox);
+  await db.setConfig("AILOOP_CODEX_EVALUATOR_SANDBOX", config.ai.evaluatorSandbox);
+  await db.setConfig("AILOOP_CODEX_TIMEOUT_MS", config.ai.timeoutMs.toString());
+
+  await db.setConfig("AILOOP_LLM_EVALUATOR_DIMENSIONS", config.ai.llmEvaluatorDimensions.join(","));
+  await db.setConfig("AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE", config.ai.llmEvaluatorMinPassScore.toString());
 }
 

@@ -7,7 +7,7 @@ import type {
   HotFileGovernanceResult,
   RoundEvaluationContext
 } from "../../types/contracts";
-import { CodexClient, type JsonSchema } from "../../agent/codex-client";
+import { AIClient, type JsonSchema } from "../../agent/ai-client";
 import { loadProjectRoleDefinition } from "../../agent/role-definitions";
 import { buildInternalRuntimeSessionGuide } from "../../agent/runtime-policy";
 import { redactSecretLikeText } from "../../utils/secret-redaction";
@@ -1077,17 +1077,17 @@ export function buildDimensionPrompt(
 }
 
 export class LLMJudgeEvaluator implements Evaluator {
-  private readonly codex: CodexClient;
-  private readonly sandbox: AppConfig["codex"]["evaluatorSandbox"];
+  private readonly codex: AIClient;
+  private readonly sandbox: AppConfig["ai"]["evaluatorSandbox"];
   private readonly dimensions: EvaluationDimension[];
   private readonly minPassScore: number;
   private readonly homeDir: string;
 
-  constructor(config: AppConfig, codexClient?: CodexClient) {
-    this.codex = codexClient ?? new CodexClient(config.codex);
-    this.sandbox = config.codex.evaluatorSandbox;
-    this.dimensions = [...config.codex.llmEvaluatorDimensions];
-    this.minPassScore = config.codex.llmEvaluatorMinPassScore;
+  constructor(config: AppConfig, aiClient?: AIClient) {
+    this.ai = aiClient ?? new AIClient(config.ai);
+    this.sandbox = config.ai.evaluatorSandbox;
+    this.dimensions = [...config.ai.llmEvaluatorDimensions];
+    this.minPassScore = config.ai.llmEvaluatorMinPassScore;
     this.homeDir = config.homeDir;
   }
 
@@ -1104,7 +1104,7 @@ export class LLMJudgeEvaluator implements Evaluator {
     try {
       for (const dimension of this.dimensions) {
         emitEvaluationLog(context, `Evaluator checking dimension: ${dimension}.`);
-        const codexResult = await this.codex.runJson<DimensionAssessment>({
+        const aiResult = await this.ai.runJson<DimensionAssessment>({
           prompt: buildDimensionPrompt(dimension, context, evaluatorRoleDefinition),
           schema: DIMENSION_SCHEMA,
           cwd: process.cwd(),
@@ -1127,14 +1127,14 @@ export class LLMJudgeEvaluator implements Evaluator {
           }
         });
 
-        if (!codexResult.ok || !codexResult.data) {
+        if (!aiResult.ok || !aiResult.data) {
           emitEvaluationLog(
             context,
             `Evaluator dimension ${dimension} failed (error=${
-              codexResult.error ?? "missing evaluator JSON payload"
+              aiResult.error ?? "missing evaluator JSON payload"
             }).`
           );
-          const evidence = [codexResult.error, codexResult.stderr].filter(Boolean).map((item) => String(item));
+          const evidence = [aiResult.error, aiResult.stderr].filter(Boolean).map((item) => String(item));
           assessments.push(
             sanitizeDimensionAssessment(dimension, {
               dimension,
@@ -1150,7 +1150,7 @@ export class LLMJudgeEvaluator implements Evaluator {
           continue;
         }
 
-        const normalized = sanitizeDimensionAssessment(dimension, codexResult.data);
+        const normalized = sanitizeDimensionAssessment(dimension, aiResult.data);
         assessments.push(normalized);
         emitEvaluationLog(
           context,

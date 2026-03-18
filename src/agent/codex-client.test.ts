@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_LLM_EVALUATOR_DIMENSIONS, type CodexConfig } from "../config/env";
-import { CodexClient, type ProcessRunner } from "./codex-client";
+import { AIClient, type ProcessRunner } from "./ai-client";
 
 function createCodexConfig(): CodexConfig {
   return {
@@ -35,7 +35,7 @@ function outputPathFromArgs(args: string[]): string {
   return args[outputIndex + 1] ?? "";
 }
 
-describe("CodexClient.runJson", () => {
+describe("AIClient.runJson", () => {
   test("inherits environment without isolation in Zero-Config model", async () => {
     const sandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-env-test-"));
     const workspaceDir = path.join(sandboxRoot, "workspace");
@@ -57,7 +57,7 @@ describe("CodexClient.runJson", () => {
         };
       }) as ProcessRunner;
 
-      const client = new CodexClient(createCodexConfig(), runner);
+      const client = new AIClient(createCodexConfig(), runner);
       const result = await client.runJson<{ status: string }>({
         prompt: "Return JSON",
         schema: { type: "object" },
@@ -100,7 +100,7 @@ describe("CodexClient.runJson", () => {
         };
       };
 
-      const client = new CodexClient(createCodexConfig(), runner);
+      const client = new AIClient(createCodexConfig(), runner);
       const result = await client.runJson<{ status: string }>({
         prompt: "Return JSON",
         schema: { type: "object" },
@@ -141,7 +141,7 @@ describe("CodexClient.runJson", () => {
         };
       };
 
-      const client = new CodexClient(createClaudeConfig(), runner);
+      const client = new AIClient(createClaudeConfig(), runner);
       const result = await client.runJson<{ status: string }>({
         prompt: "Return JSON",
         schema: {
@@ -198,7 +198,7 @@ describe("CodexClient.runJson", () => {
       };
     };
 
-    const client = new CodexClient(createCodexConfig(), runner);
+    const client = new AIClient(createCodexConfig(), runner);
     const result = await client.runJson<{ status: string }>({
       prompt: "Return JSON",
       schema: { type: "object" },
@@ -229,7 +229,7 @@ describe("CodexClient.runJson", () => {
       };
     };
 
-    const client = new CodexClient(createCodexConfig(), runner);
+    const client = new AIClient(createCodexConfig(), runner);
     const result = await client.runJson<{ status: string; source: string }>({
       prompt: "Return JSON",
       schema: { type: "object" },
@@ -259,7 +259,7 @@ describe("CodexClient.runJson", () => {
       };
     };
 
-    const client = new CodexClient(createCodexConfig(), runner);
+    const client = new AIClient(createCodexConfig(), runner);
     const result = await client.runJson<{ status: string; attempt: number }>({
       prompt: "Return JSON",
       schema: { type: "object" },
@@ -285,7 +285,7 @@ describe("CodexClient.runJson", () => {
       };
     };
 
-    const client = new CodexClient(createCodexConfig(), runner);
+    const client = new AIClient(createCodexConfig(), runner);
     const result = await client.runJson<{ status: string; source: string }>({
       prompt: "Return JSON",
       schema: {
@@ -319,7 +319,7 @@ describe("CodexClient.runJson", () => {
       };
     };
 
-    const client = new CodexClient(createCodexConfig(), runner);
+    const client = new AIClient(createCodexConfig(), runner);
     const result = await client.runJson<{ status: string; source: string }>({
       prompt: "Return JSON",
       schema: {
@@ -353,7 +353,7 @@ describe("CodexClient.runJson", () => {
       };
     };
 
-    const client = new CodexClient(createCodexConfig(), runner);
+    const client = new AIClient(createCodexConfig(), runner);
     const result = await client.runJson<{ status: string; source: string }>({
       prompt: "Return JSON",
       schema: {
@@ -388,7 +388,7 @@ describe("CodexClient.runJson", () => {
       };
     };
 
-    const client = new CodexClient(createCodexConfig(), runner);
+    const client = new AIClient(createCodexConfig(), runner);
     const result = await client.runJson<{ status: string; next_state_hint: string; actions: string[] }>({
       prompt: "Return JSON",
       schema: {
@@ -427,7 +427,7 @@ describe("CodexClient.runJson", () => {
       };
     };
 
-    const client = new CodexClient(createCodexConfig(), runner);
+    const client = new AIClient(createCodexConfig(), runner);
     const result = await client.runJson({
       prompt: "Return JSON",
       schema: { type: "object" },
@@ -460,7 +460,7 @@ describe("CodexClient.runJson", () => {
       };
     };
 
-    const client = new CodexClient(createCodexConfig(), runner);
+    const client = new AIClient(createCodexConfig(), runner);
     const result = await client.runJson<{ status: string }>({
       prompt: "Return JSON",
       schema: { type: "object" },
@@ -484,7 +484,7 @@ describe("CodexClient.runJson", () => {
       };
     };
 
-    const client = new CodexClient(createCodexConfig(), runner);
+    const client = new AIClient(createCodexConfig(), runner);
     const result = await client.runJson({
       prompt: "Return JSON",
       schema: { type: "object" },
@@ -520,7 +520,7 @@ describe("CodexClient.runJson", () => {
       };
     };
 
-    const client = new CodexClient(createCodexConfig(), runner, async (ms) => {
+    const client = new AIClient(createCodexConfig(), runner, async (ms) => {
       sleepCalls.push(ms);
     });
     const result = await client.runJson<{ status: string }>({
@@ -569,7 +569,7 @@ describe("CodexClient.runJson", () => {
       };
     };
 
-    const client = new CodexClient(createCodexConfig(), runner, async (ms) => {
+    const client = new AIClient(createCodexConfig(), runner, async (ms) => {
       sleepCalls.push(ms);
     });
     const result = await client.runJson<{ status: string }>({
@@ -603,7 +603,7 @@ describe("CodexClient.runJson", () => {
       };
     };
 
-    const client = new CodexClient(createCodexConfig(), runner, async (ms) => {
+    const client = new AIClient(createCodexConfig(), runner, async (ms) => {
       sleepCalls.push(ms);
     });
     const result = await client.runJson({
@@ -633,7 +633,7 @@ describe("CodexClient.runJson", () => {
       };
     };
 
-    const client = new CodexClient(createCodexConfig(), runner, async (ms) => {
+    const client = new AIClient(createCodexConfig(), runner, async (ms) => {
       sleepCalls.push(ms);
     });
     const result = await client.runJson({

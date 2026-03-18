@@ -1,6 +1,6 @@
 import type { AppConfig } from "../config/env";
 import type { PlannerContext, SubTask } from "../types/contracts";
-import { CodexClient, type JsonSchema } from "./codex-client";
+import { AIClient, type JsonSchema } from "./ai-client";
 import { loadProjectRoleDefinition } from "./role-definitions";
 import { buildInternalRuntimeSessionGuide } from "./runtime-policy";
 import type { ToolRegistry } from "./tool-registry";
@@ -271,16 +271,16 @@ function normalizeSubTask(candidate: SubTask): SubTask {
 }
 
 export class PlannerAgent {
-  private readonly codex: Pick<CodexClient, "runJson">;
-  private readonly sandbox: AppConfig["codex"]["plannerSandbox"];
+  private readonly ai: Pick<AIClient, "runJson">;
+  private readonly sandbox: AppConfig["ai"]["plannerSandbox"];
   private readonly homeDir: string;
   private readonly tools: ToolRegistry;
   private readonly workspaceRoot: string;
 
-  constructor(tools: ToolRegistry, config: AppConfig, codexClient?: Pick<CodexClient, "runJson">) {
+  constructor(tools: ToolRegistry, config: AppConfig, aiClient?: Pick<AIClient, "runJson">) {
     this.tools = tools;
-    this.codex = codexClient ?? new CodexClient(config.codex);
-    this.sandbox = config.codex.plannerSandbox;
+    this.ai = aiClient ?? new AIClient(config.ai);
+    this.sandbox = config.ai.plannerSandbox;
     this.homeDir = config.homeDir;
     this.workspaceRoot = process.cwd();
   }
@@ -318,14 +318,14 @@ export class PlannerAgent {
       this.workspaceRoot
     );
 
-    emitLog("ProjectPlanner started Codex planning.");
+    emitLog("ProjectPlanner started AI CLI planning.");
     const heartbeatStartedAt = Date.now();
     const heartbeat = setInterval(() => {
       const elapsedSeconds = Math.floor((Date.now() - heartbeatStartedAt) / 1000);
       emitLog(`ProjectPlanner running... ${elapsedSeconds}s elapsed.`);
     }, 15_000);
 
-    const result = await this.codex
+    const result = await this.ai
       .runJson<SubTask>({
         prompt,
         schema: SUBTASK_SCHEMA,
@@ -351,7 +351,7 @@ export class PlannerAgent {
       .finally(() => {
         clearInterval(heartbeat);
       });
-    emitLog(`ProjectPlanner Codex planning finished (ok=${result.ok}).`);
+    emitLog(`ProjectPlanner AI CLI planning finished (ok=${result.ok}).`);
 
     if (!result.ok || !result.data) {
       return fallbackPlan(context);

@@ -4,7 +4,7 @@ import type { AppConfig } from "../config/env";
 import type { LeaderContext, LeaderDecision } from "../types/contracts";
 import { writeJsonFile } from "../utils/fs";
 import { redactJsonStrings, SecretRedactor } from "../utils/redaction";
-import { CodexClient, type CodexJsonCallResult, type JsonSchema } from "./codex-client";
+import { AIClient, type CodexJsonCallResult, type JsonSchema } from "./ai-client";
 import { loadProjectRoleDefinition } from "./role-definitions";
 import { buildInternalRuntimeSessionGuide } from "./runtime-policy";
 
@@ -123,7 +123,7 @@ async function writeLeaderDiagnosticsArtifact(
   context: LeaderContext,
   prompt: string,
   result: CodexJsonCallResult<LeaderDecision>,
-  sandbox: AppConfig["codex"]["executorSandbox"],
+  sandbox: AppConfig["ai"]["executorSandbox"],
   cwd: string
 ): Promise<string> {
   const redactor = new SecretRedactor(process.env);
@@ -254,11 +254,11 @@ export interface LeaderExecuteOptions {
 }
 
 export class LeaderAgent {
-  private readonly codex: CodexClient;
-  private readonly sandbox: AppConfig["codex"]["executorSandbox"];
+  private readonly codex: AIClient;
+  private readonly sandbox: AppConfig["ai"]["executorSandbox"];
 
   constructor(private readonly config: AppConfig) {
-    this.codex = new CodexClient(config.codex);
+    this.ai = new AIClient(config.ai);
     this.sandbox = "workspace-write";
   }
 
@@ -273,7 +273,7 @@ export class LeaderAgent {
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const result = await this.codex.runJson<LeaderDecision>({
+        const result = await this.ai.runJson<LeaderDecision>({
           prompt,
           schema: LEADER_DECISION_SCHEMA,
           cwd: process.cwd(),

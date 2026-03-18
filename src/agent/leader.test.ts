@@ -50,6 +50,25 @@ const sampleLeaderContext: LeaderContext = {
 };
 
 function makeConfig(homeDir: string): AppConfig {
+  const aiConfig = {
+    bin: "codex",
+    model: "",
+    profile: "",
+    plannerSandbox: "read-only" as const,
+    executorSandbox: "workspace-write" as const,
+    evaluatorSandbox: "workspace-write" as const,
+    timeoutMs: 30_000,
+    llmEvaluatorDimensions: [
+      "goal_alignment",
+      "causal_validity",
+      "constraint_compliance",
+      "risk_externality",
+      "reversibility_resilience",
+      "learning_yield"
+    ] as const,
+    llmEvaluatorMinPassScore: 75
+  };
+
   return {
     homeDir,
     intervalSeconds: 1,
@@ -65,24 +84,8 @@ function makeConfig(homeDir: string): AppConfig {
       timeMinutes: 15,
       actions: 30
     },
-    codex: {
-      bin: "codex",
-      model: "",
-      profile: "",
-      plannerSandbox: "read-only",
-      executorSandbox: "workspace-write",
-      evaluatorSandbox: "workspace-write",
-      timeoutMs: 30_000,
-      llmEvaluatorDimensions: [
-        "goal_alignment",
-        "causal_validity",
-        "constraint_compliance",
-        "risk_externality",
-        "reversibility_resilience",
-        "learning_yield"
-      ],
-      llmEvaluatorMinPassScore: 75
-    }
+    ai: aiConfig,
+    codex: aiConfig
   };
 }
 

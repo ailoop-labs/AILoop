@@ -72,7 +72,11 @@ function makeLlmConfig(dimensions: AppConfig["codex"]["llmEvaluatorDimensions"] 
       timeMinutes: 15,
       actions: 30
     },
-    codex: {
+    ai: aiConfig,
+    codex: aiConfig // Backward compatibility
+  };
+
+  const aiConfig = {
       bin: "codex",
       model: "",
       profile: "",

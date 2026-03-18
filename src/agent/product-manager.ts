@@ -1,6 +1,6 @@
 import type { AppConfig } from "../config/env";
 import type { ProductManagerContext } from "../types/contracts";
-import { type JsonSchema, CodexClient } from "./codex-client";
+import { type JsonSchema, AIClient } from "./ai-client";
 import { loadProjectRoleDefinition } from "./role-definitions";
 import { buildInternalRuntimeSessionGuide, REPOSITORY_ROOT_SESSION_INSTRUCTION } from "./runtime-policy";
 
@@ -13,7 +13,7 @@ interface CodexLike {
     prompt: string;
     schema: JsonSchema;
     cwd: string;
-    sandbox: AppConfig["codex"]["plannerSandbox"];
+    sandbox: AppConfig["ai"]["plannerSandbox"];
     sessionIsolation?: {
       enabled: boolean;
       agentsGuide?: string;
@@ -136,13 +136,13 @@ export function buildProductManagerPrompt(
 
 export class ProductManagerAgent {
   private readonly codex: CodexLike;
-  private readonly sandbox: AppConfig["codex"]["plannerSandbox"];
+  private readonly sandbox: AppConfig["ai"]["plannerSandbox"];
   private readonly homeDir: string;
   private readonly workspaceRoot: string;
 
-  constructor(config: AppConfig, codexClient?: CodexLike) {
-    this.codex = codexClient ?? new CodexClient(config.codex);
-    this.sandbox = config.codex.plannerSandbox;
+  constructor(config: AppConfig, aiClient?: CodexLike) {
+    this.ai = aiClient ?? new AIClient(config.ai);
+    this.sandbox = config.ai.plannerSandbox;
     this.homeDir = config.homeDir;
     this.workspaceRoot = process.cwd();
   }
@@ -179,7 +179,7 @@ export class ProductManagerAgent {
       emitLog(`ProductManager running... ${elapsedSeconds}s elapsed.`);
     }, 15_000);
 
-    const result = await this.codex
+    const result = await this.ai
       .runJson<ProductManagerResponse>({
         prompt,
         schema: PRODUCT_MANAGER_RESPONSE_SCHEMA,
