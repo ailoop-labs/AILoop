@@ -118,6 +118,16 @@ interface RuntimeLoopConfig {
     timeMinutes: number;
     actions: number;
   };
+  ai: {
+    bin: string;
+    model: string;
+    profile: string;
+    plannerSandbox: SandboxMode;
+    executorSandbox: SandboxMode;
+    evaluatorSandbox: SandboxMode;
+    timeoutMs: number;
+  };
+  // Backward compatibility
   codex: {
     bin: string;
     model: string;
@@ -1406,8 +1416,13 @@ export default function App() {
       return;
     }
     const next = Number(raw);
+    const aiConfig = runtimeConfig.ai ?? runtimeConfig.codex;
     setRuntimeConfig({
       ...runtimeConfig,
+      ai: {
+        ...aiConfig,
+        [key]: Number.isFinite(next) ? next : aiConfig[key]
+      },
       codex: {
         ...runtimeConfig.codex,
         [key]: Number.isFinite(next) ? next : runtimeConfig.codex[key]
@@ -1766,18 +1781,24 @@ export default function App() {
             <label className="text-sm text-mist/80">
               CLI Model
               <input
-                value={runtimeConfig.codex.model}
+                value={runtimeConfig.ai?.model ?? runtimeConfig.codex.model}
                 onChange={(event) =>
                   setRuntimeConfig({
                     ...runtimeConfig,
+                    ai: {
+                      ...(runtimeConfig.ai ?? runtimeConfig.codex),
+                      model: event.target.value
+                    },
                     codex: {
                       ...runtimeConfig.codex,
                       model: event.target.value
                     }
                   })
                 }
+                placeholder="claude-opus-4-6 (default)"
                 className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
               />
+              <p className="mt-1 text-xs text-mist/60">Default: claude-opus-4-6</p>
             </label>
             <label className="text-sm text-mist/80">
               CLI Profile
