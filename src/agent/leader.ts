@@ -267,39 +267,59 @@ export class LeaderAgent {
     const prompt = buildLeaderPrompt(options.context, roleDefinition);
 
     await options.onLog("Leader analyzing failures and formulating strategy...");
-    
-    try {
-      const result = await this.codex.runJson<LeaderDecision>({
-        prompt,
-        schema: LEADER_DECISION_SCHEMA,
-        cwd: process.cwd(),
-        sandbox: this.sandbox,
-        sessionIsolation: {
-          enabled: true,
-          agentsGuide: buildInternalRuntimeSessionGuide("Leader", [
-            "Keep reasoning anchored to the supplied failure, evaluation, and governance context unless the runtime prompt explicitly broadens scope."
-          ])
-        }
-      });
 
-      if (!result.ok || !result.data) {
-        const diagnosticsPath = await writeLeaderDiagnosticsArtifact(
-          options.paths.homeDir,
-          options.context,
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY_MS = 2000;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const result = await this.codex.runJson<LeaderDecision>({
           prompt,
-          result,
-          this.sandbox,
-          process.cwd()
-        );
-        await options.onLog(`Leader diagnostics artifact: ${diagnosticsPath}`);
-        throw new Error(buildLeaderFailureMessage(result, diagnosticsPath));
-      }
+          schema: LEADER_DECISION_SCHEMA,
+          cwd: process.cwd(),
+          sandbox: this.sandbox,
+          sessionIsolation: {
+            enabled: true,
+            agentsGuide: buildInternalRuntimeSessionGuide("Leader", [
+              "Keep reasoning anchored to the supplied failure, evaluation, and governance context unless the runtime prompt explicitly broadens scope."
+            ])
+          }
+        });
 
-      await options.onLog(`Leader Diagnosis: ${result.data.diagnosis_type}. Action: ${result.data.action}.`);
-      return result.data;
-    } catch (err) {
-      await options.onLog(`Leader Error: ${(err as Error).message}`);
-      throw err;
+        if (!result.ok || !result.data) {
+          const classification = classifyLeaderFailure(result);
+          const isTransient = classification === "provider_upstream_error" || classification === "provider_rate_limit" || classification === "timeout";
+
+          if (isTransient && attempt < MAX_RETRIES) {
+            const delay = RETRY_DELAY_MS * attempt;
+            await options.onLog(`Leader execution failed (${classification}), retrying in ${delay}ms (attempt ${attempt}/${MAX_RETRIES})...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+
+          const diagnosticsPath = await writeLeaderDiagnosticsArtifact(
+            options.paths.homeDir,
+            options.context,
+            prompt,
+            result,
+            this.sandbox,
+            process.cwd()
+          );
+          await options.onLog(`Leader diagnostics artifact: ${diagnosticsPath}`);
+          throw new Error(buildLeaderFailureMessage(result, diagnosticsPath));
+        }
+
+        await options.onLog(`Leader Diagnosis: ${result.data.diagnosis_type}. Action: ${result.data.action}.`);
+        return result.data;
+      } catch (err) {
+        if (attempt === MAX_RETRIES) {
+          await options.onLog(`Leader Error: ${(err as Error).message}`);
+          throw err;
+        }
+        await options.onLog(`Leader Error (attempt ${attempt}/${MAX_RETRIES}): ${(err as Error).message}`);
+      }
     }
+
+    throw new Error("Leader execution failed after all retries");
   }
 }
