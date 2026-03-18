@@ -53,8 +53,8 @@
   - 同时更新 `AILOOP_CODEX_MODEL` 以保持兼容性
 
 ### 6. 文档 ✅
-- **新建** `REFACTORING_AI_CLI.md` - 详细的重构文档
-- **新建** `REFACTORING_SUMMARY_CN.md` - 中文总结（本文件）
+- **新建** `docs/REFACTORING_AI_CLI.md` - 详细的重构文档
+- **新建** `docs/REFACTORING_SUMMARY_CN.md` - 中文总结（本文件）
 
 ## 关键改进
 
