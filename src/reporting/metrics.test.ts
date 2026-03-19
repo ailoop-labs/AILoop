@@ -182,6 +182,7 @@ describe("buildExternalValidationMetricsReport", () => {
       const siblingTask = report.tasks.find((task) => task.stable_id === buildRoundSubTaskIdentity(siblingSubTask).stable_id);
 
       expect(report.task_count).toBe(2);
+      expect(report.baseline_comparison).toBeUndefined();
       expect(primaryTask).toBeDefined();
       expect(primaryTask?.rounds).toBe(2);
       expect(primaryTask?.total_cost_usd).toBe(0.3);
@@ -294,6 +295,123 @@ describe("buildExternalValidationMetricsReport", () => {
       expect(report.checklist.hot_file_growth_lines).toBe(9);
     } finally {
       await fs.rm(runsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("adds checklist baseline comparison values when an explicit baseline runs directory is supplied", async () => {
+    const pilotRunsDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-metrics-pilot-baseline-test-"));
+    const baselineRunsDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-metrics-self-iteration-baseline-test-"));
+    const comparedTask = makeSubTask(
+      "Compare pilot checklist metrics against a self-iteration baseline.",
+      "The report records baseline, pilot, and delta values for the documented checklist metrics."
+    );
+
+    try {
+      const baselineArtifacts = buildRoundArtifactPaths(baselineRunsDir, "2026-03-18T00-00-00-000Z");
+      const baselineMetrics = makeMetrics(1, "2026-03-18T00:00:00.000Z", comparedTask, 0.05);
+      baselineMetrics.evaluator_decision = "pass";
+      baselineMetrics.human_interventions = 1;
+      baselineMetrics.hot_file_growth_lines = 2;
+
+      const pilotFirstArtifacts = buildRoundArtifactPaths(pilotRunsDir, "2026-03-19T00-00-00-000Z");
+      const pilotFirstMetrics = makeMetrics(1, "2026-03-19T00:00:00.000Z", comparedTask, 0.1);
+      pilotFirstMetrics.evaluator_decision = "fail";
+      pilotFirstMetrics.human_interventions = 1;
+      pilotFirstMetrics.hot_file_growth_lines = 3;
+
+      const pilotSecondArtifacts = buildRoundArtifactPaths(pilotRunsDir, "2026-03-19T00-05-00-000Z");
+      const pilotSecondMetrics = makeMetrics(2, "2026-03-19T00:05:00.000Z", comparedTask, 0.3);
+      pilotSecondMetrics.evaluator_decision = "pass";
+      pilotSecondMetrics.human_interventions = 1;
+      pilotSecondMetrics.hot_file_growth_lines = 3;
+
+      await Promise.all([
+        fs.writeFile(baselineArtifacts.summaryPath, "Baseline success recorded.\n", "utf8"),
+        fs.writeFile(baselineArtifacts.stateChangePath, "No state changes detected.", "utf8"),
+        fs.writeFile(baselineArtifacts.metricsPath, `${JSON.stringify(baselineMetrics, null, 2)}\n`, "utf8"),
+        fs.writeFile(
+          baselineArtifacts.evaluationPath,
+          `${JSON.stringify(
+            {
+              decision: "pass",
+              justification: "Baseline completed successfully.",
+              evidence: []
+            } satisfies EvaluationResult,
+            null,
+            2
+          )}\n`,
+          "utf8"
+        ),
+        fs.writeFile(pilotFirstArtifacts.summaryPath, "Pilot retry recorded.\n", "utf8"),
+        fs.writeFile(pilotFirstArtifacts.stateChangePath, "No state changes detected.", "utf8"),
+        fs.writeFile(pilotFirstArtifacts.metricsPath, `${JSON.stringify(pilotFirstMetrics, null, 2)}\n`, "utf8"),
+        fs.writeFile(
+          pilotFirstArtifacts.evaluationPath,
+          `${JSON.stringify(
+            {
+              decision: "fail",
+              justification: "Evaluator infrastructure failure: upstream timeout while judging the pilot round.",
+              root_cause: "evaluator_infrastructure:upstream_timeout",
+              evidence: []
+            } satisfies EvaluationResult,
+            null,
+            2
+          )}\n`,
+          "utf8"
+        ),
+        fs.writeFile(pilotSecondArtifacts.summaryPath, "Pilot success recorded.\n", "utf8"),
+        fs.writeFile(pilotSecondArtifacts.stateChangePath, "No state changes detected.", "utf8"),
+        fs.writeFile(pilotSecondArtifacts.metricsPath, `${JSON.stringify(pilotSecondMetrics, null, 2)}\n`, "utf8"),
+        fs.writeFile(
+          pilotSecondArtifacts.evaluationPath,
+          `${JSON.stringify(
+            {
+              decision: "pass",
+              justification: "Pilot completed successfully.",
+              evidence: []
+            } satisfies EvaluationResult,
+            null,
+            2
+          )}\n`,
+          "utf8"
+        )
+      ]);
+
+      const report = await buildExternalValidationMetricsReport(pilotRunsDir, baselineRunsDir);
+
+      expect(report.baseline_comparison).toEqual({
+        baseline_runs_dir: baselineRunsDir,
+        checklist: {
+          rounds_per_successful_task: {
+            baseline: 1,
+            pilot: 2,
+            delta: 1
+          },
+          human_interventions_per_task: {
+            baseline: 1,
+            pilot: 2,
+            delta: 1
+          },
+          average_cost_usd_per_round: {
+            baseline: 0.05,
+            pilot: 0.2,
+            delta: 0.15
+          },
+          evaluator_infrastructure_failures: {
+            baseline: 0,
+            pilot: 1,
+            delta: 1
+          },
+          hot_file_growth_lines: {
+            baseline: 2,
+            pilot: 6,
+            delta: 4
+          }
+        }
+      });
+    } finally {
+      await fs.rm(pilotRunsDir, { recursive: true, force: true });
+      await fs.rm(baselineRunsDir, { recursive: true, force: true });
     }
   });
 });

@@ -12,7 +12,11 @@ import {
 import type { AppConfig } from "../config/env";
 import { readRuntimeLoopConfig, runtimeLoopConfigToEnv } from "../config/runtime";
 import { readActiveRequirementSnapshot } from "../product/requirements";
-import { buildExternalValidationMetricsReport, type ExternalValidationMetricsReport } from "../reporting/metrics";
+import {
+  buildExternalValidationMetricsReport,
+  type ExternalValidationChecklistMetricComparison,
+  type ExternalValidationMetricsReport
+} from "../reporting/metrics";
 import { buildRoundArtifactPaths, listRunRecords, readLastLogTail } from "../reporting/summary";
 import { evaluateExternalValidationPreflight } from "../environment/workspace";
 import type {
@@ -30,7 +34,6 @@ import type {
   RoundArtifactPresence,
   RoundArtifactKind,
   RequirementArtifactSnapshot,
-  LoopStateData,
   LoopStateName
 } from "../types/contracts";
 import { fileExists, readJsonFile, readTextFile } from "../utils/fs";
@@ -169,6 +172,27 @@ function formatUsd(value: number): string {
 
 function formatAverage(value: number | null): string {
   return value === null ? "n/a" : value.toFixed(2);
+}
+
+function formatCount(value: number | null): string {
+  return value === null ? "n/a" : String(value);
+}
+
+function formatDelta(value: number | null, formatter: (value: number | null) => string): string {
+  if (value === null) {
+    return "n/a";
+  }
+
+  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
+  return `${sign}${formatter(Math.abs(value))}`;
+}
+
+function formatChecklistComparisonLine(
+  label: string,
+  metric: ExternalValidationChecklistMetricComparison,
+  formatter: (value: number | null) => string
+): string {
+  return `- ${label}: baseline=${formatter(metric.baseline)} | pilot=${formatter(metric.pilot)} | delta=${formatDelta(metric.delta, formatter)}`;
 }
 
 function roleTitle(role: ProjectRole): string {
@@ -343,12 +367,66 @@ export function renderExternalValidationMetricsReport(report: ExternalValidation
     }
   }
 
+  if (report.baseline_comparison) {
+    lines.push(`Baseline comparison runs dir: ${report.baseline_comparison.baseline_runs_dir}`);
+    lines.push("Baseline checklist comparison:");
+    lines.push(
+      formatChecklistComparisonLine(
+        "Rounds per successful task",
+        report.baseline_comparison.checklist.rounds_per_successful_task,
+        formatAverage
+      )
+    );
+    lines.push(
+      formatChecklistComparisonLine(
+        "Human interventions per task",
+        report.baseline_comparison.checklist.human_interventions_per_task,
+        formatAverage
+      )
+    );
+    lines.push(
+      formatChecklistComparisonLine(
+        "Average cost per round (USD)",
+        report.baseline_comparison.checklist.average_cost_usd_per_round,
+        (value) => (value === null ? "n/a" : formatUsd(value))
+      )
+    );
+    lines.push(
+      formatChecklistComparisonLine(
+        "Evaluator infrastructure failures",
+        report.baseline_comparison.checklist.evaluator_infrastructure_failures,
+        formatCount
+      )
+    );
+    lines.push(
+      formatChecklistComparisonLine(
+        "Hot-file growth lines",
+        report.baseline_comparison.checklist.hot_file_growth_lines,
+        formatCount
+      )
+    );
+  }
+
   return lines.join("\n");
 }
 
-export async function runExternalValidationMetricsReport(config: AppConfig): Promise<ExternalValidationMetricsCliReport> {
+export async function runExternalValidationMetricsReport(
+  config: AppConfig,
+  baselineRunsDir?: string,
+  cwd: string = process.cwd()
+): Promise<ExternalValidationMetricsCliReport> {
   const paths = await ensureLoopHomeAndGetPaths(config);
-  const metrics = await buildExternalValidationMetricsReport(paths.runsDir);
+  let resolvedBaselineRunsDir: string | undefined;
+
+  if (baselineRunsDir) {
+    resolvedBaselineRunsDir = path.resolve(cwd, baselineRunsDir);
+    const baselineStats = await fs.stat(resolvedBaselineRunsDir).catch(() => null);
+    if (!baselineStats?.isDirectory()) {
+      throw new Error(`Baseline runs directory does not exist: ${resolvedBaselineRunsDir}`);
+    }
+  }
+
+  const metrics = await buildExternalValidationMetricsReport(paths.runsDir, resolvedBaselineRunsDir);
 
   return {
     metrics,

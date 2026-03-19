@@ -153,14 +153,14 @@ async function main(): Promise<void> {
       }
 
       if (subCommand === "report") {
-        if (rest.length > 1) {
-          console.error("Usage: bun run ailoop external-validation report");
+        if (rest.length > 2) {
+          console.error("Usage: bun run ailoop external-validation report [baseline-runs-dir]");
           process.exitCode = 1;
           return;
         }
 
         const config = loadConfig();
-        const report = await runExternalValidationMetricsReport(config);
+        const report = await runExternalValidationMetricsReport(config, rest[1]);
         console.log(report.report);
         break;
       }
@@ -169,7 +169,7 @@ async function main(): Promise<void> {
         [
           "Usage:",
           "  bun run ailoop external-validation preflight <repo-path>",
-          "  bun run ailoop external-validation report"
+          "  bun run ailoop external-validation report [baseline-runs-dir]"
         ].join("\n")
       );
       process.exitCode = 1;
@@ -191,7 +191,7 @@ async function main(): Promise<void> {
         "  history",
         "  roles generate [--regen]",
         "  external-validation preflight <repo-path>",
-        "  external-validation report"
+        "  external-validation report [baseline-runs-dir]"
       ].join("\n"));
       break;
     }

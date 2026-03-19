@@ -2415,6 +2415,7 @@ describe("external-validation report CLI", () => {
       expect(result.stdout).toContain("External validation metrics report");
       expect(result.stdout).toContain("Tasks analyzed: 2");
       expect(result.stdout).toContain("Successful tasks: 1");
+      expect(result.stdout).not.toContain("Baseline checklist comparison:");
       expect(result.stdout).toContain(
         `- Fix parser bug | stable_id=${parserBugTask.stable_id} | rounds=2`
       );
@@ -2639,6 +2640,101 @@ describe("external-validation report CLI", () => {
       );
     } finally {
       await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("prints baseline, pilot, and delta checklist values when an explicit baseline runs directory is supplied", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-control-external-validation-baseline-report-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    const pilotRunsDir = path.join(homeDir, "runs");
+    const baselineRunsDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-control-self-iteration-runs-"));
+    const comparedTask = buildRoundSubTaskIdentity({
+      rationale: "Operators need a narrow self-iteration baseline comparison.",
+      assignee: "executor",
+      objective: "Compare pilot checklist metrics against a self-iteration baseline",
+      expected_outcome: "The report shows baseline, pilot, and delta checklist values.",
+      impacted_files: ["/tmp/metrics.ts"],
+      recommended_tools: ["read_file", "write_file", "run_shell"]
+    });
+
+    try {
+      await writeRunArtifacts(baselineRunsDir, "2026-03-18T12-00-00-000Z", {
+        summary: "# Round Summary\n\nRecorded self-iteration baseline.\n",
+        metrics: makePersistedRoundMetrics({
+          round: 1,
+          run_timestamp: "2026-03-18T12:00:00.000Z",
+          evaluator_decision: "pass",
+          human_interventions: 1,
+          hot_file_growth_lines: 2,
+          usdUsed: 0.05,
+          sub_task_identity: comparedTask
+        }),
+        evaluation: {
+          decision: "pass",
+          justification: "Baseline task completed successfully.",
+          evidence: []
+        }
+      });
+
+      await writeRunArtifacts(pilotRunsDir, "2026-03-19T12-00-00-000Z", {
+        summary: "# Round Summary\n\nRecorded pilot retry.\n",
+        metrics: makePersistedRoundMetrics({
+          round: 1,
+          run_timestamp: "2026-03-19T12:00:00.000Z",
+          evaluator_decision: "fail",
+          human_interventions: 1,
+          hot_file_growth_lines: 3,
+          usdUsed: 0.1,
+          sub_task_identity: comparedTask
+        }),
+        evaluation: {
+          decision: "fail",
+          justification: "Evaluator infrastructure failure: upstream timeout during pilot validation.",
+          root_cause: "evaluator_infrastructure:upstream_timeout",
+          evidence: []
+        }
+      });
+
+      await writeRunArtifacts(pilotRunsDir, "2026-03-19T12-05-00-000Z", {
+        summary: "# Round Summary\n\nRecorded pilot success.\n",
+        metrics: makePersistedRoundMetrics({
+          round: 2,
+          run_timestamp: "2026-03-19T12:05:00.000Z",
+          evaluator_decision: "pass",
+          human_interventions: 1,
+          hot_file_growth_lines: 3,
+          usdUsed: 0.3,
+          sub_task_identity: comparedTask
+        }),
+        evaluation: {
+          decision: "pass",
+          justification: "Pilot task completed successfully.",
+          evidence: []
+        }
+      });
+
+      const result = runAiloopCli(["external-validation", "report", baselineRunsDir], workspaceRoot);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toContain(`Baseline comparison runs dir: ${baselineRunsDir}`);
+      expect(result.stdout).toContain("Baseline checklist comparison:");
+      expect(result.stdout).toContain(
+        "- Rounds per successful task: baseline=1.00 | pilot=2.00 | delta=+1.00"
+      );
+      expect(result.stdout).toContain(
+        "- Human interventions per task: baseline=1.00 | pilot=2.00 | delta=+1.00"
+      );
+      expect(result.stdout).toContain(
+        "- Average cost per round (USD): baseline=0.0500 | pilot=0.2000 | delta=+0.1500"
+      );
+      expect(result.stdout).toContain(
+        "- Evaluator infrastructure failures: baseline=0 | pilot=1 | delta=+1"
+      );
+      expect(result.stdout).toContain("- Hot-file growth lines: baseline=2 | pilot=6 | delta=+4");
+    } finally {
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+      await fs.rm(baselineRunsDir, { recursive: true, force: true });
     }
   });
 });
