@@ -24,9 +24,11 @@ import {
 } from "../planning/requirement-completion";
 import { createEvaluator } from "../evaluation/evaluator";
 import {
+  buildRoundSubTaskIdentity,
   writeMetricsFile,
   type RoundMetrics,
   type RoundFailureMode,
+  type RoundSubTaskIdentity,
   type RoundPhaseTimings,
   type RoundRetryCounts
 } from "../reporting/metrics";
@@ -978,6 +980,7 @@ export class LoopEngine {
       impacted_files: [],
       recommended_tools: []
     };
+    let subTaskIdentity: RoundSubTaskIdentity | undefined;
     let stateChange = "No state changes detected.\n";
     let snapshot: any = null;
     let goal = await readGoalFile(this.paths.taskPath, resolveWorkspaceRootFromHome(this.paths.homeDir));
@@ -1048,6 +1051,7 @@ export class LoopEngine {
 
       const planningStartedAt = Date.now();
       subTask = await planWithRequirements(requirementMarkdown);
+      subTaskIdentity = buildRoundSubTaskIdentity(subTask);
       phaseTimings.planning += Date.now() - planningStartedAt;
       planningCompleted = true;
       snapshot = await workspace.createSnapshot(subTask.impacted_files.length > 0 ? subTask.impacted_files : extractSnapshotTargetsFromSubTask(subTask, process.cwd()));
@@ -1209,7 +1213,8 @@ export class LoopEngine {
         },
         phase_timings_ms: phaseTimings,
         human_interventions: this.humanInterventions,
-        hot_file_growth_lines: evaluation.hot_file_governance ? 1 : 0
+        hot_file_growth_lines: evaluation.hot_file_governance ? 1 : 0,
+        ...(subTaskIdentity ? { sub_task_identity: subTaskIdentity } : {})
       };
 
       await this.finalizeRoundArtifacts(
@@ -1293,7 +1298,8 @@ export class LoopEngine {
         },
         phase_timings_ms: phaseTimings,
         human_interventions: this.humanInterventions,
-        hot_file_growth_lines: 0
+        hot_file_growth_lines: 0,
+        ...(subTaskIdentity ? { sub_task_identity: subTaskIdentity } : {})
       };
 
       await writeStateChangeFile(artifacts.stateChangePath, stateChange);

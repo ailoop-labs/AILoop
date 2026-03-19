@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { BudgetLimits, BudgetUsage } from "../types/contracts";
+import type { BudgetLimits, BudgetUsage, SubTask } from "../types/contracts";
 import { ensureDir, readJsonFile } from "../utils/fs";
 
 export interface RoundRetryCounts {
@@ -18,6 +19,13 @@ export interface RoundPhaseTimings {
 
 export type RoundFailureMode = "timeout" | "planning_failure" | "execution_failure";
 
+export interface RoundSubTaskIdentity {
+  stable_id: string;
+  assignee: SubTask["assignee"];
+  objective: string;
+  expected_outcome: string;
+}
+
 export interface RoundMetrics {
   round: number;
   run_timestamp: string;
@@ -31,6 +39,27 @@ export interface RoundMetrics {
   phase_timings_ms: RoundPhaseTimings;
   human_interventions: number;
   hot_file_growth_lines: number;
+  sub_task_identity?: RoundSubTaskIdentity;
+}
+
+function normalizeSubTaskIdentityText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+export function buildRoundSubTaskIdentity(subTask: SubTask): RoundSubTaskIdentity {
+  const assignee = subTask.assignee;
+  const objective = normalizeSubTaskIdentityText(subTask.objective);
+  const expectedOutcome = normalizeSubTaskIdentityText(subTask.expected_outcome);
+  const stableId = createHash("sha256")
+    .update(JSON.stringify({ assignee, objective, expected_outcome: expectedOutcome }))
+    .digest("hex");
+
+  return {
+    stable_id: stableId,
+    assignee,
+    objective,
+    expected_outcome: expectedOutcome
+  };
 }
 
 export async function writeMetricsFile(metricsPath: string, metrics: RoundMetrics): Promise<void> {

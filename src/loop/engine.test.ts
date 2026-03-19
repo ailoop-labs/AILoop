@@ -1424,6 +1424,13 @@ describe("LoopEngine auto rework", () => {
         operational_followup: expect.any(Number)
       })
     );
+    expect(metrics.sub_task_identity).toEqual({
+      stable_id: expect.any(String),
+      assignee: plan.assignee,
+      objective: plan.objective,
+      expected_outcome: plan.expected_outcome
+    });
+    expect((metrics.sub_task_identity as Record<string, unknown>).stable_id).not.toBe("");
     expect(metrics.failure_mode).toBeUndefined();
 
     await fs.rm(homeDir, { recursive: true, force: true });
