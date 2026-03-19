@@ -16,6 +16,8 @@ export interface RoundPhaseTimings {
   operational_followup: number;
 }
 
+export type RoundFailureMode = "timeout" | "planning_failure" | "execution_failure";
+
 export interface RoundMetrics {
   round: number;
   run_timestamp: string;
@@ -24,6 +26,7 @@ export interface RoundMetrics {
   budget_usage: BudgetUsage;
   evaluator_decision: "pass" | "fail";
   tool_status: "success" | "failure";
+  failure_mode?: RoundFailureMode;
   retries: RoundRetryCounts;
   phase_timings_ms: RoundPhaseTimings;
   human_interventions: number;

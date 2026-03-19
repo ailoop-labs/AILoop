@@ -175,6 +175,29 @@ describe("writeSummaryFile auto rework section", () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
+  test("renders the failure mode from round metrics when the round failed", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-summary-test-"));
+    const summaryPath = path.join(dir, "round.summary.md");
+    const input = makeSummaryInput([]);
+    input.toolResult.status = "failure";
+    input.toolResult.error = {
+      type: "ExecutorFailure",
+      message: "Codex exited with code 1"
+    };
+    input.evaluation.decision = "fail";
+    input.metrics.evaluator_decision = "fail";
+    input.metrics.tool_status = "failure";
+    input.metrics.failure_mode = "execution_failure";
+
+    await writeSummaryFile(summaryPath, input);
+    const text = await fs.readFile(summaryPath, "utf8");
+
+    expect(text).toContain("## Execution Result");
+    expect(text).toContain("- Failure Mode: execution_failure");
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
   test("renders verification evidence as a dedicated block", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-summary-test-"));
     const summaryPath = path.join(dir, "round.summary.md");

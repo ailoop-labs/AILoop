@@ -26,6 +26,7 @@ import { createEvaluator } from "../evaluation/evaluator";
 import {
   writeMetricsFile,
   type RoundMetrics,
+  type RoundFailureMode,
   type RoundPhaseTimings,
   type RoundRetryCounts
 } from "../reporting/metrics";
@@ -426,6 +427,48 @@ function buildSummaryActionsWithPriorSuccess(
       error: failureMessage
     }
   ];
+}
+
+function isTimeoutFailureSignal(value: string | null | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const normalized = value.toLowerCase();
+  return (
+    normalized.includes("timed out") ||
+    normalized.includes("timeout") ||
+    normalized.includes("etimedout") ||
+    normalized.includes("504 gateway timeout")
+  );
+}
+
+function classifyToolResultFailureMode(toolResult: ToolResult | null | undefined): RoundFailureMode | null {
+  if (!toolResult || toolResult.status !== "failure") {
+    return null;
+  }
+
+  const signal = [toolResult.error?.type, toolResult.error?.message, toolResult.summary].filter(Boolean).join("\n");
+  return isTimeoutFailureSignal(signal) ? "timeout" : "execution_failure";
+}
+
+function resolveRoundFailureMode(options: {
+  planningCompleted: boolean;
+  executionStarted: boolean;
+  toolResult?: ToolResult | null;
+  error?: unknown;
+}): RoundFailureMode {
+  const toolResultFailureMode = classifyToolResultFailureMode(options.toolResult);
+  if (toolResultFailureMode) {
+    return toolResultFailureMode;
+  }
+
+  if (!options.planningCompleted || !options.executionStarted) {
+    return "planning_failure";
+  }
+
+  const message = options.error instanceof Error ? options.error.message : String(options.error ?? "");
+  return isTimeoutFailureSignal(message) ? "timeout" : "execution_failure";
 }
 
 function appendNotesToStateChange(stateChange: string, heading: string, notes: string[]): string {
@@ -930,6 +973,9 @@ export class LoopEngine {
     let stateChange = "No state changes detected.\n";
     let snapshot: any = null;
     let goal = await readGoalFile(this.paths.taskPath, resolveWorkspaceRootFromHome(this.paths.homeDir));
+    let planningCompleted = false;
+    let executionStarted = false;
+    let latestToolResult: ToolResult | null = null;
 
     try {
       await enforceBudgetBeforeAction("round.bootstrap");
@@ -995,14 +1041,17 @@ export class LoopEngine {
       const planningStartedAt = Date.now();
       subTask = await planWithRequirements(requirementMarkdown);
       phaseTimings.planning += Date.now() - planningStartedAt;
+      planningCompleted = true;
       snapshot = await workspace.createSnapshot(subTask.impacted_files.length > 0 ? subTask.impacted_files : extractSnapshotTargetsFromSubTask(subTask, process.cwd()));
       
       const activeAgent = subTask.assignee === "designer" ? this.designer : this.executor;
       const executionStartedAt = Date.now();
       await enforceBudgetBeforeAction(`executor.execute`);
+      executionStarted = true;
       let execution = await activeAgent.execute({ subTask, round, goal, instructions, guardrails, paths: this.paths, onLog: log });
       phaseTimings.execution += Date.now() - executionStartedAt;
       let finalToolResult = withConcreteArtifactPaths(execution.toolResult, artifacts);
+      latestToolResult = finalToolResult;
       let summaryActions = execution.actions;
       let lastSuccessfulExecution =
         finalToolResult.status === "success"
@@ -1047,6 +1096,7 @@ export class LoopEngine {
           });
           phaseTimings.execution += Date.now() - reworkExecutionStartedAt;
           finalToolResult = withConcreteArtifactPaths(execution.toolResult, artifacts);
+          latestToolResult = finalToolResult;
           if (finalToolResult.status === "success") {
             lastSuccessfulExecution = {
               actions: execution.actions,
@@ -1135,6 +1185,15 @@ export class LoopEngine {
         budget_usage: guardrails.usage(),
         evaluator_decision: evaluation.decision,
         tool_status: finalToolResult.status,
+        ...(evaluation.decision === "fail"
+          ? {
+              failure_mode: resolveRoundFailureMode({
+                planningCompleted,
+                executionStarted,
+                toolResult: finalToolResult
+              })
+            }
+          : {}),
         retries: {
           evidence_remediation_attempts: 0,
           auto_rework_attempts: autoReworkAttempts,
@@ -1213,6 +1272,12 @@ export class LoopEngine {
         budget_usage: usage,
         evaluator_decision: "fail",
         tool_status: "failure",
+        failure_mode: resolveRoundFailureMode({
+          planningCompleted,
+          executionStarted,
+          toolResult: latestToolResult,
+          error
+        }),
         retries: {
           evidence_remediation_attempts: 0,
           auto_rework_attempts: 0,

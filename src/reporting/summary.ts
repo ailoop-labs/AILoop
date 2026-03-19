@@ -200,6 +200,7 @@ export async function writeSummaryFile(summaryPath: string, input: SummaryInput)
     `- Tool Status: ${input.toolResult.status}`,
     `- Work Summary: ${input.toolResult.summary}`,
     `- Error: ${input.toolResult.error?.message ?? "none"}`,
+    ...(input.metrics.failure_mode ? [`- Failure Mode: ${input.metrics.failure_mode}`] : []),
     "",
     "## Material State Change",
     formatMaterialStateChange(input.stateChange),

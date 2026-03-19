@@ -55,6 +55,23 @@ function makeToolResult(summary: string): ToolResult {
   };
 }
 
+function makeFailureToolResult(message: string, errorType = "ExecutorFailure"): ToolResult {
+  return {
+    status: "failure",
+    summary: "Executor could not complete the task.",
+    operational_evidence: [],
+    artifacts: {
+      log_path: "",
+      state_change_path: ""
+    },
+    error: {
+      type: errorType,
+      message
+    },
+    next_state_hint: "pause"
+  };
+}
+
 function makeEvaluation(decision: EvaluationResult["decision"], justification: string): EvaluationResult {
   return {
     decision,
@@ -1326,6 +1343,159 @@ describe("LoopEngine auto rework", () => {
         operational_followup: expect.any(Number)
       })
     );
+    expect(metrics.failure_mode).toBeUndefined();
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("writes planning_failure into failed round artifacts when the planner infrastructure fails", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-planning-failure-artifact-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+    mutable.planner = {
+      plan: async () => {
+        throw new PlannerInfrastructureError("Planner AI CLI rate-limited and timed out before returning a sub-task.");
+      }
+    };
+
+    const outcome = await mutable.runRound(1);
+
+    expect(outcome.success).toBe(false);
+    const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+    const metricsFile = runArtifacts.find((entry) => entry.endsWith(".round.metrics.json"));
+    const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
+    expect(metricsFile).toBeDefined();
+    expect(summaryFile).toBeDefined();
+
+    const metrics = JSON.parse(
+      await fs.readFile(path.join(homeDir, "runs", metricsFile as string), "utf8")
+    ) as Record<string, unknown>;
+    expect(metrics.failure_mode).toBe("planning_failure");
+
+    const summaryText = await fs.readFile(path.join(homeDir, "runs", summaryFile as string), "utf8");
+    expect(summaryText).toContain("- Failure Mode: planning_failure");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("writes timeout into failed round artifacts when executor failure signals a timeout", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-timeout-failure-artifact-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const plan: SubTask = {
+      assignee: "executor",
+      rationale: "test rationale",
+      objective: "Trigger executor timeout classification",
+      expected_outcome: "failed round artifacts classify the timeout",
+      impacted_files: [],
+      recommended_tools: ["read_file", "run_shell"]
+    };
+
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      executor: { execute: () => Promise<{ actions: ActionRecord[]; toolResult: ToolResult }> };
+      evaluator: { evaluate: () => Promise<EvaluationResult> };
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+    mutable.planner = { plan: async () => plan };
+    mutable.executor = {
+      execute: async () => ({
+        actions: [makeAction("run_shell")],
+        toolResult: makeFailureToolResult(
+          "AI CLI process timed out after 30000ms | diagnostics: /tmp/executor.debug.json",
+          "AIExecError"
+        )
+      })
+    };
+    mutable.evaluator = {
+      evaluate: async () => makeEvaluation("fail", "Executor timed out before finishing the sub-task.")
+    };
+
+    const outcome = await mutable.runRound(1);
+
+    expect(outcome.success).toBe(false);
+    const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+    const metricsFile = runArtifacts.find((entry) => entry.endsWith(".round.metrics.json"));
+    const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
+    expect(metricsFile).toBeDefined();
+    expect(summaryFile).toBeDefined();
+
+    const metrics = JSON.parse(
+      await fs.readFile(path.join(homeDir, "runs", metricsFile as string), "utf8")
+    ) as Record<string, unknown>;
+    expect(metrics.failure_mode).toBe("timeout");
+
+    const summaryText = await fs.readFile(path.join(homeDir, "runs", summaryFile as string), "utf8");
+    expect(summaryText).toContain("- Failure Mode: timeout");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("writes execution_failure into failed round artifacts for non-timeout executor failures", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-execution-failure-artifact-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const plan: SubTask = {
+      assignee: "executor",
+      rationale: "test rationale",
+      objective: "Trigger executor failure classification",
+      expected_outcome: "failed round artifacts classify the execution failure",
+      impacted_files: [],
+      recommended_tools: ["read_file", "run_shell"]
+    };
+
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      executor: { execute: () => Promise<{ actions: ActionRecord[]; toolResult: ToolResult }> };
+      evaluator: { evaluate: () => Promise<EvaluationResult> };
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+    mutable.planner = { plan: async () => plan };
+    mutable.executor = {
+      execute: async () => ({
+        actions: [makeAction("run_shell")],
+        toolResult: makeFailureToolResult("Codex exited with code 1", "CodexExecError")
+      })
+    };
+    mutable.evaluator = {
+      evaluate: async () => makeEvaluation("fail", "Executor failed before finishing the sub-task.")
+    };
+
+    const outcome = await mutable.runRound(1);
+
+    expect(outcome.success).toBe(false);
+    const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+    const metricsFile = runArtifacts.find((entry) => entry.endsWith(".round.metrics.json"));
+    const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
+    expect(metricsFile).toBeDefined();
+    expect(summaryFile).toBeDefined();
+
+    const metrics = JSON.parse(
+      await fs.readFile(path.join(homeDir, "runs", metricsFile as string), "utf8")
+    ) as Record<string, unknown>;
+    expect(metrics.failure_mode).toBe("execution_failure");
+
+    const summaryText = await fs.readFile(path.join(homeDir, "runs", summaryFile as string), "utf8");
+    expect(summaryText).toContain("- Failure Mode: execution_failure");
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
