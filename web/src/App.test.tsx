@@ -6,6 +6,7 @@ import {
   BudgetHealthPanel,
   ControlErrorPanel,
   CrashRecoveryPanel,
+  ExternalValidationChecklistCard,
   FailureDiagnosticsPanel,
   HotFileGovernancePanel,
   LifecycleStatusGrid,
@@ -638,6 +639,67 @@ describe("SystemHealthPanel", () => {
 
   test("renders nothing when friction telemetry is unavailable", () => {
     expect(renderToStaticMarkup(<SystemHealthPanel frictionIndex={null} />)).toBe("");
+  });
+});
+
+describe("ExternalValidationChecklistCard", () => {
+  test("renders summary-first pilot readiness metrics from persisted external-validation aggregates", () => {
+    const html = renderToStaticMarkup(
+      <ExternalValidationChecklistCard
+        report={{
+          task_count: 4,
+          successful_task_count: 3,
+          checklist: {
+            rounds_per_successful_task: 2.33,
+            human_interventions_per_task: 0.75,
+            average_cost_usd_per_round: 0.1834,
+            evaluator_infrastructure_failures: 1,
+            hot_file_growth_lines: 6
+          },
+          tasks: []
+        }}
+      />
+    );
+
+    expect(html).toContain("Phase 3 Pilot Readiness");
+    expect(html).toContain("External Validation Checklist");
+    expect(html).toContain("Tasks analyzed");
+    expect(html).toContain(">4<");
+    expect(html).toContain("Successful tasks");
+    expect(html).toContain(">3<");
+    expect(html).toContain("Success coverage");
+    expect(html).toContain(">75%<");
+    expect(html).toContain("Rounds / successful task");
+    expect(html).toContain("Human interventions / task");
+    expect(html).toContain("Average cost / round");
+    expect(html).toContain("$0.1834");
+    expect(html).toContain("Evaluator infra failures");
+    expect(html).toContain(">1<");
+    expect(html).toContain("Hot-file growth");
+    expect(html).toContain("6 lines");
+  });
+
+  test("renders an explicit empty state when no pilot-ready task aggregates exist", () => {
+    const html = renderToStaticMarkup(
+      <ExternalValidationChecklistCard
+        report={{
+          task_count: 0,
+          successful_task_count: 0,
+          checklist: {
+            rounds_per_successful_task: null,
+            human_interventions_per_task: null,
+            average_cost_usd_per_round: null,
+            evaluator_infrastructure_failures: 0,
+            hot_file_growth_lines: 0
+          },
+          tasks: []
+        }}
+      />
+    );
+
+    expect(html).toContain("waiting for pilot data");
+    expect(html).toContain("No qualifying Phase 3 pilot data yet");
+    expect(html).toContain("did not find persisted round metrics with external-validation task identities");
   });
 });
 

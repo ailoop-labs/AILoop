@@ -1,7 +1,15 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { BudgetLimits, BudgetUsage, EvaluationResult, SubTask } from "../types/contracts";
+import type {
+  BudgetLimits,
+  BudgetUsage,
+  EvaluationResult,
+  ExternalValidationChecklistMetrics,
+  ExternalValidationMetricsReport,
+  ExternalValidationTaskMetrics,
+  SubTask
+} from "../types/contracts";
 import { ensureDir, readJsonFile } from "../utils/fs";
 import { listRunRecords } from "./summary";
 
@@ -43,38 +51,7 @@ export interface RoundMetrics {
   sub_task_identity?: RoundSubTaskIdentity;
 }
 
-export interface ExternalValidationTaskMetrics {
-  stable_id: string;
-  assignee: SubTask["assignee"];
-  objective: string;
-  expected_outcome: string;
-  rounds: number;
-  total_cost_usd: number;
-  average_cost_usd_per_round: number;
-  successful: boolean;
-  latest_decision: RoundMetrics["evaluator_decision"] | "unknown";
-  human_interventions: number;
-  no_op_claim_mismatches: number;
-  evaluator_infrastructure_failures: number;
-  hot_file_growth_lines: number;
-  first_run_timestamp: string;
-  latest_run_timestamp: string;
-}
-
-export interface ExternalValidationChecklistMetrics {
-  rounds_per_successful_task: number | null;
-  human_interventions_per_task: number | null;
-  average_cost_usd_per_round: number | null;
-  evaluator_infrastructure_failures: number;
-  hot_file_growth_lines: number;
-}
-
-export interface ExternalValidationMetricsReport {
-  task_count: number;
-  successful_task_count: number;
-  checklist: ExternalValidationChecklistMetrics;
-  tasks: ExternalValidationTaskMetrics[];
-}
+export type { ExternalValidationChecklistMetrics, ExternalValidationMetricsReport, ExternalValidationTaskMetrics };
 
 function normalizeSubTaskIdentityText(value: string): string {
   return value.replace(/\s+/g, " ").trim();

@@ -710,6 +710,135 @@ describe("console server API contract", () => {
     });
   });
 
+  test("returns persisted external-validation checklist aggregates for authenticated operators", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    await writeRunArtifacts(paths.runsDir, "2026-03-18T01-00-00-000Z", {
+      metrics: {
+        round: 1,
+        run_timestamp: "2026-03-18T01-00-00-000Z",
+        duration_ms: 1_000,
+        budget_limits: {
+          usdPerRound: 1,
+          timeMinutes: 10,
+          actions: 10
+        },
+        budget_usage: {
+          usdUsed: 0.2,
+          elapsedMs: 1_000,
+          actionsUsed: 2
+        },
+        evaluator_decision: "pass",
+        tool_status: "success",
+        retries: {
+          evidence_remediation_attempts: 0,
+          auto_rework_attempts: 0,
+          auto_rework_limit: 2
+        },
+        phase_timings_ms: {
+          planning: 100,
+          execution: 500,
+          evaluation: 300,
+          operational_followup: 100
+        },
+        human_interventions: 1,
+        hot_file_growth_lines: 5,
+        sub_task_identity: {
+          stable_id: "task-a",
+          assignee: "designer",
+          objective: "Surface pilot readiness in the Web Console",
+          expected_outcome: "Operators can assess readiness without parsing CLI output."
+        }
+      },
+      evaluation: {
+        decision: "pass",
+        justification: "Pilot summary metrics were persisted successfully.",
+        evidence: ["bun test src/server.test.ts"]
+      },
+      summary: "Rendered the pilot readiness summary in the Web Console.",
+      stateChange: "diff --git a/web/src/App.tsx b/web/src/App.tsx\n+++ b/web/src/App.tsx\n@@ -1 +1 @@\n+const ready = true;\n"
+    });
+
+    await writeRunArtifacts(paths.runsDir, "2026-03-18T02-00-00-000Z", {
+      metrics: {
+        round: 2,
+        run_timestamp: "2026-03-18T02-00-00-000Z",
+        duration_ms: 1_400,
+        budget_limits: {
+          usdPerRound: 1,
+          timeMinutes: 10,
+          actions: 10
+        },
+        budget_usage: {
+          usdUsed: 0.4,
+          elapsedMs: 1_400,
+          actionsUsed: 3
+        },
+        evaluator_decision: "fail",
+        tool_status: "failure",
+        retries: {
+          evidence_remediation_attempts: 0,
+          auto_rework_attempts: 1,
+          auto_rework_limit: 2
+        },
+        phase_timings_ms: {
+          planning: 100,
+          execution: 700,
+          evaluation: 500,
+          operational_followup: 100
+        },
+        human_interventions: 0,
+        hot_file_growth_lines: 2,
+        sub_task_identity: {
+          stable_id: "task-b",
+          assignee: "executor",
+          objective: "Run the external-validation pilot on a fixture repository",
+          expected_outcome: "The pilot completes without evaluator infrastructure faults."
+        }
+      },
+      evaluation: {
+        decision: "fail",
+        justification: "Evaluator infrastructure failure: upstream timeout.",
+        root_cause: "evaluator_infrastructure:upstream-timeout",
+        evidence: ["bun test src/server.test.ts"]
+      },
+      summary: "The pilot remained blocked by evaluator infrastructure.",
+      stateChange: "No state changes detected.\n"
+    });
+
+    const response = await fetchHandler(
+      createAuthorizedRequest("http://console.test/api/metrics/external-validation", token)
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      task_count: 2,
+      successful_task_count: 1,
+      checklist: {
+        rounds_per_successful_task: 1,
+        human_interventions_per_task: 0.5,
+        average_cost_usd_per_round: 0.3,
+        evaluator_infrastructure_failures: 1,
+        hot_file_growth_lines: 7
+      },
+      tasks: [
+        expect.objectContaining({
+          stable_id: "task-a",
+          objective: "Surface pilot readiness in the Web Console",
+          successful: true
+        }),
+        expect.objectContaining({
+          stable_id: "task-b",
+          objective: "Run the external-validation pilot on a fixture repository",
+          successful: false
+        })
+      ]
+    });
+  });
+
   test("returns the active requirement snapshot inside authenticated loop status responses", async () => {
     const token = "test-token";
     const { fetchHandler, paths } = await createFixture({

@@ -190,6 +190,39 @@ export interface ProductManagerContext {
   source_manifest?: ContextSourceManifest | null;
 }
 
+export interface ExternalValidationTaskMetrics {
+  stable_id: string;
+  assignee: SubTask["assignee"];
+  objective: string;
+  expected_outcome: string;
+  rounds: number;
+  total_cost_usd: number;
+  average_cost_usd_per_round: number;
+  successful: boolean;
+  latest_decision: EvaluationResult["decision"] | "unknown";
+  human_interventions: number;
+  no_op_claim_mismatches: number;
+  evaluator_infrastructure_failures: number;
+  hot_file_growth_lines: number;
+  first_run_timestamp: string;
+  latest_run_timestamp: string;
+}
+
+export interface ExternalValidationChecklistMetrics {
+  rounds_per_successful_task: number | null;
+  human_interventions_per_task: number | null;
+  average_cost_usd_per_round: number | null;
+  evaluator_infrastructure_failures: number;
+  hot_file_growth_lines: number;
+}
+
+export interface ExternalValidationMetricsReport {
+  task_count: number;
+  successful_task_count: number;
+  checklist: ExternalValidationChecklistMetrics;
+  tasks: ExternalValidationTaskMetrics[];
+}
+
 export interface RequirementArtifactSnapshot {
   path: string;
   exists: boolean;

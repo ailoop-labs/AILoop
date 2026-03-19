@@ -16,6 +16,7 @@ import {
   readGoal,
   resolveWebDistPath,
   resumeLoop,
+  runExternalValidationMetricsReport,
   startBackgroundLoop,
   stopLoop,
   tailLatestLog
@@ -203,6 +204,10 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
         } finally {
           db.close();
         }
+      }
+
+      if (url.pathname === "/api/metrics/external-validation" && request.method === "GET") {
+        return json((await runExternalValidationMetricsReport(config)).metrics);
       }
 
       if (url.pathname === "/api/config" && request.method === "GET") {

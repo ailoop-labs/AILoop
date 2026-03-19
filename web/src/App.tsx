@@ -193,6 +193,24 @@ interface FrictionIndex {
   healthStatus: "healthy" | "at_risk";
 }
 
+interface ExternalValidationChecklistMetrics {
+  rounds_per_successful_task: number | null;
+  human_interventions_per_task: number | null;
+  average_cost_usd_per_round: number | null;
+  evaluator_infrastructure_failures: number;
+  hot_file_growth_lines: number;
+}
+
+interface ExternalValidationMetricsReport {
+  task_count: number;
+  successful_task_count: number;
+  checklist: ExternalValidationChecklistMetrics;
+  tasks: Array<{
+    stable_id: string;
+    objective: string;
+  }>;
+}
+
 const stateTone: Record<LoopStateName, string> = {
   idle: "bg-slate text-mist",
   starting: "bg-sky-300/20 text-sky-100",
@@ -261,6 +279,15 @@ const budgetBarTone: Record<BudgetHealth, string> = {
   healthy: "bg-accent",
   warning: "bg-warning",
   breached: "bg-ember"
+};
+
+type ChecklistSignalTone = "neutral" | "good" | "warning" | "critical";
+
+const checklistSignalTone: Record<ChecklistSignalTone, string> = {
+  neutral: "border-white/10 bg-ink/70 text-mist/80",
+  good: "border-accent/30 bg-accent/10 text-accent",
+  warning: "border-warning/40 bg-warning/10 text-warning",
+  critical: "border-ember/40 bg-ember/10 text-ember"
 };
 
 const failureDiagnosticsTone: Record<FailureDiagnosticsTone, string> = {
@@ -497,6 +524,25 @@ function formatBudgetDimensionName(dimension: BudgetDimension): string {
     return "Time";
   }
   return "Actions";
+}
+
+function formatChecklistAverage(value: number | null): string {
+  return value === null ? "n/a" : value.toFixed(2);
+}
+
+function formatChecklistUsd(value: number | null): string {
+  return value === null ? "n/a" : `$${value.toFixed(4)}`;
+}
+
+function resolveChecklistThresholdTone(
+  value: number | null,
+  evaluate: (resolvedValue: number) => ChecklistSignalTone
+): ChecklistSignalTone {
+  if (value === null) {
+    return "neutral";
+  }
+
+  return evaluate(value);
 }
 
 type StepStatus = "done" | "current" | "pending";
@@ -1485,6 +1531,131 @@ export function SystemHealthPanel({ frictionIndex }: { frictionIndex: FrictionIn
   );
 }
 
+export function ExternalValidationChecklistCard({
+  report
+}: {
+  report: ExternalValidationMetricsReport | null;
+}) {
+  if (!report) {
+    return null;
+  }
+
+  const successRate = report.task_count > 0 ? Math.round((report.successful_task_count / report.task_count) * 100) : 0;
+  const checklistCards = [
+    {
+      label: "Rounds / successful task",
+      value: formatChecklistAverage(report.checklist.rounds_per_successful_task),
+      detail: "Target < 5",
+      tone: resolveChecklistThresholdTone(report.checklist.rounds_per_successful_task, (value) =>
+        value < 5 ? "good" : "warning"
+      )
+    },
+    {
+      label: "Human interventions / task",
+      value: formatChecklistAverage(report.checklist.human_interventions_per_task),
+      detail: "Target < 2",
+      tone: resolveChecklistThresholdTone(report.checklist.human_interventions_per_task, (value) =>
+        value < 2 ? "good" : "warning"
+      )
+    },
+    {
+      label: "Average cost / round",
+      value: formatChecklistUsd(report.checklist.average_cost_usd_per_round),
+      detail: "Observed blended spend",
+      tone: "neutral" as const
+    },
+    {
+      label: "Evaluator infra failures",
+      value: String(report.checklist.evaluator_infrastructure_failures),
+      detail: "Target 0",
+      tone: report.checklist.evaluator_infrastructure_failures === 0 ? "good" : "critical"
+    },
+    {
+      label: "Hot-file growth",
+      value: `${report.checklist.hot_file_growth_lines} lines`,
+      detail: "Target 0",
+      tone: report.checklist.hot_file_growth_lines === 0 ? "good" : "warning"
+    }
+  ];
+
+  return (
+    <section className="mt-4 rounded-2xl border border-white/10 bg-ink/60 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.04)]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs uppercase tracking-[0.2em] text-mist/70">Phase 3 Pilot Readiness</p>
+          <h2 className="mt-1 text-xl font-semibold text-mist">External Validation Checklist</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-mist/70">
+            Persisted run artifacts are condensed into a summary-first checklist so operators can judge pilot readiness
+            without parsing CLI output.
+          </p>
+        </div>
+        <span
+          className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${
+            report.successful_task_count > 0 ? checklistSignalTone.good : checklistSignalTone.neutral
+          }`}
+        >
+          {report.successful_task_count > 0 ? "pilot evidence present" : "waiting for pilot data"}
+        </span>
+      </div>
+
+      {report.task_count === 0 ? (
+        <div className="mt-4 rounded-2xl border border-dashed border-white/15 bg-panel/40 p-5">
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-mist/65">Empty State</p>
+          <p className="mt-3 text-lg font-semibold text-mist">No qualifying Phase 3 pilot data yet</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-mist/70">
+            The console did not find persisted round metrics with external-validation task identities. Run the pilot and
+            keep the artifact bundle so this checklist can light up automatically.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+            <div className="rounded-2xl border border-white/10 bg-panel/50 p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-mist/55">Coverage Snapshot</p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-mist/50">Tasks analyzed</p>
+                  <p className="mt-2 text-3xl font-semibold text-mist">{report.task_count}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-mist/50">Successful tasks</p>
+                  <p className="mt-2 text-3xl font-semibold text-mist">{report.successful_task_count}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-panel/50 p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-mist/55">Success coverage</p>
+              <div className="mt-3 flex items-end justify-between gap-3">
+                <p className="text-3xl font-semibold text-mist">{successRate}%</p>
+                <span className="rounded-full border border-white/10 bg-ink/70 px-3 py-1 text-[11px] uppercase tracking-[0.16em] text-mist/65">
+                  {report.successful_task_count} / {report.task_count} tasks
+                </span>
+              </div>
+              <div className="mt-4 h-2 rounded-full bg-ink/80">
+                <div className="h-2 rounded-full bg-accent" style={{ width: `${successRate}%` }} />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            {checklistCards.map((card) => (
+              <div key={card.label} className={`rounded-2xl border p-4 ${checklistSignalTone[card.tone]}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-current/80">{card.label}</p>
+                  <span className="h-2.5 w-2.5 rounded-full bg-current shadow-[0_0_10px_currentColor]" />
+                </div>
+                <p className="mt-3 text-2xl font-semibold text-mist">{card.value}</p>
+                <p className="mt-2 text-xs uppercase tracking-[0.16em] text-current/80">{card.detail}</p>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 export function AiRuntimePanel({ runtimeConfig }: { runtimeConfig: RuntimeLoopConfig | null }) {
   const aiRuntime = runtimeConfig?.aiRuntime;
   if (!runtimeConfig || !aiRuntime) {
@@ -1595,6 +1766,7 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [status, setStatus] = useState<LoopStatus | null>(null);
   const [frictionIndex, setFrictionIndex] = useState<FrictionIndex | null>(null);
+  const [externalValidation, setExternalValidation] = useState<ExternalValidationMetricsReport | null>(null);
   const [goal, setGoal] = useState("");
   const [roles, setRoles] = useState<ProjectRoleItem[]>([]);
   const [runs, setRuns] = useState<RunHistoryItem[]>([]);
@@ -1657,6 +1829,7 @@ export default function App() {
       setAuthToken("");
       setAuthError(unauthorizedMessage);
       setRoles([]);
+      setExternalValidation(null);
       setSelectedRole(null);
       setError(null);
       return;
@@ -1667,13 +1840,16 @@ export default function App() {
   const refresh = async (tokenOverride?: string): Promise<void> => {
     const activeToken = tokenOverride ?? authToken;
     try {
-      const [nextStatus, nextGoal, nextRuns, nextLogs, nextRoles, nextFriction] = await Promise.all([
+      const [nextStatus, nextGoal, nextRuns, nextLogs, nextRoles, nextFriction, nextExternalValidation] = await Promise.all([
         api<LoopStatus>("/api/status", undefined, activeToken),
         api<GoalResponse>("/api/goal", undefined, activeToken),
         api<RunHistoryItem[]>("/api/runs?limit=20", undefined, activeToken),
         api<{ lines: string[] }>("/api/logs/tail?lines=120", undefined, activeToken),
         api<ProjectRoleResponse>("/api/roles", undefined, activeToken),
-        api<FrictionIndex>("/api/metrics/friction-index", undefined, activeToken).catch(() => null)
+        api<FrictionIndex>("/api/metrics/friction-index", undefined, activeToken).catch(() => null),
+        api<ExternalValidationMetricsReport>("/api/metrics/external-validation", undefined, activeToken).catch(
+          () => null
+        )
       ]);
       setStatus(nextStatus);
       setGoal(nextGoal.goal ?? "");
@@ -1681,6 +1857,7 @@ export default function App() {
       setLogs(nextLogs.lines);
       setRoles(nextRoles.roles ?? []);
       setFrictionIndex(nextFriction);
+      setExternalValidation(nextExternalValidation);
       setError(null);
       setAuthError(null);
     } catch (requestError) {
@@ -1712,6 +1889,7 @@ export default function App() {
         setRoles([]);
         setRuns([]);
         setLogs([]);
+        setExternalValidation(null);
         setRuntimeConfig(null);
         return;
       }
@@ -1841,6 +2019,7 @@ export default function App() {
     setRoles([]);
     setRuns([]);
     setLogs([]);
+    setExternalValidation(null);
     setSelectedRole(null);
     setSelectedRequirement(null);
     setRuntimeConfig(null);
@@ -2069,6 +2248,7 @@ export default function App() {
         <CrashRecoveryPanel crashRecovery={status?.crash_recovery ?? null} />
 
         <SystemHealthPanel frictionIndex={frictionIndex} />
+        <ExternalValidationChecklistCard report={externalValidation} />
 
         <div className="mt-4 rounded-xl border border-white/10 bg-ink/60 p-4">
           <div className="flex items-center justify-between gap-3">
