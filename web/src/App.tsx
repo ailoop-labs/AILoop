@@ -579,6 +579,163 @@ interface RunArtifactBundle {
   } | null;
 }
 
+export interface StateChangeDigest {
+  changedFiles: string[];
+  addedLines: number;
+  removedLines: number;
+  notes: string[];
+  hasEdits: boolean;
+}
+
+function normalizeStateChangePath(path: string): string {
+  return path.replace(/^[ab]\//, "");
+}
+
+export function summarizeStateChangeArtifact(stateChange: string | null): StateChangeDigest {
+  const normalized = (stateChange ?? "").trim();
+  if (!normalized || normalized === "No state changes detected.") {
+    return {
+      changedFiles: [],
+      addedLines: 0,
+      removedLines: 0,
+      notes: [],
+      hasEdits: false
+    };
+  }
+
+  const changedFiles = Array.from(
+    new Set(
+      normalized
+        .split("\n")
+        .map((line) => line.trim())
+        .flatMap((line) => {
+          if (line.startsWith("+++ ")) {
+            return [line.slice(4).trim()];
+          }
+          if (line.startsWith("--- ")) {
+            return [line.slice(4).trim()];
+          }
+          return [];
+        })
+        .filter((line) => line && line !== "/dev/null")
+        .map(normalizeStateChangePath)
+        .filter((line) => !line.startsWith(".ailoop/runs/"))
+    )
+  );
+  const addedLines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+    .length;
+  const removedLines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("-") && !line.startsWith("---"))
+    .length;
+  const notes = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("### "))
+    .slice(0, 4);
+  const hasEdits = changedFiles.length > 0 || addedLines > 0 || removedLines > 0;
+
+  return {
+    changedFiles: changedFiles.slice(0, 12),
+    addedLines,
+    removedLines,
+    notes,
+    hasEdits
+  };
+}
+
+function StateChangeMetricCard({
+  label,
+  value,
+  tone = "neutral"
+}: {
+  label: string;
+  value: string;
+  tone?: "neutral" | "positive" | "negative";
+}) {
+  const toneClass =
+    tone === "positive"
+      ? "border-accent/30 bg-accent/10 text-accent"
+      : tone === "negative"
+        ? "border-ember/30 bg-ember/10 text-ember"
+        : "border-white/10 bg-panel/60 text-mist";
+
+  return (
+    <div className={`rounded-xl border p-3 ${toneClass}`}>
+      <p className="text-[11px] uppercase tracking-[0.18em] text-current/75">{label}</p>
+      <p className="mt-2 text-2xl font-semibold leading-none text-current">{value}</p>
+    </div>
+  );
+}
+
+export function StateChangeDigestPanel({ digest }: { digest: StateChangeDigest }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-ink/70 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.04)]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-accent/80">State Change Digest</p>
+          <h4 className="mt-2 text-lg font-semibold text-mist">
+            {digest.hasEdits ? "Workspace edits detected" : "No workspace edits detected"}
+          </h4>
+          <p className="mt-2 text-sm leading-6 text-mist/75">
+            {digest.hasEdits
+              ? "Review the changed files and line counts first, then use the raw artifact only when you need exact diff text."
+              : "No workspace file edits were detected in this round. Review the raw artifact below only if you need the underlying note trail."}
+          </p>
+        </div>
+        <span
+          className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${
+            digest.hasEdits
+              ? "border-accent/30 bg-accent/10 text-accent"
+              : "border-white/10 bg-panel/70 text-mist/70"
+          }`}
+        >
+          {digest.hasEdits ? "edited" : "no-op"}
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <StateChangeMetricCard label="Files Edited" value={`${digest.changedFiles.length}`} />
+        <StateChangeMetricCard label="Added Lines" value={`${digest.addedLines}`} tone="positive" />
+        <StateChangeMetricCard label="Removed Lines" value={`${digest.removedLines}`} tone="negative" />
+      </div>
+
+      {digest.hasEdits ? (
+        <div className="mt-4 rounded-xl border border-white/10 bg-panel/60 p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-mist/60">Changed Files</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {digest.changedFiles.map((file) => (
+              <span
+                key={file}
+                className="rounded-full border border-white/10 bg-ink/80 px-3 py-1 font-mono text-xs text-mist/85"
+              >
+                {file}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {digest.notes.length > 0 ? (
+        <div className="mt-4 rounded-xl border border-white/10 bg-panel/60 p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-mist/60">Artifact Notes</p>
+          <div className="mt-3 space-y-2">
+            {digest.notes.map((note) => (
+              <p key={note} className="rounded-lg border border-white/10 bg-ink/80 px-3 py-2 text-sm text-mist/80">
+                {note.replace(/^###\s*/, "")}
+              </p>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 interface EvidenceBlockProps {
   title: string;
   items: string[];
@@ -1604,6 +1761,10 @@ export default function App() {
       evaluation: selectedArtifacts.evaluation
     });
   }, [selectedArtifacts]);
+  const selectedStateChangeDigest = useMemo(
+    () => summarizeStateChangeArtifact(selectedArtifacts?.state_change ?? null),
+    [selectedArtifacts]
+  );
 
   useEffect(() => {
     if (runHistoryPagination.currentPage !== runHistoryPage) {
@@ -2734,12 +2895,15 @@ export default function App() {
                   </section>
                   <section>
                     <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">State Change</h4>
-                    <div className="h-[30rem] overflow-auto rounded-2xl border border-white/10 bg-ink/80 p-4 font-mono text-xs leading-relaxed text-mist/80 shadow-inner">
-                      {selectedArtifacts.state_change ? (
-                        <pre className="whitespace-pre-wrap">{selectedArtifacts.state_change}</pre>
-                      ) : (
-                        <p className="text-sm text-mist/60">State change artifact is missing for this round.</p>
-                      )}
+                    <div className="space-y-4">
+                      <StateChangeDigestPanel digest={selectedStateChangeDigest} />
+                      <div className="h-[24rem] overflow-auto rounded-2xl border border-white/10 bg-ink/80 p-4 font-mono text-xs leading-relaxed text-mist/80 shadow-inner">
+                        {selectedArtifacts.state_change ? (
+                          <pre className="whitespace-pre-wrap">{selectedArtifacts.state_change}</pre>
+                        ) : (
+                          <p className="text-sm text-mist/60">State change artifact is missing for this round.</p>
+                        )}
+                      </div>
                     </div>
                   </section>
                 </div>

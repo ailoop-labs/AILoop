@@ -12,6 +12,7 @@ import {
   OperatorReasonPanel,
   RunArtifactEvidenceGrid,
   RunHistoryCard,
+  StateChangeDigestPanel,
   SystemHealthPanel,
   applyCliProvider,
   deriveCliProvider,
@@ -20,6 +21,7 @@ import {
   parseFailureDiagnostics,
   resolveCliModel,
   postControlAndRefresh,
+  summarizeStateChangeArtifact,
   summarizeApiError
 } from "./App";
 import type { RoundReport, RunHistoryItem } from "./run-history";
@@ -137,6 +139,50 @@ describe("RunArtifactEvidenceGrid", () => {
     expect(html).toContain("No material state change summary captured.");
     expect(html).toContain("No verification evidence captured.");
     expect(html).toContain("No operational evidence captured.");
+  });
+});
+
+describe("StateChangeDigestPanel", () => {
+  test("renders a summary-first digest for edited rounds before operators parse raw diff text", () => {
+    const html = renderToStaticMarkup(
+      <StateChangeDigestPanel
+        digest={summarizeStateChangeArtifact(`diff --git a/web/src/App.tsx b/web/src/App.tsx
+index 1111111..2222222 100644
+--- a/web/src/App.tsx
++++ b/web/src/App.tsx
+@@ -1,3 +1,4 @@
+-const stale = false;
++const stale = true;
++const digest = true;
+diff --git a/web/src/App.test.tsx b/web/src/App.test.tsx
+index 3333333..4444444 100644
+--- a/web/src/App.test.tsx
++++ b/web/src/App.test.tsx
+@@ -10,0 +11,2 @@
++expect(html).toContain("State Change Digest");
++expect(html).toContain("Workspace edits detected");`)}
+      />
+    );
+
+    expect(html).toContain("State Change Digest");
+    expect(html).toContain("Workspace edits detected");
+    expect(html).toContain("Files Edited");
+    expect(html).toContain("Added Lines");
+    expect(html).toContain("Removed Lines");
+    expect(html).toContain(">2<");
+    expect(html).toContain("web/src/App.tsx");
+    expect(html).toContain("web/src/App.test.tsx");
+  });
+
+  test("renders explicit no-op copy when the state-change artifact reports no file edits", () => {
+    const html = renderToStaticMarkup(
+      <StateChangeDigestPanel digest={summarizeStateChangeArtifact("No state changes detected.\n")} />
+    );
+
+    expect(html).toContain("No workspace edits detected");
+    expect(html).toContain("No workspace file edits were detected in this round.");
+    expect(html).toContain("no-op");
+    expect(html).toContain(">0<");
   });
 });
 
