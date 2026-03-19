@@ -73,6 +73,16 @@ describe("loadConfig llm evaluator options", () => {
     expect(config.codex.model).toBe("claude-opus-4-6");
   });
 
+  test("forces the AI CLI timeout to 30 minutes even when overrides are provided", () => {
+    const config = loadConfig({
+      AILOOP_AI_CLI_TIMEOUT_MS: "1000",
+      AILOOP_CODEX_TIMEOUT_MS: "2000"
+    });
+
+    expect(config.codex.timeoutMs).toBe(1_800_000);
+    expect(config.ai.timeoutMs).toBe(1_800_000);
+  });
+
   test("loads config from the workspace database by default and ignores process env overrides", async () => {
     const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-config-db-"));
     const homeDir = path.join(workspaceRoot, ".ailoop");

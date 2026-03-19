@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AppConfig, CodexSandboxMode } from "./env";
-import { DEFAULT_LLM_EVALUATOR_DIMENSIONS } from "./env";
+import { DEFAULT_LLM_EVALUATOR_DIMENSIONS, FIXED_AI_CLI_TIMEOUT_MS } from "./env";
 import type { BudgetLimits, EvaluationDimension } from "../types/contracts";
 import { readJsonFile } from "../utils/fs";
 import { DatabaseManager } from "../utils/db";
@@ -23,7 +23,6 @@ const AI_DB_KEYS = {
   plannerSandbox: "AILOOP_AI_CLI_PLANNER_SANDBOX",
   executorSandbox: "AILOOP_AI_CLI_EXECUTOR_SANDBOX",
   evaluatorSandbox: "AILOOP_AI_CLI_EVALUATOR_SANDBOX",
-  timeoutMs: "AILOOP_AI_CLI_TIMEOUT_MS",
   llmEvaluatorDimensions: "AILOOP_LLM_EVALUATOR_DIMENSIONS",
   llmEvaluatorMinPassScore: "AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE"
 } as const;
@@ -50,7 +49,6 @@ export interface RuntimeLoopConfig {
     plannerSandbox: CodexSandboxMode;
     executorSandbox: CodexSandboxMode;
     evaluatorSandbox: CodexSandboxMode;
-    timeoutMs: number;
     llmEvaluatorDimensions: EvaluationDimension[];
     llmEvaluatorMinPassScore: number;
   };
@@ -235,7 +233,6 @@ async function readAiCliConfigFromDb(
       plannerSandbox,
       executorSandbox,
       evaluatorSandbox,
-      timeoutMs,
       llmEvaluatorDimensions,
       llmEvaluatorMinPassScore
     ] = await Promise.all([
@@ -245,7 +242,6 @@ async function readAiCliConfigFromDb(
       db.getConfig(AI_DB_KEYS.plannerSandbox),
       db.getConfig(AI_DB_KEYS.executorSandbox),
       db.getConfig(AI_DB_KEYS.evaluatorSandbox),
-      db.getConfig(AI_DB_KEYS.timeoutMs),
       db.getConfig(AI_DB_KEYS.llmEvaluatorDimensions),
       db.getConfig(AI_DB_KEYS.llmEvaluatorMinPassScore)
     ]);
@@ -257,7 +253,6 @@ async function readAiCliConfigFromDb(
       plannerSandbox: asSandbox(plannerSandbox, fallback.plannerSandbox),
       executorSandbox: asSandbox(executorSandbox, fallback.executorSandbox),
       evaluatorSandbox: asSandbox(evaluatorSandbox, fallback.evaluatorSandbox),
-      timeoutMs: asInteger(timeoutMs, fallback.timeoutMs, 10_000, 3_600_000),
       llmEvaluatorDimensions: parseDimensionsString(llmEvaluatorDimensions, fallback.llmEvaluatorDimensions),
       llmEvaluatorMinPassScore: asNumber(
         llmEvaluatorMinPassScore,
@@ -281,9 +276,9 @@ async function writeAiCliConfigToDb(baseConfig: AppConfig, aiConfig: RuntimeLoop
     await db.setConfig(AI_DB_KEYS.plannerSandbox, aiConfig.plannerSandbox);
     await db.setConfig(AI_DB_KEYS.executorSandbox, aiConfig.executorSandbox);
     await db.setConfig(AI_DB_KEYS.evaluatorSandbox, aiConfig.evaluatorSandbox);
-    await db.setConfig(AI_DB_KEYS.timeoutMs, String(aiConfig.timeoutMs));
     await db.setConfig(AI_DB_KEYS.llmEvaluatorDimensions, aiConfig.llmEvaluatorDimensions.join(","));
     await db.setConfig(AI_DB_KEYS.llmEvaluatorMinPassScore, String(aiConfig.llmEvaluatorMinPassScore));
+    await db.deleteConfig("AILOOP_AI_CLI_TIMEOUT_MS");
 
     for (const key of LEGACY_AI_DB_KEYS) {
       await db.deleteConfig(key);
@@ -297,7 +292,7 @@ async function clearAiCliConfigFromDb(baseConfig: AppConfig): Promise<void> {
   const db = new DatabaseManager({ dbPath: path.join(baseConfig.homeDir, "ailoop.db") });
 
   try {
-    for (const key of [...Object.values(AI_DB_KEYS), ...LEGACY_AI_DB_KEYS]) {
+    for (const key of [...Object.values(AI_DB_KEYS), "AILOOP_AI_CLI_TIMEOUT_MS", ...LEGACY_AI_DB_KEYS]) {
       await db.deleteConfig(key);
     }
   } finally {
@@ -335,7 +330,6 @@ export function extractRuntimeLoopConfig(config: AppConfig): RuntimeLoopConfig {
       plannerSandbox: config.codex.plannerSandbox,
       executorSandbox: config.codex.executorSandbox,
       evaluatorSandbox: config.codex.evaluatorSandbox,
-      timeoutMs: config.codex.timeoutMs,
       llmEvaluatorDimensions: [...config.codex.llmEvaluatorDimensions],
       llmEvaluatorMinPassScore: config.codex.llmEvaluatorMinPassScore
     }
@@ -369,7 +363,6 @@ function normalizeRuntimeLoopConfig(candidate: unknown, fallback: RuntimeLoopCon
       plannerSandbox: asSandbox(codex.plannerSandbox, fallback.codex.plannerSandbox),
       executorSandbox: asSandbox(codex.executorSandbox, fallback.codex.executorSandbox),
       evaluatorSandbox: asSandbox(codex.evaluatorSandbox, fallback.codex.evaluatorSandbox),
-      timeoutMs: asInteger(codex.timeoutMs, fallback.codex.timeoutMs, 10_000, 3_600_000),
       llmEvaluatorDimensions: asLlmEvaluatorDimensions(codex.llmEvaluatorDimensions, fallback.codex.llmEvaluatorDimensions),
       llmEvaluatorMinPassScore: asNumber(codex.llmEvaluatorMinPassScore, fallback.codex.llmEvaluatorMinPassScore, 0, 100)
     }
@@ -478,7 +471,7 @@ export function applyRuntimeLoopConfig(baseConfig: AppConfig, runtime: RuntimeLo
       plannerSandbox: runtime.codex.plannerSandbox,
       executorSandbox: runtime.codex.executorSandbox,
       evaluatorSandbox: runtime.codex.evaluatorSandbox,
-      timeoutMs: runtime.codex.timeoutMs,
+      timeoutMs: FIXED_AI_CLI_TIMEOUT_MS,
       llmEvaluatorDimensions: [...runtime.codex.llmEvaluatorDimensions],
       llmEvaluatorMinPassScore: runtime.codex.llmEvaluatorMinPassScore
     },
@@ -490,7 +483,7 @@ export function applyRuntimeLoopConfig(baseConfig: AppConfig, runtime: RuntimeLo
       plannerSandbox: runtime.codex.plannerSandbox,
       executorSandbox: runtime.codex.executorSandbox,
       evaluatorSandbox: runtime.codex.evaluatorSandbox,
-      timeoutMs: runtime.codex.timeoutMs,
+      timeoutMs: FIXED_AI_CLI_TIMEOUT_MS,
       llmEvaluatorDimensions: [...runtime.codex.llmEvaluatorDimensions],
       llmEvaluatorMinPassScore: runtime.codex.llmEvaluatorMinPassScore
     }
@@ -512,14 +505,14 @@ export function runtimeLoopConfigToEnv(runtime: RuntimeLoopConfig): Record<strin
     AILOOP_AI_CLI_PLANNER_SANDBOX: runtime.codex.plannerSandbox,
     AILOOP_AI_CLI_EXECUTOR_SANDBOX: runtime.codex.executorSandbox,
     AILOOP_AI_CLI_EVALUATOR_SANDBOX: runtime.codex.evaluatorSandbox,
-    AILOOP_AI_CLI_TIMEOUT_MS: String(runtime.codex.timeoutMs),
+    AILOOP_AI_CLI_TIMEOUT_MS: String(FIXED_AI_CLI_TIMEOUT_MS),
     AILOOP_CODEX_BIN: runtime.codex.bin,
     AILOOP_CODEX_MODEL: runtime.codex.model,
     AILOOP_CODEX_PROFILE: runtime.codex.profile,
     AILOOP_CODEX_PLANNER_SANDBOX: runtime.codex.plannerSandbox,
     AILOOP_CODEX_EXECUTOR_SANDBOX: runtime.codex.executorSandbox,
     AILOOP_CODEX_EVALUATOR_SANDBOX: runtime.codex.evaluatorSandbox,
-    AILOOP_CODEX_TIMEOUT_MS: String(runtime.codex.timeoutMs),
+    AILOOP_CODEX_TIMEOUT_MS: String(FIXED_AI_CLI_TIMEOUT_MS),
     AILOOP_LLM_EVALUATOR_DIMENSIONS: runtime.codex.llmEvaluatorDimensions.join(","),
     AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE: String(runtime.codex.llmEvaluatorMinPassScore)
   };

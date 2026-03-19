@@ -87,7 +87,7 @@ function makeTestConfig(homeDir: string, consoleAdminToken = ""): AppConfig {
       plannerSandbox: "read-only",
       executorSandbox: "danger-full-access",
       evaluatorSandbox: "danger-full-access",
-      timeoutMs: 180_000,
+      timeoutMs: 1_800_000,
       llmEvaluatorDimensions: [
         "goal_alignment",
         "causal_validity",
@@ -1215,7 +1215,6 @@ describe("console server API contract", () => {
       },
       codex: {
         profile: "console-test",
-        timeoutMs: 240_000,
         llmEvaluatorDimensions: ["constraint_compliance", "learning_yield"],
         llmEvaluatorMinPassScore: 88
       }
@@ -1248,8 +1247,7 @@ describe("console server API contract", () => {
           codex: {
             bin: "/opt/homebrew/bin/claude",
             model: "claude-opus-4-6",
-            profile: "saved-from-console",
-            timeoutMs: 240_000
+            profile: "saved-from-console"
           }
         })
       })
@@ -1271,8 +1269,7 @@ describe("console server API contract", () => {
       codex: {
         bin: "/opt/homebrew/bin/claude",
         model: "claude-opus-4-6",
-        profile: "saved-from-console",
-        timeoutMs: 240_000
+        profile: "saved-from-console"
       }
     });
 
@@ -1281,7 +1278,7 @@ describe("console server API contract", () => {
       await expect(db.getConfig("AILOOP_AI_CLI_BIN")).resolves.toBe("/opt/homebrew/bin/claude");
       await expect(db.getConfig("AILOOP_AI_CLI_MODEL")).resolves.toBe("claude-opus-4-6");
       await expect(db.getConfig("AILOOP_AI_CLI_PROFILE")).resolves.toBe("saved-from-console");
-      await expect(db.getConfig("AILOOP_AI_CLI_TIMEOUT_MS")).resolves.toBe("240000");
+      await expect(db.getConfig("AILOOP_AI_CLI_TIMEOUT_MS")).resolves.toBe(null);
     } finally {
       db.close();
     }
@@ -1304,7 +1301,6 @@ describe("console server API contract", () => {
       },
       codex: {
         profile: "reset-me",
-        timeoutMs: 240_000
       }
     });
 
@@ -1334,7 +1330,6 @@ describe("console server API contract", () => {
           plannerSandbox: "read-only",
           executorSandbox: "danger-full-access",
           evaluatorSandbox: "danger-full-access",
-          timeoutMs: 180_000,
           llmEvaluatorDimensions: [
             "goal_alignment",
             "causal_validity",
@@ -1364,7 +1359,6 @@ describe("console server API contract", () => {
         plannerSandbox: "read-only",
         executorSandbox: "danger-full-access",
         evaluatorSandbox: "danger-full-access",
-        timeoutMs: 180_000,
         llmEvaluatorDimensions: [
           "goal_alignment",
           "causal_validity",

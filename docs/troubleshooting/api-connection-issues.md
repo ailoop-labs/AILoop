@@ -40,13 +40,8 @@ export ANTHROPIC_AUTH_TOKEN="your-proxy-token"
 
 ### Prevention
 
-#### Reduce Timeout Duration
-The default 20-minute timeout is too long. Reduce it to fail faster:
-
-```bash
-# In .env file
-AILOOP_CODEX_TIMEOUT_MS=180000  # 3 minutes instead of 20
-```
+#### Timeout Policy
+AILoop now uses a fixed 30-minute AI CLI timeout. It is intentionally not user-configurable so long-running planner/executor work has enough time to complete before governance decides how to recover.
 
 #### Add Health Checks
 Before starting AILoop, verify API connectivity:

@@ -13,6 +13,7 @@ import { DatabaseManager } from "../src/utils/db";
 
 const LEGACY_KEYS = [
   "AILOOP_HOME",
+  "AILOOP_AI_CLI_TIMEOUT_MS",
   "AILOOP_CODEX_BIN",
   "AILOOP_CODEX_MODEL",
   "AILOOP_CODEX_PROFILE",

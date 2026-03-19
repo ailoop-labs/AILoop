@@ -18,6 +18,7 @@ export const DEFAULT_LLM_EVALUATOR_DIMENSIONS: EvaluationDimension[] = [
   "reversibility_resilience",
   "learning_yield"
 ];
+export const FIXED_AI_CLI_TIMEOUT_MS = 30 * 60 * 1000;
 const VALID_EVALUATION_DIMENSIONS = new Set<EvaluationDimension>(DEFAULT_LLM_EVALUATOR_DIMENSIONS);
 
 export interface AIConfig {
@@ -165,7 +166,7 @@ function buildConfig(values: ConfigRecord, homeDir: string): AppConfig {
     values.AILOOP_AI_CLI_EVALUATOR_SANDBOX ?? values.AILOOP_CODEX_EVALUATOR_SANDBOX,
     "danger-full-access"
   );
-  const timeoutMs = parseNumber(values.AILOOP_AI_CLI_TIMEOUT_MS ?? values.AILOOP_CODEX_TIMEOUT_MS, 180_000);
+  const timeoutMs = FIXED_AI_CLI_TIMEOUT_MS;
 
   const aiConfig: AIConfig = {
     bin: aiBin,
@@ -270,7 +271,7 @@ export async function saveConfigToDb(config: AppConfig, db: DatabaseManager): Pr
   await db.setConfig("AILOOP_AI_CLI_PLANNER_SANDBOX", config.ai.plannerSandbox);
   await db.setConfig("AILOOP_AI_CLI_EXECUTOR_SANDBOX", config.ai.executorSandbox);
   await db.setConfig("AILOOP_AI_CLI_EVALUATOR_SANDBOX", config.ai.evaluatorSandbox);
-  await db.setConfig("AILOOP_AI_CLI_TIMEOUT_MS", config.ai.timeoutMs.toString());
+  await db.deleteConfig("AILOOP_AI_CLI_TIMEOUT_MS");
   await db.deleteConfig("AILOOP_CODEX_BIN");
   await db.deleteConfig("AILOOP_CODEX_MODEL");
   await db.deleteConfig("AILOOP_CODEX_PROFILE");

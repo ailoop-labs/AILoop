@@ -69,7 +69,6 @@ AILOOP_AI_CLI_PROFILE=
 AILOOP_AI_CLI_PLANNER_SANDBOX=read-only
 AILOOP_AI_CLI_EXECUTOR_SANDBOX=danger-full-access
 AILOOP_AI_CLI_EVALUATOR_SANDBOX=danger-full-access
-AILOOP_AI_CLI_TIMEOUT_MS=600000
 ```
 
 ### Legacy Naming (Still Supported)
@@ -80,8 +79,9 @@ AILOOP_CODEX_PROFILE=
 AILOOP_CODEX_PLANNER_SANDBOX=read-only
 AILOOP_CODEX_EXECUTOR_SANDBOX=danger-full-access
 AILOOP_CODEX_EVALUATOR_SANDBOX=danger-full-access
-AILOOP_CODEX_TIMEOUT_MS=600000
 ```
+
+Timeout is now fixed inside the application at 30 minutes and is no longer a user-configurable setting.
 
 ## Supported AI CLI Providers
 

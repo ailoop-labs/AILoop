@@ -129,7 +129,6 @@ interface RuntimeLoopConfig {
     plannerSandbox: SandboxMode;
     executorSandbox: SandboxMode;
     evaluatorSandbox: SandboxMode;
-    timeoutMs: number;
   };
   // Backward compatibility
   codex: {
@@ -139,7 +138,6 @@ interface RuntimeLoopConfig {
     plannerSandbox: SandboxMode;
     executorSandbox: SandboxMode;
     evaluatorSandbox: SandboxMode;
-    timeoutMs: number;
   };
 }
 
@@ -1883,32 +1881,12 @@ export default function App() {
                     className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
                   />
                 </label>
-                <label className="text-sm text-mist/80">
-                  CLI Timeout (seconds)
-                  <input
-                    type="number"
-                    min={10}
-                    value={Math.round((runtimeConfig.ai?.timeoutMs ?? runtimeConfig.codex.timeoutMs) / 1000)}
-                    onChange={(event) => {
-                      const seconds = Number.parseInt(event.target.value, 10);
-                      if (Number.isFinite(seconds)) {
-                        const timeoutMs = seconds * 1000;
-                        setRuntimeConfig({
-                          ...runtimeConfig,
-                          ai: {
-                            ...(runtimeConfig.ai ?? runtimeConfig.codex),
-                            timeoutMs
-                          },
-                          codex: {
-                            ...runtimeConfig.codex,
-                            timeoutMs
-                          }
-                        });
-                      }
-                    }}
-                    className="mt-2 w-full rounded-xl border border-white/15 bg-ink/80 px-3 py-2 text-mist outline-none ring-accent/40 focus:ring"
-                  />
-                </label>
+                <div className="text-sm text-mist/80">
+                  AI CLI Timeout
+                  <p className="mt-2 rounded-xl border border-white/10 bg-ink/70 px-3 py-2 text-mist/75">
+                    Fixed at 30 minutes to prioritize completion over fail-fast retries.
+                  </p>
+                </div>
                 <label className="text-sm text-mist/80">
                   Project Planner Sandbox
                   <select

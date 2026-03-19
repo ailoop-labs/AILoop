@@ -89,7 +89,6 @@ bun run scripts/migrate-config-to-db.ts
 - `AILOOP_AI_CLI_PLANNER_SANDBOX`
 - `AILOOP_AI_CLI_EXECUTOR_SANDBOX`
 - `AILOOP_AI_CLI_EVALUATOR_SANDBOX`
-- `AILOOP_AI_CLI_TIMEOUT_MS`
 
 Legacy `AILOOP_CODEX_*` keys are exported to loop child processes for compatibility, but they are not stored as authoritative config.
 

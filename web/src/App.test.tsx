@@ -172,8 +172,7 @@ describe("CLI provider/model helpers", () => {
           profile: "",
           plannerSandbox: "read-only",
           executorSandbox: "workspace-write",
-          evaluatorSandbox: "workspace-write",
-          timeoutMs: 180_000
+          evaluatorSandbox: "workspace-write"
         },
         codex: {
           bin: "claude",
@@ -181,8 +180,7 @@ describe("CLI provider/model helpers", () => {
           profile: "",
           plannerSandbox: "read-only",
           executorSandbox: "workspace-write",
-          evaluatorSandbox: "workspace-write",
-          timeoutMs: 180_000
+          evaluatorSandbox: "workspace-write"
         }
       },
       "codex"

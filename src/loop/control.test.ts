@@ -456,8 +456,7 @@ describe("startBackgroundLoop", () => {
       intervalSeconds: 90,
       codex: {
         bin: "/opt/homebrew/bin/claude",
-        model: "claude-opus-4-6",
-        timeoutMs: 600_000
+        model: "claude-opus-4-6"
       }
     });
 
@@ -471,7 +470,7 @@ describe("startBackgroundLoop", () => {
       const spawnOptions = spawnSpy.mock.calls[0]?.[2];
       expect(spawnOptions?.env?.AILOOP_AI_CLI_BIN).toBe("/opt/homebrew/bin/claude");
       expect(spawnOptions?.env?.AILOOP_AI_CLI_MODEL).toBe("claude-opus-4-6");
-      expect(spawnOptions?.env?.AILOOP_AI_CLI_TIMEOUT_MS).toBe("600000");
+      expect(spawnOptions?.env?.AILOOP_AI_CLI_TIMEOUT_MS).toBe("1800000");
       expect(spawnOptions?.env?.AILOOP_CODEX_BIN).toBe("/opt/homebrew/bin/claude");
     } finally {
       process.chdir(originalCwd);

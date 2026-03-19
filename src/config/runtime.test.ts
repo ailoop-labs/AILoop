@@ -45,7 +45,7 @@ function makeConfig(): AppConfig {
       plannerSandbox: "read-only",
       executorSandbox: "danger-full-access",
       evaluatorSandbox: "danger-full-access",
-      timeoutMs: 180000,
+      timeoutMs: 1_800_000,
       llmEvaluatorDimensions: [
         "goal_alignment",
         "causal_validity",
@@ -97,8 +97,7 @@ describe("runtime codex bin persistence", () => {
         },
         codex: {
           bin: "/opt/homebrew/bin/claude",
-          model: "claude-opus-4-6",
-          timeoutMs: 600000
+          model: "claude-opus-4-6"
         }
       });
     } finally {
@@ -177,8 +176,7 @@ describe("runtime codex bin persistence", () => {
       intervalSeconds: 75,
       codex: {
         bin: "/opt/homebrew/bin/claude",
-        model: "claude-opus-4-6",
-        timeoutMs: 600000
+        model: "claude-opus-4-6"
       }
     });
 
@@ -194,7 +192,7 @@ describe("runtime codex bin persistence", () => {
       await expect(db.getConfig("AILOOP_BUDGET_ACTIONS")).resolves.toBe("30");
       await expect(db.getConfig("AILOOP_AI_CLI_BIN")).resolves.toBe("/opt/homebrew/bin/claude");
       await expect(db.getConfig("AILOOP_AI_CLI_MODEL")).resolves.toBe("claude-opus-4-6");
-      await expect(db.getConfig("AILOOP_AI_CLI_TIMEOUT_MS")).resolves.toBe("600000");
+      await expect(db.getConfig("AILOOP_AI_CLI_TIMEOUT_MS")).resolves.toBe(null);
     } finally {
       db.close();
     }
