@@ -165,7 +165,7 @@ function parsePlannerExitCode(error?: string): number | null {
 }
 
 function parsePlannerProviderStatusCode(result: Pick<AIJsonCallResult<unknown>, "error" | "stderr" | "rawMessage">): number | null {
-  const match = `${result.error ?? ""}\n${result.stderr}\n${result.rawMessage}`.match(/\b(502|503|504)\b/);
+  const match = `${result.error ?? ""}\n${result.stderr}\n${result.rawMessage}`.match(/\b(429|502|503|504)\b/);
   return match ? Number(match[1]) : null;
 }
 
@@ -326,11 +326,12 @@ function buildPlannerTimeoutContext(
   };
 }
 
-function buildPlannerProviderUpstreamContext(
+function buildPlannerProviderFailureContext(
   result: AIJsonCallResult<unknown>,
   sandbox: AppConfig["ai"]["plannerSandbox"],
   cwd: string,
-  failureSnapshot: PlannerFailureSnapshot
+  failureSnapshot: PlannerFailureSnapshot,
+  failureKind: Extract<PlannerTransientFailureKind, "provider_rate_limit" | "provider_upstream_error">
 ): PlannerDiagnosticsContext {
   const redactor = new SecretRedactor(process.env);
 
@@ -341,7 +342,7 @@ function buildPlannerProviderUpstreamContext(
     environment_state: normalizePlannerEnvironmentState(sandbox, cwd),
     failure_snapshot: failureSnapshot,
     provider_error_context: {
-      failure_kind: "provider_upstream_error",
+      failure_kind: failureKind,
       status_code: parsePlannerProviderStatusCode(result),
       retry_exhausted: true,
       error_excerpt: normalizeDiagnosticExcerpt(result.error, redactor),
@@ -761,7 +762,11 @@ export class PlannerAgent {
       if (finalTransientFailure) {
         let diagnosticsPath: string | undefined;
         let diagnosticsContext: PlannerDiagnosticsContext | null = null;
-        if (finalTransientFailure === "timeout" || finalTransientFailure === "provider_upstream_error") {
+        if (
+          finalTransientFailure === "timeout" ||
+          finalTransientFailure === "provider_upstream_error" ||
+          finalTransientFailure === "provider_rate_limit"
+        ) {
           diagnosticsContext =
             finalTransientFailure === "timeout"
               ? buildPlannerTimeoutContext(
@@ -770,14 +775,21 @@ export class PlannerAgent {
                   this.workspaceRoot,
                   await this.buildFailureSnapshot(this.tools)
                 )
-              : buildPlannerProviderUpstreamContext(
+              : buildPlannerProviderFailureContext(
                   result,
                   this.sandbox,
                   this.workspaceRoot,
-                  await this.buildFailureSnapshot(this.tools)
+                  await this.buildFailureSnapshot(this.tools),
+                  finalTransientFailure
                 );
           emitLog(
-            `ProjectPlanner ${finalTransientFailure === "timeout" ? "timeout" : "provider upstream"} context: ${JSON.stringify(diagnosticsContext)}`
+            `ProjectPlanner ${
+              finalTransientFailure === "timeout"
+                ? "timeout"
+                : finalTransientFailure === "provider_rate_limit"
+                  ? "provider rate limit"
+                  : "provider upstream"
+            } context: ${JSON.stringify(diagnosticsContext)}`
           );
           diagnosticsPath = await writePlannerDiagnosticsArtifact(
             this.homeDir,

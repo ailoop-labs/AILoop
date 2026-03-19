@@ -354,11 +354,12 @@ describe("PlannerAgent", () => {
   test("throws planner infrastructure failure after transient retry budget is exhausted", async () => {
     const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-planner-rate-limit-"));
     const homeDir = path.join(workspaceRoot, ".ailoop");
-    await fs.mkdir(homeDir, { recursive: true });
+    await fs.mkdir(path.join(homeDir, "runs"), { recursive: true });
     await fs.writeFile(path.join(homeDir, "PLANNER_ROLE.md"), "# Planner Role\n\nCustom planner guidance.\n", "utf8");
 
     let attempts = 0;
     const sleepCalls: number[] = [];
+    const logs: string[] = [];
     const mockCodex = {
       async runJson<T>() {
         attempts += 1;
@@ -389,15 +390,55 @@ describe("PlannerAgent", () => {
 
       let failure: unknown;
       try {
-        await agent.plan(createContext(), { onLog: async () => {} });
+        await agent.plan(createContext(), {
+          onLog: async (message) => {
+            logs.push(message);
+          }
+        });
       } catch (error) {
         failure = error;
       }
 
       expect(failure).toBeInstanceOf(PlannerInfrastructureError);
       expect((failure as Error).message).toContain("usage limit exceeded");
+      expect((failure as Error).message).toMatch(/diagnostics: .*planner\.debug\.json/);
       expect(attempts).toBe(3);
       expect(sleepCalls).toEqual([1000, 2000]);
+
+      const rateLimitContextLog = logs.find((message) => message.includes("ProjectPlanner provider rate limit context:"));
+      expect(rateLimitContextLog).toBeTruthy();
+
+      const rateLimitContext = JSON.parse(
+        rateLimitContextLog!.split("ProjectPlanner provider rate limit context: ")[1]
+      ) as Record<string, unknown>;
+      expect(rateLimitContext.provider_error_context).toEqual({
+        failure_kind: "provider_rate_limit",
+        status_code: 429,
+        retry_exhausted: true,
+        error_excerpt: "AI CLI exited with code 1",
+        stderr_excerpt:
+          'API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)"}}',
+        raw_excerpt: null
+      });
+
+      const diagnosticsLog = logs.find((message) => message.includes("ProjectPlanner diagnostics artifact:"));
+      expect(diagnosticsLog).toBeTruthy();
+
+      const diagnosticsPath = diagnosticsLog!.split("ProjectPlanner diagnostics artifact: ")[1];
+      const payload = await readJsonFile<Record<string, unknown>>(diagnosticsPath, {});
+
+      expect(payload.failure_classification).toBe("provider_rate_limit");
+      expect(payload.provider_error_context).toEqual({
+        failure_kind: "provider_rate_limit",
+        status_code: 429,
+        retry_exhausted: true,
+        error_excerpt: "AI CLI exited with code 1",
+        stderr_excerpt:
+          'API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)"}}',
+        raw_excerpt: null
+      });
+      expect(payload.stderr_tail).toContain("429");
+      expect(payload.stderr_tail).toContain("usage limit exceeded");
     } finally {
       process.chdir(originalCwd);
       await fs.rm(workspaceRoot, { recursive: true, force: true });
