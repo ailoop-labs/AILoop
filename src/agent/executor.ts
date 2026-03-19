@@ -1,8 +1,12 @@
+import { createHash } from "node:crypto";
+import path from "node:path";
 import type { AppConfig } from "../config/env";
 import type { LoopPaths } from "../types/contracts";
 import type { ActionRecord, SubTask, ToolResult } from "../types/contracts";
+import { writeJsonFile } from "../utils/fs";
+import { SecretRedactor } from "../utils/redaction";
 import type { Guardrails } from "./guardrails";
-import { AIClient, type JsonSchema } from "./ai-client";
+import { AIClient, type CodexJsonCallResult, type JsonSchema } from "./ai-client";
 import { loadProjectRoleDefinition } from "./role-definitions";
 import { buildInternalRuntimeSessionGuide } from "./runtime-policy";
 import { ToolRegistry } from "./tool-registry";
@@ -112,6 +116,82 @@ function emitLog(options: ExecuteOptions, message: string): void {
   void Promise.resolve(options.onLog(message)).catch(() => {
     // Logging must never block executor flow.
   });
+}
+
+function normalizeDiagnosticExcerpt(
+  value: string | undefined,
+  redactor: SecretRedactor,
+  limit = 500
+): string | null {
+  const normalized = redactor.redact((value ?? "").replace(/\s+/g, " ").trim());
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.length <= limit) {
+    return normalized;
+  }
+
+  return `...${normalized.slice(normalized.length - limit + 3)}`;
+}
+
+function parseExitCode(error: string | undefined): number | null {
+  const match = (error ?? "").match(/code (\d+)/i);
+  return match ? Number(match[1]) : null;
+}
+
+function resolveExecutorDiagnosticsPath(runsDir: string): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return path.join(runsDir, `${stamp}.executor.debug.json`);
+}
+
+async function writeExecutorDiagnosticsArtifact(
+  runsDir: string,
+  prompt: string,
+  result: CodexJsonCallResult<CodexExecutorResponse>,
+  sandbox: AppConfig["ai"]["executorSandbox"],
+  cwd: string
+): Promise<string> {
+  const redactor = new SecretRedactor(process.env);
+  const diagnosticsPath = resolveExecutorDiagnosticsPath(runsDir);
+  await writeJsonFile(diagnosticsPath, {
+    created_at: new Date().toISOString(),
+    exit_code: parseExitCode(result.error),
+    timed_out: /timed out/i.test(result.error ?? ""),
+    sandbox,
+    cwd,
+    prompt_chars: prompt.length,
+    prompt_sha256: createHash("sha256").update(prompt).digest("hex"),
+    role_contract_mode: "runtime_json_v1",
+    stdout_tail: normalizeDiagnosticExcerpt(result.stdout, redactor, 800),
+    stderr_tail: normalizeDiagnosticExcerpt(result.stderr, redactor, 800),
+    raw_tail: normalizeDiagnosticExcerpt(result.rawMessage, redactor, 800),
+    error: normalizeDiagnosticExcerpt(result.error, redactor)
+  });
+  return diagnosticsPath;
+}
+
+function buildExecutorFailureMessage(
+  result: CodexJsonCallResult<CodexExecutorResponse>,
+  diagnosticsPath?: string,
+  diagnosticsWriteError?: string
+): string {
+  const redactor = new SecretRedactor(process.env);
+  const baseMessage =
+    normalizeDiagnosticExcerpt(result.error, redactor) ??
+    normalizeDiagnosticExcerpt(result.stderr, redactor) ??
+    "AI CLI execution failed";
+  const details: string[] = [];
+
+  if (diagnosticsPath) {
+    details.push(`diagnostics: ${diagnosticsPath}`);
+  }
+
+  if (diagnosticsWriteError) {
+    details.push(`diagnostics_write_error: ${diagnosticsWriteError}`);
+  }
+
+  return details.length > 0 ? `${baseMessage} | ${details.join(" | ")}` : baseMessage;
 }
 
 export function buildExecutorPrompt(input: ExecutorPromptInput, executorRoleDefinition: string): string {
@@ -252,6 +332,28 @@ export class ExecutorAgent {
     emitLog(options, `Executor Codex execution finished (ok=${aiResult.ok}).`);
 
     if (!aiResult.ok || !aiResult.data) {
+      let diagnosticsPath: string | undefined;
+      let diagnosticsWriteError: string | undefined;
+
+      try {
+        diagnosticsPath = await writeExecutorDiagnosticsArtifact(
+          options.paths.runsDir,
+          prompt,
+          aiResult,
+          this.sandbox,
+          this.workspaceRoot
+        );
+        emitLog(options, `Executor diagnostics artifact: ${diagnosticsPath}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        diagnosticsWriteError =
+          normalizeDiagnosticExcerpt(message, new SecretRedactor(process.env)) ??
+          "Unable to persist executor diagnostics";
+        emitLog(options, `Executor diagnostics artifact failed: ${diagnosticsWriteError}`);
+      }
+
+      const failureMessage = buildExecutorFailureMessage(aiResult, diagnosticsPath, diagnosticsWriteError);
+      emitLog(options, `Executor Error: ${failureMessage}`);
       options.guardrails.recordAction(0);
       return {
         actions: [
@@ -260,7 +362,7 @@ export class ExecutorAgent {
             args: { round: options.round },
             ok: false,
             output: aiResult.stdout,
-            error: aiResult.error ?? aiResult.stderr ?? "AI CLI execution failed"
+            error: failureMessage
           }
         ],
         toolResult: {
@@ -273,7 +375,7 @@ export class ExecutorAgent {
           },
           error: {
             type: "AIExecError",
-            message: aiResult.error ?? aiResult.stderr ?? "Unknown AI CLI execution error"
+            message: failureMessage
           },
           next_state_hint: "pause"
         }

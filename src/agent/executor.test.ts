@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import type { AppConfig } from "../config/env";
 import type { SubTask } from "../types/contracts";
+import { readJsonFile } from "../utils/fs";
 import { buildExecutorPrompt, ExecutorAgent, sanitizeCodexActionDetail } from "./executor";
 
 const sampleSubTask: SubTask = {
@@ -264,6 +265,204 @@ describe("ExecutorAgent", () => {
       expect(capturedIsolationGuide).toContain("Internal Runtime Agent Session");
       expect(capturedIsolationGuide).toContain("external skill catalogs");
       expect(capturedCwd).toBe(realWorkspaceRoot);
+    } finally {
+      process.chdir(originalCwd);
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("writes a redacted executor diagnostics artifact on AI CLI failure", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-executor-agent-debug-artifact-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    const runsDir = path.join(homeDir, "runs");
+    await fs.mkdir(runsDir, { recursive: true });
+    await fs.writeFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "# Executor Role\n\nCustom executor guidance.\n", "utf8");
+
+    const logs: string[] = [];
+    const originalSecret = process.env.AILOOP_EXECUTOR_TEST_SECRET;
+    process.env.AILOOP_EXECUTOR_TEST_SECRET = "supersecret123";
+
+    const longRawPayload = `{"partial":"${"x".repeat(1200)}","secret":"supersecret123","inline":"apiToken=supersecret123"}`;
+    const mockCodex = {
+      async runJson() {
+        return {
+          ok: false,
+          data: undefined,
+          rawMessage: longRawPayload,
+          stdout: `${"s".repeat(1100)} partial stdout supersecret123`,
+          stderr: "stderr apiToken=supersecret123 returned 502 Bad Gateway",
+          error: "AI CLI exited with code 7"
+        };
+      }
+    };
+    const stubTools = {
+      async initialize() {},
+      listTools() {
+        return [{ name: "read_file", description: "Reads a file." }];
+      },
+      getSkillManager() {
+        return {
+          getAvailableSkills() {
+            return [];
+          }
+        };
+      }
+    };
+    const guardrails = {
+      recordAction() {}
+    };
+
+    const originalCwd = process.cwd();
+    process.chdir(workspaceRoot);
+
+    try {
+      const agent = new ExecutorAgent(stubTools as never, makeConfig(homeDir), mockCodex as never);
+      const result = await agent.execute({
+        subTask: sampleSubTask,
+        round: 2,
+        goal: "Ship feature",
+        instructions: ["Keep scope minimal"],
+        guardrails: guardrails as never,
+        paths: {
+          homeDir,
+          runsDir,
+          taskPath: path.join(homeDir, "README.md"),
+          productRequirementsDirPath: path.join(homeDir, "product-requirements"),
+          activeRequirementPath: path.join(homeDir, "product-requirements/current.md"),
+          plannerRolePath: path.join(homeDir, "PLANNER_ROLE.md"),
+          productManagerRolePath: path.join(homeDir, "PRODUCT_MANAGER_ROLE.md"),
+          executorRolePath: path.join(homeDir, "EXECUTOR_ROLE.md"),
+          designerRolePath: path.join(homeDir, "DESIGNER_ROLE.md"),
+          evaluatorRolePath: path.join(homeDir, "EVALUATOR_ROLE.md"),
+          leaderRolePath: path.join(homeDir, "LEADER_ROLE.md"),
+          instructionsPath: path.join(homeDir, "instructions.queue.json"),
+          legacyInstructionsPath: path.join(homeDir, "instructions.queue.legacy.json"),
+          statePath: path.join(homeDir, "loop.state.json"),
+          legacyStatePath: path.join(homeDir, "loop.state.legacy.json"),
+          pidPath: path.join(homeDir, "engine.pid"),
+          stopFlagPath: path.join(homeDir, "STOP"),
+          pauseFlagPath: path.join(homeDir, "PAUSE"),
+          lockPath: path.join(homeDir, "engine.lock"),
+          dbPath: path.join(homeDir, "ailoop.db")
+        },
+        onLog: async (message) => {
+          logs.push(message);
+        }
+      });
+
+      expect(result.toolResult.status).toBe("failure");
+      expect(result.toolResult.error?.type).toBe("AIExecError");
+      expect(result.toolResult.error?.message).toMatch(/diagnostics: .*executor\.debug\.json/);
+      expect(result.toolResult.error?.message).toContain("AI CLI exited with code 7");
+      expect(result.actions[0]?.error).toBe(result.toolResult.error?.message);
+      expect(logs.some((message) => message.includes("Executor diagnostics artifact:"))).toBe(true);
+
+      const diagnosticsPath = result.toolResult.error?.message.match(/diagnostics: ([^|]+)/)?.[1]?.trim();
+      expect(diagnosticsPath).toBeTruthy();
+
+      const payload = await readJsonFile<Record<string, unknown>>(diagnosticsPath!, {});
+      expect(payload.exit_code).toBe(7);
+      expect(payload.timed_out).toBe(false);
+      expect(String(payload.stdout_tail || "")).toContain("[REDACTED]");
+      expect(String(payload.stdout_tail || "")).not.toContain("supersecret123");
+      expect(String(payload.stderr_tail || "")).toContain("apiToken=[REDACTED]");
+      expect(String(payload.raw_tail || "")).toContain("[REDACTED]");
+      expect(String(payload.raw_tail || "")).not.toContain("supersecret123");
+      expect(String(payload.raw_tail || "").length).toBeLessThan(longRawPayload.length);
+    } finally {
+      process.chdir(originalCwd);
+      if (originalSecret === undefined) {
+        delete process.env.AILOOP_EXECUTOR_TEST_SECRET;
+      } else {
+        process.env.AILOOP_EXECUTOR_TEST_SECRET = originalSecret;
+      }
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("preserves the AI CLI failure when diagnostics artifact writing fails", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-executor-agent-debug-write-failure-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    const runsDir = path.join(homeDir, "runs-blocked");
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(runsDir, "not a directory\n", "utf8");
+    await fs.writeFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "# Executor Role\n\nCustom executor guidance.\n", "utf8");
+
+    const logs: string[] = [];
+    const mockCodex = {
+      async runJson() {
+        return {
+          ok: false,
+          data: undefined,
+          rawMessage: "",
+          stdout: "",
+          stderr: "stderr output",
+          error: "AI CLI exited with code 9"
+        };
+      }
+    };
+    const stubTools = {
+      async initialize() {},
+      listTools() {
+        return [{ name: "read_file", description: "Reads a file." }];
+      },
+      getSkillManager() {
+        return {
+          getAvailableSkills() {
+            return [];
+          }
+        };
+      }
+    };
+    const guardrails = {
+      recordAction() {}
+    };
+
+    const originalCwd = process.cwd();
+    process.chdir(workspaceRoot);
+
+    try {
+      const agent = new ExecutorAgent(stubTools as never, makeConfig(homeDir), mockCodex as never);
+      const result = await agent.execute({
+        subTask: sampleSubTask,
+        round: 2,
+        goal: "Ship feature",
+        instructions: ["Keep scope minimal"],
+        guardrails: guardrails as never,
+        paths: {
+          homeDir,
+          runsDir,
+          taskPath: path.join(homeDir, "README.md"),
+          productRequirementsDirPath: path.join(homeDir, "product-requirements"),
+          activeRequirementPath: path.join(homeDir, "product-requirements/current.md"),
+          plannerRolePath: path.join(homeDir, "PLANNER_ROLE.md"),
+          productManagerRolePath: path.join(homeDir, "PRODUCT_MANAGER_ROLE.md"),
+          executorRolePath: path.join(homeDir, "EXECUTOR_ROLE.md"),
+          designerRolePath: path.join(homeDir, "DESIGNER_ROLE.md"),
+          evaluatorRolePath: path.join(homeDir, "EVALUATOR_ROLE.md"),
+          leaderRolePath: path.join(homeDir, "LEADER_ROLE.md"),
+          instructionsPath: path.join(homeDir, "instructions.queue.json"),
+          legacyInstructionsPath: path.join(homeDir, "instructions.queue.legacy.json"),
+          statePath: path.join(homeDir, "loop.state.json"),
+          legacyStatePath: path.join(homeDir, "loop.state.legacy.json"),
+          pidPath: path.join(homeDir, "engine.pid"),
+          stopFlagPath: path.join(homeDir, "STOP"),
+          pauseFlagPath: path.join(homeDir, "PAUSE"),
+          lockPath: path.join(homeDir, "engine.lock"),
+          dbPath: path.join(homeDir, "ailoop.db")
+        },
+        onLog: async (message) => {
+          logs.push(message);
+        }
+      });
+
+      expect(result.toolResult.status).toBe("failure");
+      expect(result.toolResult.error?.type).toBe("AIExecError");
+      expect(result.toolResult.error?.message).toContain("AI CLI exited with code 9");
+      expect(result.toolResult.error?.message).toContain("diagnostics_write_error:");
+      expect(result.toolResult.error?.message).not.toContain("diagnostics:");
+      expect(result.actions[0]?.error).toBe(result.toolResult.error?.message);
+      expect(logs.some((message) => message.includes("Executor diagnostics artifact failed:"))).toBe(true);
     } finally {
       process.chdir(originalCwd);
       await fs.rm(workspaceRoot, { recursive: true, force: true });
