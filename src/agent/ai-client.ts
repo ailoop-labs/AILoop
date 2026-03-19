@@ -741,6 +741,15 @@ function detectAIProvider(bin: string): AIProvider {
   return "codex";
 }
 
+function configuredProviderInvocation(config: AIConfig): { bin: string; provider: AIProvider } {
+  // MVP path: execute only the explicitly configured provider binary for the request.
+  // Do not add shared preflight or alternate-provider probing here.
+  return {
+    bin: config.bin,
+    provider: detectAIProvider(config.bin)
+  };
+}
+
 function permissionModeForSandbox(sandbox: AISandboxMode, provider: AIProvider): string {
   // Claude-specific permission modes
   if (provider === "claude") {
@@ -1074,7 +1083,8 @@ export class AIClient {
       let interfaceRetryCount = 0;
       const processEnv = await buildProcessEnv(this.config, options.cwd);
       const invocationCwd = await prepareInvocationCwd(tempDir, options);
-      const provider = detectAIProvider(this.config.bin);
+      const configuredInvocation = configuredProviderInvocation(this.config);
+      const provider = configuredInvocation.provider;
       const skipGitRepoCheck = provider === "codex" ? !(await isValidGitRepository(invocationCwd)) : false;
       let previousSessionId: string | null = null;
 
@@ -1106,7 +1116,7 @@ export class AIClient {
         });
         const stdin = provider === "claude" || provider === "codex" ? attemptOptions.prompt : undefined;
         const runResult = await this.processRunner(
-          this.config.bin,
+          configuredInvocation.bin,
           args,
           invocationCwd,
           timeoutMs,

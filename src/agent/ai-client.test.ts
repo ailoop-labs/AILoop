@@ -1,5 +1,16 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, test } from "bun:test";
-import { PROCESS_TIMEOUT_GRACE_MS, runProcess } from "./ai-client";
+import { AIClient, PROCESS_TIMEOUT_GRACE_MS, type ProcessRunner, runProcess } from "./ai-client";
+
+function outputPathFromArgs(args: string[]): string {
+  const outputIndex = args.findIndex((item) => item === "-o");
+  if (outputIndex < 0 || outputIndex + 1 >= args.length) {
+    throw new Error("output path was not found in AI client args");
+  }
+  return args[outputIndex + 1] ?? "";
+}
 
 describe("runProcess timeout handling", () => {
   test("captures final output from a process that exits during the SIGTERM grace window", async () => {
@@ -66,5 +77,65 @@ describe("runProcess timeout handling", () => {
     expect(result.timing?.sigtermSentAfterMs).toBeGreaterThanOrEqual(50);
     expect(result.timing?.sigkillSentAfterMs).toBeGreaterThanOrEqual(50 + PROCESS_TIMEOUT_GRACE_MS);
     expect(result.timing?.requiredSigkill).toBe(true);
+  });
+});
+
+describe("AIClient.runJson configured provider execution", () => {
+  test("invokes only the configured CLI binary on a successful JSON call", async () => {
+    const configuredBin = "/mock/bin/custom-codex";
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-ai-client-single-provider-"));
+    const invocations: Array<{ cmd: string; args: string[] }> = [];
+
+    try {
+      const runner: ProcessRunner = async (cmd, args) => {
+        invocations.push({ cmd, args: [...args] });
+        await fs.writeFile(outputPathFromArgs(args), '{"status":"success"}', "utf8");
+        return {
+          code: 0,
+          stdout: "",
+          stderr: ""
+        };
+      };
+
+      const client = new AIClient(
+        {
+          bin: configuredBin,
+          model: "",
+          profile: "",
+          plannerSandbox: "read-only",
+          executorSandbox: "workspace-write",
+          evaluatorSandbox: "workspace-write",
+          timeoutMs: 1000,
+          llmEvaluatorDimensions: [],
+          llmEvaluatorMinPassScore: 75
+        },
+        runner
+      );
+
+      const result = await client.runJson<{ status: string }>({
+        prompt: "Return JSON",
+        schema: {
+          type: "object",
+          properties: {
+            status: { type: "string" }
+          },
+          required: ["status"],
+          additionalProperties: false
+        },
+        cwd: workspaceDir,
+        sandbox: "read-only",
+        maxRetries: 0
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.data).toEqual({ status: "success" });
+      expect(invocations).toHaveLength(1);
+      expect(invocations[0]).toEqual({
+        cmd: configuredBin,
+        args: expect.arrayContaining(["exec", "--json"])
+      });
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
   });
 });
