@@ -35,6 +35,7 @@ export interface ProcessRunResult {
   stdout: string;
   stderr: string;
   timedOut?: boolean;
+  killedGracefully?: boolean;
 }
 
 export type ProcessRunner = (
@@ -440,11 +441,28 @@ async function runProcess(
     let stderr = "";
     let finished = false;
 
+    // Timeout handler: SIGTERM first, then SIGKILL after grace period
+    const GRACE_PERIOD_MS = 5000;
     let timedOut = false;
+    let killedGracefully = false;
+
     const timer = setTimeout(() => {
       if (!finished) {
         timedOut = true;
+        // First attempt graceful termination with SIGTERM
         child.kill("SIGTERM");
+        killedGracefully = true;
+
+        // After grace period, escalate to SIGKILL if still running
+        setTimeout(() => {
+          if (!finished) {
+            try {
+              child.kill("SIGKILL");
+            } catch {
+              // Process may have already exited
+            }
+          }
+        }, GRACE_PERIOD_MS);
       }
     }, timeoutMs);
 
@@ -617,16 +635,31 @@ export class CodexClient {
         }
 
         const errorMessage = runResult.timedOut
-          ? `Codex process timed out after ${timeoutMs}ms`
+          ? `AI CLI process timed out after ${timeoutMs}ms`
           : runResult.code !== 0
-            ? `Codex exited with code ${runResult.code}`
-            : "Codex response was not valid JSON";
+            ? `AI CLI exited with code ${runResult.code}`
+            : "AI CLI response was not valid JSON";
+
+        // Capture diagnostic context for timeout failures
+        const diagnosticContext = runResult.timedOut ? {
+          timeoutMs,
+          model: this.config.model || "default",
+          promptLength: basePrompt.length,
+          partialStdoutLength: runResult.stdout.length,
+          partialStderrLength: runResult.stderr.length,
+          exitCode: runResult.code,
+          killedGracefully: runResult.killedGracefully,
+          attempt
+        } : null;
+
         const failure: CodexJsonCallResult<T> = {
           ok: false,
           rawMessage,
           stdout: combinedStdout,
           stderr: combinedStderr,
-          error: errorMessage
+          error: diagnosticContext
+            ? `${errorMessage} | diagnostics: model=${diagnosticContext.model}, promptLen=${diagnosticContext.promptLength}, partialStdout=${diagnosticContext.partialStdoutLength} chars, partialStderr=${diagnosticContext.partialStderrLength} chars, gracefulKill=${diagnosticContext.killedGracefully}, attempt=${diagnosticContext.attempt}`
+            : errorMessage
         };
 
         const shouldRetryByCodexPolicy = attempt < maxRetries && isRetryableFailure(errorMessage, Boolean(runResult.timedOut));

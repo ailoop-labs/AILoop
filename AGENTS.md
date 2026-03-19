@@ -16,10 +16,12 @@ To understand the project, always consult these files in order:
 
 ## 2. Documentation-Driven Development (DoD) Mandate
 
-This project strictly follows **Documentation-Driven Development**. 
+This project strictly follows **Documentation-Driven Development**.
 - The documentation (`README.md`, `ARCHITECTURE.md`, `AILOOP_ENGINE_WORKFLOW.md`, and plans in `docs/plans/`) **always precedes the code**.
 - **Do not trust the codebase over the documentation.** If the code contradicts the documentation, the code is wrong. You must fix the code to align with the documented intent.
 - Before implementing a new feature, verify that it has been fully specified in the architecture or plan documents. If it is underspecified, stop and ask the human operator for clarification.
+
+> **⚠️ CCB Principle (Outcome First):** If documentation is part of the solution, it must accompany code changes, not replace them. Documentation alone does not satisfy the "Outcome First" principle. Always implement actual code changes alongside any documentation updates.
 
 ## 3. Coding Philosophy & Constraints
 
