@@ -5,9 +5,11 @@ AILoop configuration has been fully converged onto the workspace SQLite database
 ## Current State
 
 - `loadConfig()` resolves application settings from the workspace database only.
+- Runtime loop settings such as interval, max cycles, runtime budgets, and evaluator retry limits are also stored in the same database-backed `config` table.
 - The console server reads admin token metadata from the database instead of process environment.
 - Runtime AI CLI settings are stored as `AILOOP_AI_CLI_*` in the database and injected into new loop processes when they start.
 - Compatibility `AILOOP_CODEX_*` variables are still exported to child processes, but only as derived compatibility output.
+- Legacy `./.ailoop/runtime-config.json` files are migrated away and should no longer be treated as a live config source.
 - `AILOOP_HOME` is no longer treated as an editable configuration key.
 
 ## Operational Impact

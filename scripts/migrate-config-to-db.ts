@@ -2,10 +2,13 @@
 /**
  * Legacy entrypoint retained for operator convenience.
  * Configuration is already database-only; this script now removes stale
- * legacy config keys from the current workspace database.
+ * legacy config keys from the current workspace database and deletes the
+ * deprecated runtime-config.json file if it exists.
  */
 
-import { resolveAiloopHome, resolveConfigDbPath } from "../src/config/env";
+import path from "node:path";
+import { loadConfig, resolveAiloopHome, resolveConfigDbPath } from "../src/config/env";
+import { readRuntimeLoopConfig } from "../src/config/runtime";
 import { DatabaseManager } from "../src/utils/db";
 
 const LEGACY_KEYS = [
@@ -22,9 +25,13 @@ const LEGACY_KEYS = [
 async function main() {
   const homeDir = resolveAiloopHome();
   const dbPath = resolveConfigDbPath(homeDir);
+  const runtimeConfigPath = path.join(homeDir, "runtime-config.json");
+  const config = loadConfig();
   const db = new DatabaseManager({ dbPath });
 
   try {
+    await readRuntimeLoopConfig(config);
+
     for (const key of LEGACY_KEYS) {
       await db.deleteConfig(key);
     }
@@ -34,6 +41,7 @@ async function main() {
     for (const key of LEGACY_KEYS) {
       console.log(`  - ${key}`);
     }
+    console.log(`Migrated and removed deprecated runtime config file if present: ${runtimeConfigPath}`);
   } finally {
     db.close();
   }

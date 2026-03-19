@@ -3,10 +3,19 @@ import path from "node:path";
 import type { AppConfig, CodexSandboxMode } from "./env";
 import { DEFAULT_LLM_EVALUATOR_DIMENSIONS } from "./env";
 import type { BudgetLimits, EvaluationDimension } from "../types/contracts";
-import { readJsonFile, writeJsonFile } from "../utils/fs";
+import { readJsonFile } from "../utils/fs";
 import { DatabaseManager } from "../utils/db";
 
 const RUNTIME_CONFIG_FILENAME = "runtime-config.json";
+const LOOP_DB_KEYS = {
+  intervalSeconds: "AILOOP_INTERVAL_SECONDS",
+  maxCycles: "AILOOP_MAX_CYCLES",
+  exitOnError: "AILOOP_EXIT_ON_ERROR",
+  evaluatorReworkMaxAttempts: "AILOOP_EVAL_REWORK_MAX_ATTEMPTS",
+  budgetUsdPerRound: "AILOOP_BUDGET_USD_PER_ROUND",
+  budgetTimeMinutes: "AILOOP_BUDGET_TIME_MINUTES",
+  budgetActions: "AILOOP_BUDGET_ACTIONS"
+} as const;
 const AI_DB_KEYS = {
   bin: "AILOOP_AI_CLI_BIN",
   model: "AILOOP_AI_CLI_MODEL",
@@ -144,16 +153,72 @@ function parseDimensionsString(value: string | null, fallback: EvaluationDimensi
   return Array.from(new Set(parsed));
 }
 
-function serializeRuntimeLoopConfig(runtime: RuntimeLoopConfig): Omit<RuntimeLoopConfig, "codex"> {
-  return {
-    intervalSeconds: runtime.intervalSeconds,
-    maxCycles: runtime.maxCycles,
-    exitOnError: runtime.exitOnError,
-    evaluatorReworkMaxAttempts: runtime.evaluatorReworkMaxAttempts,
-    budget: {
-      ...runtime.budget
-    }
-  };
+async function readLoopConfigFromDb(
+  baseConfig: AppConfig,
+  fallback: Omit<RuntimeLoopConfig, "codex">
+): Promise<Omit<RuntimeLoopConfig, "codex">> {
+  const db = new DatabaseManager({ dbPath: path.join(baseConfig.homeDir, "ailoop.db") });
+
+  try {
+    const [
+      intervalSeconds,
+      maxCycles,
+      exitOnError,
+      evaluatorReworkMaxAttempts,
+      budgetUsdPerRound,
+      budgetTimeMinutes,
+      budgetActions
+    ] = await Promise.all([
+      db.getConfig(LOOP_DB_KEYS.intervalSeconds),
+      db.getConfig(LOOP_DB_KEYS.maxCycles),
+      db.getConfig(LOOP_DB_KEYS.exitOnError),
+      db.getConfig(LOOP_DB_KEYS.evaluatorReworkMaxAttempts),
+      db.getConfig(LOOP_DB_KEYS.budgetUsdPerRound),
+      db.getConfig(LOOP_DB_KEYS.budgetTimeMinutes),
+      db.getConfig(LOOP_DB_KEYS.budgetActions)
+    ]);
+
+    return {
+      intervalSeconds: asInteger(intervalSeconds, fallback.intervalSeconds, 1, 86_400),
+      maxCycles: asInteger(maxCycles, fallback.maxCycles, 0, 1_000_000),
+      exitOnError: asBoolean(exitOnError, fallback.exitOnError),
+      evaluatorReworkMaxAttempts: asInteger(
+        evaluatorReworkMaxAttempts,
+        fallback.evaluatorReworkMaxAttempts,
+        0,
+        5
+      ),
+      budget: {
+        usdPerRound: asNumber(budgetUsdPerRound, fallback.budget.usdPerRound, 0, 1_000_000),
+        timeMinutes: asNumber(budgetTimeMinutes, fallback.budget.timeMinutes, 1, 1_440),
+        actions: asInteger(budgetActions, fallback.budget.actions, 1, 1_000_000)
+      }
+    };
+  } finally {
+    db.close();
+  }
+}
+
+async function writeLoopConfigToDb(
+  baseConfig: AppConfig,
+  runtimeConfig: Omit<RuntimeLoopConfig, "codex">
+): Promise<void> {
+  const db = new DatabaseManager({ dbPath: path.join(baseConfig.homeDir, "ailoop.db") });
+
+  try {
+    await db.setConfig(LOOP_DB_KEYS.intervalSeconds, String(runtimeConfig.intervalSeconds));
+    await db.setConfig(LOOP_DB_KEYS.maxCycles, String(runtimeConfig.maxCycles));
+    await db.setConfig(LOOP_DB_KEYS.exitOnError, runtimeConfig.exitOnError ? "1" : "0");
+    await db.setConfig(
+      LOOP_DB_KEYS.evaluatorReworkMaxAttempts,
+      String(runtimeConfig.evaluatorReworkMaxAttempts)
+    );
+    await db.setConfig(LOOP_DB_KEYS.budgetUsdPerRound, String(runtimeConfig.budget.usdPerRound));
+    await db.setConfig(LOOP_DB_KEYS.budgetTimeMinutes, String(runtimeConfig.budget.timeMinutes));
+    await db.setConfig(LOOP_DB_KEYS.budgetActions, String(runtimeConfig.budget.actions));
+  } finally {
+    db.close();
+  }
 }
 
 async function readAiCliConfigFromDb(
@@ -233,6 +298,18 @@ async function clearAiCliConfigFromDb(baseConfig: AppConfig): Promise<void> {
 
   try {
     for (const key of [...Object.values(AI_DB_KEYS), ...LEGACY_AI_DB_KEYS]) {
+      await db.deleteConfig(key);
+    }
+  } finally {
+    db.close();
+  }
+}
+
+async function clearLoopConfigFromDb(baseConfig: AppConfig): Promise<void> {
+  const db = new DatabaseManager({ dbPath: path.join(baseConfig.homeDir, "ailoop.db") });
+
+  try {
+    for (const key of Object.values(LOOP_DB_KEYS)) {
       await db.deleteConfig(key);
     }
   } finally {
@@ -321,20 +398,51 @@ function mergeRuntimePatch(base: RuntimeLoopConfig, patch: unknown): RuntimeLoop
 export async function readRuntimeLoopConfig(baseConfig: AppConfig): Promise<RuntimeLoopConfig> {
   const defaults = extractRuntimeLoopConfig(baseConfig);
   const filePath = runtimeConfigPath(baseConfig.homeDir);
-  const raw = await readJsonFile<unknown>(filePath, serializeRuntimeLoopConfig(defaults));
-  const normalized = normalizeRuntimeLoopConfig(raw, defaults);
+  const legacyFileConfig = await readJsonFile<unknown>(filePath, null);
+  if (legacyFileConfig !== null) {
+    const normalizedLegacy = normalizeRuntimeLoopConfig(legacyFileConfig, defaults);
+    await writeLoopConfigToDb(baseConfig, {
+      intervalSeconds: normalizedLegacy.intervalSeconds,
+      maxCycles: normalizedLegacy.maxCycles,
+      exitOnError: normalizedLegacy.exitOnError,
+      evaluatorReworkMaxAttempts: normalizedLegacy.evaluatorReworkMaxAttempts,
+      budget: {
+        ...normalizedLegacy.budget
+      }
+    });
+    await fs.rm(filePath, { force: true });
+  }
+
+  const loopConfig = await readLoopConfigFromDb(baseConfig, {
+    intervalSeconds: defaults.intervalSeconds,
+    maxCycles: defaults.maxCycles,
+    exitOnError: defaults.exitOnError,
+    evaluatorReworkMaxAttempts: defaults.evaluatorReworkMaxAttempts,
+    budget: {
+      ...defaults.budget
+    }
+  });
 
   return {
-    ...normalized,
-    codex: await readAiCliConfigFromDb(baseConfig, normalized.codex)
+    ...loopConfig,
+    codex: await readAiCliConfigFromDb(baseConfig, defaults.codex)
   };
 }
 
 export async function saveRuntimeLoopConfig(baseConfig: AppConfig, next: unknown): Promise<RuntimeLoopConfig> {
   const defaults = extractRuntimeLoopConfig(baseConfig);
   const normalized = normalizeRuntimeLoopConfig(next, defaults);
-  await writeJsonFile(runtimeConfigPath(baseConfig.homeDir), serializeRuntimeLoopConfig(normalized));
+  await writeLoopConfigToDb(baseConfig, {
+    intervalSeconds: normalized.intervalSeconds,
+    maxCycles: normalized.maxCycles,
+    exitOnError: normalized.exitOnError,
+    evaluatorReworkMaxAttempts: normalized.evaluatorReworkMaxAttempts,
+    budget: {
+      ...normalized.budget
+    }
+  });
   await writeAiCliConfigToDb(baseConfig, normalized.codex);
+  await fs.rm(runtimeConfigPath(baseConfig.homeDir), { force: true });
   return readRuntimeLoopConfig(baseConfig);
 }
 
@@ -347,6 +455,7 @@ export async function patchRuntimeLoopConfig(baseConfig: AppConfig, patch: unkno
 export async function resetRuntimeLoopConfig(baseConfig: AppConfig): Promise<RuntimeLoopConfig> {
   const filePath = runtimeConfigPath(baseConfig.homeDir);
   await fs.rm(filePath, { force: true });
+  await clearLoopConfigFromDb(baseConfig);
   await clearAiCliConfigFromDb(baseConfig);
   return readRuntimeLoopConfig(baseConfig);
 }

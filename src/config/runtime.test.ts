@@ -82,24 +82,11 @@ describe("runtime codex bin persistence", () => {
     const db = new DatabaseManager({ dbPath: path.join(homeDir, "ailoop.db") });
 
     try {
+      await db.setConfig("AILOOP_INTERVAL_SECONDS", "75");
+      await db.setConfig("AILOOP_BUDGET_ACTIONS", "44");
       await db.setConfig("AILOOP_AI_CLI_BIN", "/opt/homebrew/bin/claude");
       await db.setConfig("AILOOP_AI_CLI_MODEL", "claude-opus-4-6");
       await db.setConfig("AILOOP_AI_CLI_TIMEOUT_MS", "600000");
-
-      await fs.writeFile(
-        path.join(homeDir, "runtime-config.json"),
-        JSON.stringify(
-          {
-            intervalSeconds: 75,
-            budget: {
-              actions: 44
-            }
-          },
-          null,
-          2
-        ),
-        "utf8"
-      );
 
       await expect(readRuntimeLoopConfig(config)).resolves.toMatchObject({
         intervalSeconds: 75,
@@ -117,6 +104,64 @@ describe("runtime codex bin persistence", () => {
     } finally {
       db.close();
     }
+  });
+
+  test("readRuntimeLoopConfig migrates legacy runtime-config.json loop settings into the database", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-runtime-config-migrate-"));
+    tempDirs.add(homeDir);
+
+    const config = {
+      ...makeConfig(),
+      homeDir
+    };
+
+    await fs.writeFile(
+      path.join(homeDir, "runtime-config.json"),
+      JSON.stringify(
+        {
+          intervalSeconds: 60,
+          maxCycles: 15,
+          exitOnError: false,
+          evaluatorReworkMaxAttempts: 3,
+          budget: {
+            usdPerRound: 0.1,
+            timeMinutes: 10,
+            actions: 10
+          }
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const runtime = await readRuntimeLoopConfig(config);
+
+    expect(runtime).toMatchObject({
+      intervalSeconds: 60,
+      maxCycles: 15,
+      exitOnError: false,
+      evaluatorReworkMaxAttempts: 3,
+      budget: {
+        usdPerRound: 0.1,
+        timeMinutes: 10,
+        actions: 10
+      }
+    });
+
+    const db = new DatabaseManager({ dbPath: path.join(homeDir, "ailoop.db") });
+    try {
+      await expect(db.getConfig("AILOOP_INTERVAL_SECONDS")).resolves.toBe("60");
+      await expect(db.getConfig("AILOOP_MAX_CYCLES")).resolves.toBe("15");
+      await expect(db.getConfig("AILOOP_EVAL_REWORK_MAX_ATTEMPTS")).resolves.toBe("3");
+      await expect(db.getConfig("AILOOP_BUDGET_USD_PER_ROUND")).resolves.toBe("0.1");
+      await expect(db.getConfig("AILOOP_BUDGET_TIME_MINUTES")).resolves.toBe("10");
+      await expect(db.getConfig("AILOOP_BUDGET_ACTIONS")).resolves.toBe("10");
+    } finally {
+      db.close();
+    }
+
+    await expect(fs.stat(path.join(homeDir, "runtime-config.json"))).rejects.toThrow();
   });
 
   test("saveRuntimeLoopConfig persists AI CLI overrides in the database instead of runtime-config.json", async () => {
@@ -140,6 +185,13 @@ describe("runtime codex bin persistence", () => {
     const db = new DatabaseManager({ dbPath: path.join(homeDir, "ailoop.db") });
 
     try {
+      await expect(db.getConfig("AILOOP_INTERVAL_SECONDS")).resolves.toBe("75");
+      await expect(db.getConfig("AILOOP_MAX_CYCLES")).resolves.toBe("0");
+      await expect(db.getConfig("AILOOP_EXIT_ON_ERROR")).resolves.toBe("0");
+      await expect(db.getConfig("AILOOP_EVAL_REWORK_MAX_ATTEMPTS")).resolves.toBe("1");
+      await expect(db.getConfig("AILOOP_BUDGET_USD_PER_ROUND")).resolves.toBe("0.5");
+      await expect(db.getConfig("AILOOP_BUDGET_TIME_MINUTES")).resolves.toBe("60");
+      await expect(db.getConfig("AILOOP_BUDGET_ACTIONS")).resolves.toBe("30");
       await expect(db.getConfig("AILOOP_AI_CLI_BIN")).resolves.toBe("/opt/homebrew/bin/claude");
       await expect(db.getConfig("AILOOP_AI_CLI_MODEL")).resolves.toBe("claude-opus-4-6");
       await expect(db.getConfig("AILOOP_AI_CLI_TIMEOUT_MS")).resolves.toBe("600000");
@@ -147,8 +199,7 @@ describe("runtime codex bin persistence", () => {
       db.close();
     }
 
-    const raw = JSON.parse(await fs.readFile(path.join(homeDir, "runtime-config.json"), "utf8")) as Record<string, unknown>;
-    expect(raw).not.toHaveProperty("codex");
+    await expect(fs.stat(path.join(homeDir, "runtime-config.json"))).rejects.toThrow();
   });
 
   test("patchRuntimeLoopConfig persists partial overrides without dropping defaults", async () => {
@@ -208,9 +259,16 @@ describe("runtime codex bin persistence", () => {
       }
     });
 
+    await fs.writeFile(
+      path.join(homeDir, "runtime-config.json"),
+      JSON.stringify({ intervalSeconds: 999 }, null, 2),
+      "utf8"
+    );
+
     const reset = await resetRuntimeLoopConfig(config);
 
     expect(reset).toEqual(extractRuntimeLoopConfig(config));
     expect(await readRuntimeLoopConfig(config)).toEqual(extractRuntimeLoopConfig(config));
+    await expect(fs.stat(path.join(homeDir, "runtime-config.json"))).rejects.toThrow();
   });
 });

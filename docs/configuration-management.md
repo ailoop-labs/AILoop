@@ -5,8 +5,10 @@ AILoop now treats the workspace database as the only configuration source of tru
 ## Source of Truth
 
 - Runtime configuration is stored in `./.ailoop/ailoop.db`.
+- Loop runtime settings such as `intervalSeconds`, `maxCycles`, runtime budgets, and evaluator retry limits are stored in the `config` table alongside AI CLI settings.
 - `loadConfig()` and the console server read from that database only.
 - `.env` and ordinary `AILOOP_*` process environment variables are not used to resolve application configuration.
+- The legacy `./.ailoop/runtime-config.json` file is no longer authoritative. If present, it is migrated into the database and removed.
 - The workspace home is fixed to `./.ailoop` for the current working directory. `AILOOP_HOME` is no longer an editable config key.
 
 ## What Still Uses Process Environment
