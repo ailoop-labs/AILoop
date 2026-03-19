@@ -713,7 +713,7 @@ export class AIClient {
       const processEnv = await buildProcessEnv(this.config, options.cwd);
       const invocationCwd = await prepareInvocationCwd(tempDir, options);
       const provider = detectAIProvider(this.config.bin);
-      const skipGitRepoCheck = provider === "codex" ? !(await isValidGitRepository(options.cwd)) : false;
+      const skipGitRepoCheck = provider === "codex" ? !(await isValidGitRepository(invocationCwd)) : false;
       let previousSessionId: string | null = null;
 
       for (let attempt = 0; ; attempt += 1) {

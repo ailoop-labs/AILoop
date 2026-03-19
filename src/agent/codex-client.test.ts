@@ -245,6 +245,43 @@ describe("AIClient.runJson", () => {
     }
   });
 
+  test("adds skip-git-repo-check when session isolation moves Codex into a non-git scratch directory", async () => {
+    const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-ai-client-session-git-repo-"));
+    execFileSync("git", ["init"], { cwd: repoDir, stdio: "ignore" });
+    let capturedArgs: string[] = [];
+
+    try {
+      const runner: ProcessRunner = async (_cmd, args) => {
+        capturedArgs = [...args];
+        await fs.writeFile(outputPathFromArgs(args), '{"status":"success"}', "utf8");
+        return {
+          code: 0,
+          stdout: "",
+          stderr: ""
+        };
+      };
+
+      const client = new AIClient(createCodexConfig(), runner);
+      const result = await client.runJson<{ status: string }>({
+        prompt: "Return JSON",
+        schema: { type: "object" },
+        cwd: repoDir,
+        sandbox: "read-only",
+        maxRetries: 0,
+        sessionIsolation: {
+          enabled: true,
+          agentsGuide: "Use runtime-safe instructions only."
+        }
+      });
+
+      expect(result.ok).toBe(true);
+      expect(capturedArgs).toContain("--json");
+      expect(capturedArgs).toContain("--skip-git-repo-check");
+    } finally {
+      await fs.rm(repoDir, { recursive: true, force: true });
+    }
+  });
+
   test("uses resume with the prior session id on retryable Codex failures", async () => {
     const prompts: string[] = [];
     const capturedArgv: string[][] = [];
