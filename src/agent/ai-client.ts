@@ -92,6 +92,7 @@ type SleepFn = (ms: number) => Promise<void>;
 const INTERFACE_ERROR_RETRY_DELAY_MS = 60_000;
 const INTERFACE_ERROR_MAX_RETRIES = 5;
 export const PROCESS_TIMEOUT_GRACE_MS = 250;
+const CODEX_RESUME_OUTPUT_FLAG = "--output-last-message";
 const UUID_LIKE_PATTERN =
   /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/i;
 
@@ -727,6 +728,27 @@ function shouldResumeCodexSession(lastFailure: AIJsonCallResult<unknown> | null)
   return true;
 }
 
+function buildCodexResumeCompatibilityError(stderr: string): string | null {
+  const normalized = stderr.toLowerCase();
+  if (!normalized.includes("usage: codex exec resume")) {
+    return null;
+  }
+
+  if (
+    normalized.includes("unexpected argument '--output-last-message'") ||
+    normalized.includes("unexpected argument '-o'")
+  ) {
+    const detail = stderr.trim() ? ` stderr: ${stderr.trim()}` : "";
+    return (
+      `Codex resume output capture is unsupported by this CLI. ` +
+      `Expected \`codex exec resume --json ${CODEX_RESUME_OUTPUT_FLAG} <FILE> <SESSION_ID> [PROMPT]\`.` +
+      `${detail}`
+    );
+  }
+
+  return null;
+}
+
 function detectAIProvider(bin: string): AIProvider {
   const basename = path.basename(bin).toLowerCase();
   if (basename === "gemini" || basename.includes("gemini")) {
@@ -895,7 +917,7 @@ function buildArgs(
   args.push("--json");
 
   if (invocation.resumeSessionId) {
-    args.push("-o", outputPath);
+    args.push(CODEX_RESUME_OUTPUT_FLAG, outputPath);
   } else {
     args.push("--output-schema", schemaPath, "-o", outputPath);
   }
@@ -1188,13 +1210,17 @@ export class AIClient {
         }
 
         const codexErrorDetail = codexJsonl?.errorMessages.at(-1);
+        const codexResumeCompatibilityError =
+          provider === "codex" && resumeSessionId ? buildCodexResumeCompatibilityError(runResult.stderr) : null;
         const errorMessage = runResult.timedOut
           ? `AI CLI process timed out after ${timeoutMs}ms`
-          : runResult.code !== 0
-            ? codexErrorDetail
-              ? `AI CLI exited with code ${runResult.code} | detail: ${codexErrorDetail}`
-              : `AI CLI exited with code ${runResult.code}`
-            : "AI CLI response was not valid JSON";
+          : codexResumeCompatibilityError
+            ? codexResumeCompatibilityError
+            : runResult.code !== 0
+              ? codexErrorDetail
+                ? `AI CLI exited with code ${runResult.code} | detail: ${codexErrorDetail}`
+                : `AI CLI exited with code ${runResult.code}`
+              : "AI CLI response was not valid JSON";
         const failure: AIJsonCallResult<T> = {
           ok: false,
           rawMessage,

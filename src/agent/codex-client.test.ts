@@ -29,7 +29,7 @@ function createClaudeConfig(): CodexConfig {
 }
 
 function outputPathFromArgs(args: string[]): string {
-  const outputIndex = args.findIndex((item) => item === "-o");
+  const outputIndex = args.findIndex((item) => item === "-o" || item === "--output-last-message");
   if (outputIndex < 0 || outputIndex + 1 >= args.length) {
     throw new Error("output path was not found in codex args");
   }
@@ -282,59 +282,80 @@ describe("AIClient.runJson", () => {
     }
   });
 
-  test("uses resume with the prior session id on retryable Codex failures", async () => {
+  test("retries Codex resume with output-last-message instead of the round-76 output-schema contract", async () => {
     const prompts: string[] = [];
     const capturedArgv: string[][] = [];
-    const attempts = [
-      {
-        code: 0,
-        stdout: '{"type":"session.started","session_id":"123e4567-e89b-12d3-a456-426614174000"}\n',
-        stderr: "",
-        output: "{bad json"
-      },
-      {
-        code: 0,
-        stdout: '{"type":"turn.completed"}\n',
-        stderr: "",
-        output: '{"status":"success"}'
-      }
-    ];
+    const sessionId = "123e4567-e89b-12d3-a456-426614174000";
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-codex-resume-"));
 
-    const runner = (async function (_cmd, args) {
-      capturedArgv.push([...args]);
-      prompts.push((arguments[6] as string | undefined) ?? "");
-      const step = attempts.shift();
-      if (!step) {
+    try {
+      const runner = (async function (_cmd, args) {
+        capturedArgv.push([...args]);
+        prompts.push((arguments[6] as string | undefined) ?? "");
+
+        if (capturedArgv.length === 1) {
+          await fs.writeFile(outputPathFromArgs(args), "{bad json", "utf8");
+          return {
+            code: 0,
+            stdout: `{"type":"session.started","session_id":"${sessionId}"}\n`,
+            stderr: ""
+          };
+        }
+
+        if (capturedArgv.length === 2 && args.includes("--output-schema")) {
+          await fs.writeFile(outputPathFromArgs(args), "", "utf8");
+          return {
+            code: 2,
+            stdout: "",
+            stderr:
+              "error: unexpected argument '--output-schema' found\n\n" +
+              "  tip: a similar argument exists: '--output-last-message'\n\n" +
+              "Usage: codex exec resume --ephemeral --skip-git-repo-check --json --output-last-message <FILE> <SESSION_ID> [PROMPT]\n\n" +
+              "For more information, try '--help'."
+          };
+        }
+
+        if (capturedArgv.length === 2) {
+          await fs.writeFile(outputPathFromArgs(args), '{"status":"success"}', "utf8");
+          return {
+            code: 0,
+            stdout: '{"type":"turn.completed"}\n',
+            stderr: ""
+          };
+        }
+
         throw new Error("unexpected additional attempt");
-      }
-      await fs.writeFile(outputPathFromArgs(args), step.output, "utf8");
-      return {
-        code: step.code,
-        stdout: step.stdout,
-        stderr: step.stderr
-      };
-    }) as ProcessRunner;
+      }) as ProcessRunner;
 
-    const client = new AIClient(createCodexConfig(), runner);
-    const result = await client.runJson<{ status: string }>({
-      prompt: "Return JSON",
-      schema: { type: "object" },
-      cwd: process.cwd(),
-      sandbox: "read-only",
-      maxRetries: 1
-    });
+      const client = new AIClient(createCodexConfig(), runner);
+      const result = await client.runJson<{ status: string }>({
+        prompt: "Return JSON",
+        schema: { type: "object" },
+        cwd: workspaceDir,
+        sandbox: "read-only",
+        maxRetries: 1
+      });
 
-    expect(result.ok).toBe(true);
-    expect(capturedArgv).toHaveLength(2);
-    expect(capturedArgv[0]).toEqual(expect.arrayContaining(["exec", "--json"]));
-    expect(capturedArgv[1][0]).toBe("exec");
-    expect(capturedArgv[1][1]).toBe("resume");
-    expect(capturedArgv[1]).toContain("123e4567-e89b-12d3-a456-426614174000");
-    expect(capturedArgv[1]).not.toContain("--output-schema");
-    expect(capturedArgv[1]).toContain("-o");
-    expect(capturedArgv[1].at(-1)).toBe("-");
-    expect(prompts[1]).toContain("Retry attempt 1");
-    expect(prompts[1]).toContain("IMPORTANT: You MUST return a single JSON object");
+      expect(result.ok).toBe(true);
+      expect(capturedArgv).toHaveLength(2);
+      expect(capturedArgv[0]).toEqual(expect.arrayContaining(["exec", "--json", "--output-schema"]));
+      expect(capturedArgv[1]).toEqual([
+        "exec",
+        "resume",
+        sessionId,
+        "--ephemeral",
+        "--skip-git-repo-check",
+        "--json",
+        "--output-last-message",
+        outputPathFromArgs(capturedArgv[1]),
+        "-"
+      ]);
+      expect(capturedArgv[1]).not.toContain("--output-schema");
+      expect(prompts[1]).toContain("Retry attempt 1");
+      expect(prompts[1]).toContain("IMPORTANT: You MUST return a single JSON object");
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
   });
 
   test("extracts structured error details from Codex JSONL events", async () => {
