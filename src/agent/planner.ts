@@ -4,7 +4,13 @@ import type { AppConfig } from "../config/env";
 import type { PlannerContext, SubTask } from "../types/contracts";
 import { writeJsonFile } from "../utils/fs";
 import { redactJsonStrings, SecretRedactor } from "../utils/redaction";
-import { AIClient, type AIJsonCallResult, type JsonSchema } from "./ai-client";
+import {
+  AIClient,
+  type AIJsonCallResult,
+  type AIJsonPartialProgressCheckpoint,
+  type AIProcessTimingBreakdown,
+  type JsonSchema
+} from "./ai-client";
 import { loadProjectRoleDefinition } from "./role-definitions";
 import { buildInternalRuntimeSessionGuide } from "./runtime-policy";
 import type { ToolRegistry } from "./tool-registry";
@@ -143,6 +149,78 @@ function parsePlannerExitCode(error?: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
+function normalizeTimingBreakdown(value: AIProcessTimingBreakdown | null | undefined): Record<string, unknown> | null {
+  if (!value) {
+    return null;
+  }
+
+  return {
+    timeout_ms: value.timeoutMs,
+    total_runtime_ms: value.totalRuntimeMs,
+    sigterm_sent_after_ms: value.sigtermSentAfterMs,
+    sigkill_sent_after_ms: value.sigkillSentAfterMs,
+    exit_observed_after_ms: value.exitObservedAfterMs,
+    shutdown_after_sigterm_ms: value.shutdownAfterSigtermMs,
+    required_sigkill: value.requiredSigkill
+  };
+}
+
+function normalizePartialOutput(
+  checkpoint: AIJsonPartialProgressCheckpoint | null | undefined,
+  redactor: SecretRedactor
+): Record<string, unknown> | null {
+  if (!checkpoint) {
+    return null;
+  }
+
+  const redacted = redactJsonStrings(checkpoint, redactor);
+  return {
+    source: typeof redacted.source === "string" ? redacted.source : null,
+    kind: typeof redacted.kind === "string" ? redacted.kind : null,
+    event_type: typeof redacted.eventType === "string" ? redacted.eventType : null,
+    session_id: typeof redacted.sessionId === "string" ? redacted.sessionId : null,
+    excerpt: normalizeDiagnosticExcerpt(typeof redacted.excerpt === "string" ? redacted.excerpt : undefined, redactor)
+  };
+}
+
+function normalizePlannerEnvironmentState(
+  sandbox: AppConfig["ai"]["plannerSandbox"],
+  cwd: string
+): Record<string, unknown> {
+  return {
+    sandbox,
+    cwd,
+    process_cwd: process.cwd(),
+    node_env: process.env.NODE_ENV ?? null,
+    pid: process.pid
+  };
+}
+
+function buildPlannerTimeoutContext(
+  result: AIJsonCallResult<unknown>,
+  sandbox: AppConfig["ai"]["plannerSandbox"],
+  cwd: string
+): Record<string, unknown> {
+  const redactor = new SecretRedactor(process.env);
+  const diagnostics = result.diagnostics;
+
+  return {
+    timeout_duration_ms: diagnostics?.timingBreakdown?.timeoutMs ?? null,
+    partial_output: {
+      checkpoint: normalizePartialOutput(diagnostics?.partialProgress, redactor),
+      stdout_tail: normalizeDiagnosticExcerpt(result.stdout, redactor),
+      stderr_tail: normalizeDiagnosticExcerpt(result.stderr, redactor),
+      raw_tail: normalizeDiagnosticExcerpt(result.rawMessage, redactor)
+    },
+    exit_status: {
+      exit_code: diagnostics?.exitCode ?? parsePlannerExitCode(result.error),
+      exit_signal: diagnostics?.exitSignal ?? null,
+      timed_out: diagnostics?.timedOut ?? /timed out/i.test(`${result.error ?? ""}\n${result.stderr}\n${result.rawMessage}`)
+    },
+    environment_state: normalizePlannerEnvironmentState(sandbox, cwd)
+  };
+}
+
 async function writePlannerDiagnosticsArtifact(
   homeDir: string,
   prompt: string,
@@ -154,6 +232,7 @@ async function writePlannerDiagnosticsArtifact(
   const redactor = new SecretRedactor(process.env);
   const diagnosticsPath = resolvePlannerDiagnosticsPath(homeDir);
   const diagnostics = result.diagnostics;
+  const timeoutContext = buildPlannerTimeoutContext(result, sandbox, cwd);
 
   await writeJsonFile(diagnosticsPath, {
     created_at: new Date().toISOString(),
@@ -168,8 +247,12 @@ async function writePlannerDiagnosticsArtifact(
     input_tokens: diagnostics?.inputTokens ?? null,
     output_tokens: diagnostics?.outputTokens ?? null,
     total_tokens: diagnostics?.totalTokens ?? null,
-    timing_breakdown: redactJsonStrings(diagnostics?.timingBreakdown ?? null, redactor),
-    partial_progress_checkpoint: redactJsonStrings(diagnostics?.partialProgress ?? null, redactor),
+    timing_breakdown: normalizeTimingBreakdown(diagnostics?.timingBreakdown),
+    partial_progress_checkpoint: normalizePartialOutput(diagnostics?.partialProgress, redactor),
+    timeout_duration_ms: timeoutContext.timeout_duration_ms,
+    partial_output: timeoutContext.partial_output,
+    exit_status: timeoutContext.exit_status,
+    environment_state: timeoutContext.environment_state,
     prompt_sha256: createHash("sha256").update(prompt).digest("hex"),
     role_contract_mode: "runtime_json_v1",
     stdout_tail: normalizeDiagnosticExcerpt(result.stdout, redactor),
@@ -536,6 +619,11 @@ export class PlannerAgent {
       if (finalTransientFailure) {
         let diagnosticsPath: string | undefined;
         if (finalTransientFailure === "timeout") {
+          emitLog(
+            `ProjectPlanner timeout context: ${JSON.stringify(
+              buildPlannerTimeoutContext(result, this.sandbox, this.workspaceRoot)
+            )}`
+          );
           diagnosticsPath = await writePlannerDiagnosticsArtifact(
             this.homeDir,
             prompt,

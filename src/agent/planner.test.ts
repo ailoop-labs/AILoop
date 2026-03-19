@@ -455,6 +455,7 @@ describe("PlannerAgent", () => {
     process.chdir(workspaceRoot);
 
     try {
+      const realWorkspaceRoot = await fs.realpath(process.cwd());
       const agent = new PlannerAgent(
         createStubTools() as never,
         makeConfig(homeDir),
@@ -480,6 +481,40 @@ describe("PlannerAgent", () => {
       expect(attempts).toBe(3);
       expect(sleepCalls).toEqual([1000, 2000]);
 
+      const timeoutContextLog = logs.find((message) => message.includes("ProjectPlanner timeout context:"));
+      expect(timeoutContextLog).toBeTruthy();
+
+      const timeoutContext = JSON.parse(timeoutContextLog!.split("ProjectPlanner timeout context: ")[1]) as Record<
+        string,
+        unknown
+      >;
+      expect(timeoutContext.timeout_duration_ms).toBe(30_000);
+      expect(timeoutContext.exit_status).toEqual({
+        exit_code: 1,
+        exit_signal: "SIGKILL",
+        timed_out: true
+      });
+      expect(timeoutContext.environment_state).toEqual({
+        sandbox: "read-only",
+        cwd: realWorkspaceRoot,
+        process_cwd: realWorkspaceRoot,
+        node_env: process.env.NODE_ENV ?? null,
+        pid: process.pid
+      });
+      expect(timeoutContext.partial_output).toEqual({
+        checkpoint: {
+          source: "stdout",
+          kind: "assistant_message",
+          event_type: "response.output_text.done",
+          session_id: null,
+          excerpt: "Planner reached timeout while collecting a sub-task."
+        },
+        stdout_tail:
+          '{"type":"response.output_text.done","text":"Planner reached timeout while collecting a sub-task."}',
+        stderr_tail: "planner request timed out after 30000ms",
+        raw_tail: null
+      });
+
       const diagnosticsLog = logs.find((message) => message.includes("ProjectPlanner diagnostics artifact:"));
       expect(diagnosticsLog).toBeTruthy();
 
@@ -488,12 +523,38 @@ describe("PlannerAgent", () => {
 
       expect(payload.failure_classification).toBe("timeout");
       expect(payload.timed_out).toBe(true);
+      expect(payload.timeout_duration_ms).toBe(30_000);
+      expect(payload.exit_status).toEqual({
+        exit_code: 1,
+        exit_signal: "SIGKILL",
+        timed_out: true
+      });
+      expect(payload.environment_state).toEqual({
+        sandbox: "read-only",
+        cwd: realWorkspaceRoot,
+        process_cwd: realWorkspaceRoot,
+        node_env: process.env.NODE_ENV ?? null,
+        pid: process.pid
+      });
       expect(payload.partial_progress_checkpoint).toEqual({
         source: "stdout",
         kind: "assistant_message",
-        eventType: "response.output_text.done",
-        sessionId: null,
+        event_type: "response.output_text.done",
+        session_id: null,
         excerpt: "Planner reached timeout while collecting a sub-task."
+      });
+      expect(payload.partial_output).toEqual({
+        checkpoint: {
+          source: "stdout",
+          kind: "assistant_message",
+          event_type: "response.output_text.done",
+          session_id: null,
+          excerpt: "Planner reached timeout while collecting a sub-task."
+        },
+        stdout_tail:
+          '{"type":"response.output_text.done","text":"Planner reached timeout while collecting a sub-task."}',
+        stderr_tail: "planner request timed out after 30000ms",
+        raw_tail: null
       });
     } finally {
       process.chdir(originalCwd);
