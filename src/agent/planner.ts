@@ -1,6 +1,6 @@
 import type { AppConfig } from "../config/env";
 import type { PlannerContext, SubTask } from "../types/contracts";
-import { AIClient, type JsonSchema } from "./ai-client";
+import { AIClient, type AIJsonCallResult, type JsonSchema } from "./ai-client";
 import { loadProjectRoleDefinition } from "./role-definitions";
 import { buildInternalRuntimeSessionGuide } from "./runtime-policy";
 import type { ToolRegistry } from "./tool-registry";
@@ -26,6 +26,12 @@ const SUBTASK_SCHEMA: JsonSchema = {
   additionalProperties: false
 };
 
+const PLANNER_TRANSIENT_RETRY_MAX_ATTEMPTS = 3;
+const PLANNER_TRANSIENT_RETRY_BASE_DELAY_MS = 1_000;
+const PLANNER_TRANSIENT_RETRY_MAX_DELAY_MS = 8_000;
+
+type PlannerTransientFailureKind = "provider_rate_limit" | "provider_upstream_error" | "timeout";
+
 export class PlannerInfrastructureError extends Error {
   constructor(message: string) {
     super(message);
@@ -50,6 +56,56 @@ function isProviderRateLimitFailure(result: { error?: string; stderr: string }):
     combined.includes("usage limit exceeded") ||
     combined.includes("too many requests")
   );
+}
+
+function classifyTransientPlannerFailure(result: AIJsonCallResult<unknown>): PlannerTransientFailureKind | null {
+  const combined = `${result.error ?? ""}\n${result.stderr}\n${result.rawMessage}`.toLowerCase();
+
+  if (isProviderRateLimitFailure(result)) {
+    return "provider_rate_limit";
+  }
+
+  if (
+    combined.includes("502 bad gateway") ||
+    combined.includes("503 service unavailable") ||
+    combined.includes("504 gateway timeout") ||
+    combined.includes("unexpected status 502") ||
+    combined.includes("unexpected status 503") ||
+    combined.includes("unexpected status 504") ||
+    combined.includes("bad gateway") ||
+    combined.includes("gateway timeout") ||
+    combined.includes("service unavailable")
+  ) {
+    return "provider_upstream_error";
+  }
+
+  if (
+    result.diagnostics?.timedOut === true ||
+    combined.includes("timed out") ||
+    combined.includes("etimedout")
+  ) {
+    return "timeout";
+  }
+
+  return null;
+}
+
+function getPlannerRetryDelayMs(attempt: number): number {
+  return Math.min(
+    PLANNER_TRANSIENT_RETRY_BASE_DELAY_MS * Math.pow(2, Math.max(0, attempt - 1)),
+    PLANNER_TRANSIENT_RETRY_MAX_DELAY_MS
+  );
+}
+
+function describeTransientPlannerFailure(kind: PlannerTransientFailureKind): string {
+  switch (kind) {
+    case "provider_rate_limit":
+      return "rate-limited";
+    case "provider_upstream_error":
+      return "hit an upstream provider failure";
+    case "timeout":
+      return "timed out";
+  }
 }
 
 function summarizeInfrastructureFailure(result: { error?: string; stderr: string }): string {
@@ -302,13 +358,20 @@ export class PlannerAgent {
   private readonly homeDir: string;
   private readonly tools: ToolRegistry;
   private readonly workspaceRoot: string;
+  private readonly sleep: (ms: number) => Promise<void>;
 
-  constructor(tools: ToolRegistry, config: AppConfig, aiClient?: Pick<AIClient, "runJson">) {
+  constructor(
+    tools: ToolRegistry,
+    config: AppConfig,
+    aiClient?: Pick<AIClient, "runJson">,
+    sleepFn: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  ) {
     this.tools = tools;
     this.ai = aiClient ?? new AIClient(config.ai);
     this.sandbox = config.ai.plannerSandbox;
     this.homeDir = config.homeDir;
     this.workspaceRoot = process.cwd();
+    this.sleep = sleepFn;
   }
 
   async plan(
@@ -333,7 +396,7 @@ export class PlannerAgent {
 
     const adaptiveDirectives = buildAdaptivePlannerDirectives(context);
     const plannerRoleDefinition = await loadProjectRoleDefinition(this.homeDir, "planner");
-    
+
     await this.tools.initialize();
     const availableSkills = this.tools.getSkillManager().getAvailableSkills();
     const prompt = buildPlannerPrompt(
@@ -351,38 +414,64 @@ export class PlannerAgent {
       emitLog(`ProjectPlanner running... ${elapsedSeconds}s elapsed.`);
     }, 15_000);
 
-    const result = await this.ai
-      .runJson<SubTask>({
-        prompt,
-        schema: SUBTASK_SCHEMA,
-        cwd: this.workspaceRoot,
-        sandbox: this.sandbox,
-        sessionIsolation: {
-          enabled: true,
-          agentsGuide: buildInternalRuntimeSessionGuide("ProjectPlanner", [
-            "If repository inspection is needed, use absolute paths under the provided repository root or explicitly `cd` into the repository root first."
-          ])
-        },
-        onStdoutChunk: (chunk) => {
-          for (const line of toLogLines("stdout", chunk)) {
-            emitLog(line);
+    let result: AIJsonCallResult<SubTask> | null = null;
+    let finalTransientFailure: PlannerTransientFailureKind | null = null;
+
+    try {
+      for (let attempt = 1; attempt <= PLANNER_TRANSIENT_RETRY_MAX_ATTEMPTS; attempt += 1) {
+        result = await this.ai.runJson<SubTask>({
+          prompt,
+          schema: SUBTASK_SCHEMA,
+          cwd: this.workspaceRoot,
+          sandbox: this.sandbox,
+          sessionIsolation: {
+            enabled: true,
+            agentsGuide: buildInternalRuntimeSessionGuide("ProjectPlanner", [
+              "If repository inspection is needed, use absolute paths under the provided repository root or explicitly `cd` into the repository root first."
+            ])
+          },
+          onStdoutChunk: (chunk) => {
+            for (const line of toLogLines("stdout", chunk)) {
+              emitLog(line);
+            }
+          },
+          onStderrChunk: (chunk) => {
+            for (const line of toLogLines("stderr", chunk)) {
+              emitLog(line);
+            }
           }
-        },
-        onStderrChunk: (chunk) => {
-          for (const line of toLogLines("stderr", chunk)) {
-            emitLog(line);
-          }
+        });
+        emitLog(
+          `ProjectPlanner AI CLI planning finished (ok=${result.ok}, attempt=${attempt}/${PLANNER_TRANSIENT_RETRY_MAX_ATTEMPTS}).`
+        );
+
+        finalTransientFailure = !result.ok || !result.data ? classifyTransientPlannerFailure(result) : null;
+        if (!finalTransientFailure) {
+          break;
         }
-      })
-      .finally(() => {
-        clearInterval(heartbeat);
-      });
-    emitLog(`ProjectPlanner AI CLI planning finished (ok=${result.ok}).`);
+
+        if (attempt === PLANNER_TRANSIENT_RETRY_MAX_ATTEMPTS) {
+          break;
+        }
+
+        const delayMs = getPlannerRetryDelayMs(attempt);
+        emitLog(
+          `ProjectPlanner transient AI failure (${finalTransientFailure}), retrying in ${delayMs}ms (attempt ${attempt}/${PLANNER_TRANSIENT_RETRY_MAX_ATTEMPTS}).`
+        );
+        await this.sleep(delayMs);
+      }
+    } finally {
+      clearInterval(heartbeat);
+    }
+
+    if (!result) {
+      return fallbackPlan(context);
+    }
 
     if (!result.ok || !result.data) {
-      if (isProviderRateLimitFailure(result)) {
+      if (finalTransientFailure) {
         throw new PlannerInfrastructureError(
-          `Planner AI CLI rate-limited: ${summarizeInfrastructureFailure(result)}`
+          `Planner AI CLI ${describeTransientPlannerFailure(finalTransientFailure)} after ${PLANNER_TRANSIENT_RETRY_MAX_ATTEMPTS} attempts: ${summarizeInfrastructureFailure(result)}`
         );
       }
       return fallbackPlan(context);

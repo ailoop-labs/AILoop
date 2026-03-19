@@ -71,6 +71,19 @@ function makeConfig(homeDir: string): AppConfig {
   };
 }
 
+function createStubTools() {
+  return {
+    async initialize() {},
+    getSkillManager() {
+      return {
+        getAvailableSkills() {
+          return [];
+        }
+      };
+    }
+  };
+}
+
 describe("resolvePlannerRequirementMode", () => {
   test("requests requirement creation when no active requirement artifact exists", () => {
     expect(
@@ -204,23 +217,12 @@ describe("PlannerAgent", () => {
         };
       }
     };
-    const stubTools = {
-      async initialize() {},
-      getSkillManager() {
-        return {
-          getAvailableSkills() {
-            return [];
-          }
-        };
-      }
-    };
-
     const originalCwd = process.cwd();
     process.chdir(workspaceRoot);
 
     try {
       const realWorkspaceRoot = await fs.realpath(process.cwd());
-      const agent = new PlannerAgent(stubTools as never, makeConfig(homeDir), mockCodex as never);
+      const agent = new PlannerAgent(createStubTools() as never, makeConfig(homeDir), mockCodex as never);
       const result = await agent.plan(createContext(), { onLog: async () => {} });
 
       expect(result.objective).toBe("Inspect one file.");
@@ -260,22 +262,11 @@ describe("PlannerAgent", () => {
         };
       }
     };
-    const stubTools = {
-      async initialize() {},
-      getSkillManager() {
-        return {
-          getAvailableSkills() {
-            return [];
-          }
-        };
-      }
-    };
-
     const originalCwd = process.cwd();
     process.chdir(workspaceRoot);
 
     try {
-      const agent = new PlannerAgent(stubTools as never, makeConfig(homeDir), mockCodex as never);
+      const agent = new PlannerAgent(createStubTools() as never, makeConfig(homeDir), mockCodex as never);
       const result = await agent.plan(
         createContext({
           requirement_artifact_status: "ready"
@@ -293,14 +284,80 @@ describe("PlannerAgent", () => {
     }
   });
 
-  test("throws planner infrastructure failure instead of falling back when the provider reports usage-limit exhaustion", async () => {
+  test("retries transient planner failures with exponential backoff and then succeeds", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-planner-retry-success-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(path.join(homeDir, "PLANNER_ROLE.md"), "# Planner Role\n\nCustom planner guidance.\n", "utf8");
+
+    let attempts = 0;
+    const sleepCalls: number[] = [];
+    const mockCodex = {
+      async runJson<T>() {
+        attempts += 1;
+        if (attempts === 1) {
+          return {
+            ok: false,
+            data: undefined as T | undefined,
+            rawMessage: "",
+            stdout: "",
+            stderr: "API Error: 503 Service Unavailable",
+            error: "AI CLI exited with code 1"
+          };
+        }
+
+        return {
+          ok: true,
+          data: {
+            rationale: "Use a narrow step.",
+            assignee: "executor",
+            objective: "Inspect one file.",
+            expected_outcome: "A minimal next step is defined.",
+            impacted_files: ["src/example.ts"],
+            recommended_tools: ["read_file"]
+          } as T,
+          rawMessage: "{}",
+          stdout: "",
+          stderr: ""
+        };
+      }
+    };
+
+    const originalCwd = process.cwd();
+    process.chdir(workspaceRoot);
+
+    try {
+      const agent = new PlannerAgent(
+        createStubTools() as never,
+        makeConfig(homeDir),
+        mockCodex as never,
+        async (ms) => {
+          sleepCalls.push(ms);
+        }
+      );
+
+      const result = await agent.plan(createContext(), { onLog: async () => {} });
+
+      expect(result.objective).toBe("Inspect one file.");
+      expect(attempts).toBe(2);
+      expect(sleepCalls).toEqual([1000]);
+    } finally {
+      process.chdir(originalCwd);
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("throws planner infrastructure failure after transient retry budget is exhausted", async () => {
     const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-planner-rate-limit-"));
     const homeDir = path.join(workspaceRoot, ".ailoop");
     await fs.mkdir(homeDir, { recursive: true });
     await fs.writeFile(path.join(homeDir, "PLANNER_ROLE.md"), "# Planner Role\n\nCustom planner guidance.\n", "utf8");
 
+    let attempts = 0;
+    const sleepCalls: number[] = [];
     const mockCodex = {
       async runJson<T>() {
+        attempts += 1;
         return {
           ok: false,
           data: undefined as T | undefined,
@@ -312,25 +369,31 @@ describe("PlannerAgent", () => {
         };
       }
     };
-    const stubTools = {
-      async initialize() {},
-      getSkillManager() {
-        return {
-          getAvailableSkills() {
-            return [];
-          }
-        };
-      }
-    };
 
     const originalCwd = process.cwd();
     process.chdir(workspaceRoot);
 
     try {
-      const agent = new PlannerAgent(stubTools as never, makeConfig(homeDir), mockCodex as never);
+      const agent = new PlannerAgent(
+        createStubTools() as never,
+        makeConfig(homeDir),
+        mockCodex as never,
+        async (ms) => {
+          sleepCalls.push(ms);
+        }
+      );
 
-      await expect(agent.plan(createContext(), { onLog: async () => {} })).rejects.toBeInstanceOf(PlannerInfrastructureError);
-      await expect(agent.plan(createContext(), { onLog: async () => {} })).rejects.toThrow("usage limit exceeded");
+      let failure: unknown;
+      try {
+        await agent.plan(createContext(), { onLog: async () => {} });
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(failure).toBeInstanceOf(PlannerInfrastructureError);
+      expect((failure as Error).message).toContain("usage limit exceeded");
+      expect(attempts).toBe(3);
+      expect(sleepCalls).toEqual([1000, 2000]);
     } finally {
       process.chdir(originalCwd);
       await fs.rm(workspaceRoot, { recursive: true, force: true });
