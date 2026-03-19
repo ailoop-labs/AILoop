@@ -36,6 +36,18 @@ function outputPathFromArgs(args: string[]): string {
   return args[outputIndex + 1] ?? "";
 }
 
+const ROUND_76_RESUME_STDERR_FIXTURE = [
+  "Warning: no last agent message; wrote empty content to /tmp/round-76-result.json",
+  "",
+  "error: unexpected argument '--output-schema' found",
+  "",
+  "  tip: a similar argument exists: '--output-last-message'",
+  "",
+  "Usage: codex exec resume --ephemeral --skip-git-repo-check --json --output-last-message <FILE> <SESSION_ID> [PROMPT]",
+  "",
+  "For more information, try '--help'."
+].join("\n");
+
 describe("AIClient.runJson", () => {
   test("inherits environment without isolation in Zero-Config model", async () => {
     const sandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-env-test-"));
@@ -307,11 +319,7 @@ describe("AIClient.runJson", () => {
           return {
             code: 2,
             stdout: "",
-            stderr:
-              "error: unexpected argument '--output-schema' found\n\n" +
-              "  tip: a similar argument exists: '--output-last-message'\n\n" +
-              "Usage: codex exec resume --ephemeral --skip-git-repo-check --json --output-last-message <FILE> <SESSION_ID> [PROMPT]\n\n" +
-              "For more information, try '--help'."
+            stderr: ROUND_76_RESUME_STDERR_FIXTURE
           };
         }
 
