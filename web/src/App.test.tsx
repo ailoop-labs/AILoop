@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
+  AiRuntimePanel,
   ArtifactCompletenessPanel,
   BudgetHealthPanel,
   ControlErrorPanel,
@@ -190,6 +191,55 @@ describe("CLI provider/model helpers", () => {
     expect(next.codex.bin).toBe("codex");
     expect(next.ai.model).toBe("gpt-5.4");
     expect(next.codex.model).toBe("gpt-5.4");
+  });
+});
+
+describe("AiRuntimePanel", () => {
+  test("renders the actual execution route and a Claude routing warning", () => {
+    const html = renderToStaticMarkup(
+      <AiRuntimePanel
+        runtimeConfig={{
+          intervalSeconds: 60,
+          maxCycles: 0,
+          exitOnError: false,
+          budget: {
+            usdPerRound: 0.5,
+            timeMinutes: 60,
+            actions: 10
+          },
+          ai: {
+            bin: "claude",
+            model: "claude-opus-4-6",
+            profile: "",
+            plannerSandbox: "read-only",
+            executorSandbox: "danger-full-access",
+            evaluatorSandbox: "danger-full-access"
+          },
+          codex: {
+            bin: "claude",
+            model: "claude-opus-4-6",
+            profile: "",
+            plannerSandbox: "read-only",
+            executorSandbox: "danger-full-access",
+            evaluatorSandbox: "danger-full-access"
+          },
+          aiRuntime: {
+            bin: "/opt/homebrew/bin/claude",
+            provider: "claude",
+            claudeSettingsPath: "/Users/test/.claude/settings.json",
+            claudeBaseUrlOverride: "https://api.minimaxi.com/anthropic",
+            claudeModelOverride: "MiniMax-M2.7",
+            warning:
+              "Claude CLI on this machine is routed through https://api.minimaxi.com/anthropic via /Users/test/.claude/settings.json; selecting Claude here will consume that provider's quota."
+          }
+        }}
+      />
+    );
+
+    expect(html).toContain("Actual Execution Route");
+    expect(html).toContain("/opt/homebrew/bin/claude");
+    expect(html).toContain("https://api.minimaxi.com/anthropic");
+    expect(html).toContain("will consume that provider&#x27;s quota");
   });
 });
 

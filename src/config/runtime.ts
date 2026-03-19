@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AppConfig, CodexSandboxMode } from "./env";
+import { detectAiCliProvider } from "./ai-runtime-info";
 import { DEFAULT_LLM_EVALUATOR_DIMENSIONS, FIXED_AI_CLI_TIMEOUT_MS } from "./env";
 import type { BudgetLimits, EvaluationDimension } from "../types/contracts";
 import { readJsonFile } from "../utils/fs";
@@ -491,7 +492,7 @@ export function applyRuntimeLoopConfig(baseConfig: AppConfig, runtime: RuntimeLo
 }
 
 export function runtimeLoopConfigToEnv(runtime: RuntimeLoopConfig): Record<string, string> {
-  return {
+  const env: Record<string, string> = {
     AILOOP_INTERVAL_SECONDS: String(runtime.intervalSeconds),
     AILOOP_MAX_CYCLES: String(runtime.maxCycles),
     AILOOP_EXIT_ON_ERROR: runtime.exitOnError ? "1" : "0",
@@ -506,14 +507,19 @@ export function runtimeLoopConfigToEnv(runtime: RuntimeLoopConfig): Record<strin
     AILOOP_AI_CLI_EXECUTOR_SANDBOX: runtime.codex.executorSandbox,
     AILOOP_AI_CLI_EVALUATOR_SANDBOX: runtime.codex.evaluatorSandbox,
     AILOOP_AI_CLI_TIMEOUT_MS: String(FIXED_AI_CLI_TIMEOUT_MS),
-    AILOOP_CODEX_BIN: runtime.codex.bin,
-    AILOOP_CODEX_MODEL: runtime.codex.model,
-    AILOOP_CODEX_PROFILE: runtime.codex.profile,
-    AILOOP_CODEX_PLANNER_SANDBOX: runtime.codex.plannerSandbox,
-    AILOOP_CODEX_EXECUTOR_SANDBOX: runtime.codex.executorSandbox,
-    AILOOP_CODEX_EVALUATOR_SANDBOX: runtime.codex.evaluatorSandbox,
-    AILOOP_CODEX_TIMEOUT_MS: String(FIXED_AI_CLI_TIMEOUT_MS),
     AILOOP_LLM_EVALUATOR_DIMENSIONS: runtime.codex.llmEvaluatorDimensions.join(","),
     AILOOP_LLM_EVALUATOR_MIN_PASS_SCORE: String(runtime.codex.llmEvaluatorMinPassScore)
   };
+
+  if (detectAiCliProvider(runtime.codex.bin) === "codex") {
+    env.AILOOP_CODEX_BIN = runtime.codex.bin;
+    env.AILOOP_CODEX_MODEL = runtime.codex.model;
+    env.AILOOP_CODEX_PROFILE = runtime.codex.profile;
+    env.AILOOP_CODEX_PLANNER_SANDBOX = runtime.codex.plannerSandbox;
+    env.AILOOP_CODEX_EXECUTOR_SANDBOX = runtime.codex.executorSandbox;
+    env.AILOOP_CODEX_EVALUATOR_SANDBOX = runtime.codex.evaluatorSandbox;
+    env.AILOOP_CODEX_TIMEOUT_MS = String(FIXED_AI_CLI_TIMEOUT_MS);
+  }
+
+  return env;
 }

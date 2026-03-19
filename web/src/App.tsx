@@ -139,6 +139,16 @@ interface RuntimeLoopConfig {
     executorSandbox: SandboxMode;
     evaluatorSandbox: SandboxMode;
   };
+  aiRuntime?: AiRuntimeInfo;
+}
+
+interface AiRuntimeInfo {
+  bin: string;
+  provider: string;
+  claudeSettingsPath: string | null;
+  claudeBaseUrlOverride: string | null;
+  claudeModelOverride: string | null;
+  warning: string | null;
 }
 
 interface SaveConfigResponse {
@@ -1130,6 +1140,59 @@ export function SystemHealthPanel({ frictionIndex }: { frictionIndex: FrictionIn
   );
 }
 
+export function AiRuntimePanel({ runtimeConfig }: { runtimeConfig: RuntimeLoopConfig | null }) {
+  const aiRuntime = runtimeConfig?.aiRuntime;
+  if (!runtimeConfig || !aiRuntime) {
+    return "";
+  }
+
+  const warningTone = aiRuntime.warning
+    ? aiRuntime.provider === "claude"
+      ? "border-warning/40 bg-warning/10 text-warning"
+      : "border-white/10 bg-ink/60 text-mist/80"
+    : "border-white/10 bg-ink/60 text-mist/80";
+
+  return (
+    <div className={`rounded-2xl border p-4 ${warningTone}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-xs uppercase tracking-[0.3em] text-mist/50">Resolved AI CLI</p>
+          <h3 className="mt-2 text-lg font-semibold text-mist">Actual Execution Route</h3>
+        </div>
+        <span className="rounded-full border border-white/10 bg-ink/70 px-3 py-1 text-xs uppercase tracking-[0.3em] text-mist/70">
+          {aiRuntime.provider}
+        </span>
+      </div>
+      <dl className="mt-4 grid gap-3 md:grid-cols-2">
+        <div>
+          <dt className="text-xs uppercase tracking-[0.3em] text-mist/50">Binary</dt>
+          <dd className="mt-1 font-mono text-sm text-mist">{aiRuntime.bin}</dd>
+        </div>
+        <div>
+          <dt className="text-xs uppercase tracking-[0.3em] text-mist/50">Provider</dt>
+          <dd className="mt-1 text-sm text-mist">{aiRuntime.provider}</dd>
+        </div>
+        {aiRuntime.claudeBaseUrlOverride ? (
+          <div className="md:col-span-2">
+            <dt className="text-xs uppercase tracking-[0.3em] text-mist/50">Claude Route Override</dt>
+            <dd className="mt-1 font-mono text-sm text-mist">{aiRuntime.claudeBaseUrlOverride}</dd>
+          </div>
+        ) : null}
+      </dl>
+      {aiRuntime.warning ? (
+        <p className="mt-4 text-sm leading-6">{aiRuntime.warning}</p>
+      ) : (
+        <p className="mt-4 text-sm leading-6 text-mist/70">
+          No local Claude endpoint override was detected for the active AI CLI provider.
+        </p>
+      )}
+      {aiRuntime.claudeSettingsPath ? (
+        <p className="mt-3 text-xs text-mist/60">Source: {aiRuntime.claudeSettingsPath}</p>
+      ) : null}
+    </div>
+  );
+}
+
 export function LifecycleStatusGrid({ status }: { status: LoopStatus | null }) {
   const pendingInstructionCount = status?.pending_instruction_count ?? 0;
   const pauseReason = status?.pause_reason ?? "None active";
@@ -1821,6 +1884,9 @@ export default function App() {
               <summary className="cursor-pointer px-4 py-3 text-base font-semibold text-mist hover:text-accent">
                 AI CLI Configuration
               </summary>
+              <div className="px-4 pb-4">
+                <AiRuntimePanel runtimeConfig={runtimeConfig} />
+              </div>
               <div className="grid gap-4 px-4 pb-4 md:grid-cols-2">
                 <label className="text-sm text-mist/80">
                   Execution Provider

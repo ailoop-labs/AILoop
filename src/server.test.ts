@@ -1223,7 +1223,13 @@ describe("console server API contract", () => {
     const response = await fetchHandler(createAuthorizedRequest("http://console.test/api/config", token));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual(await readRuntimeLoopConfig(config));
+    expect(await response.json()).toMatchObject({
+      ...(await readRuntimeLoopConfig(config)),
+      aiRuntime: {
+        bin: "codex",
+        provider: "codex"
+      }
+    });
   });
 
   test("persists runtime config overrides through the authenticated save endpoint", async () => {
@@ -1254,9 +1260,15 @@ describe("console server API contract", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
+    expect(await response.json()).toMatchObject({
       ok: true,
-      config: await readRuntimeLoopConfig(config)
+      config: {
+        ...(await readRuntimeLoopConfig(config)),
+        aiRuntime: {
+          bin: "/opt/homebrew/bin/claude",
+          provider: "claude"
+        }
+      }
     });
     expect(await readRuntimeLoopConfig(config)).toMatchObject({
       intervalSeconds: 90,
@@ -1311,7 +1323,7 @@ describe("console server API contract", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
+    expect(await response.json()).toMatchObject({
       ok: true,
       config: {
         intervalSeconds: 30,
@@ -1339,6 +1351,10 @@ describe("console server API contract", () => {
             "learning_yield"
           ],
           llmEvaluatorMinPassScore: 75
+        },
+        aiRuntime: {
+          bin: "codex",
+          provider: "codex"
         }
       }
     });

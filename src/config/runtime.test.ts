@@ -71,6 +71,21 @@ describe("runtime codex bin persistence", () => {
     expect(env.AILOOP_CODEX_BIN).toBe("/Users/test/.bun/bin/codex");
   });
 
+  test("runtimeLoopConfigToEnv omits legacy AILOOP_CODEX_* aliases for non-codex providers", () => {
+    const env = runtimeLoopConfigToEnv({
+      ...extractRuntimeLoopConfig(makeConfig()),
+      codex: {
+        ...extractRuntimeLoopConfig(makeConfig()).codex,
+        bin: "/opt/homebrew/bin/claude",
+        model: "claude-opus-4-6"
+      }
+    });
+
+    expect(env.AILOOP_AI_CLI_BIN).toBe("/opt/homebrew/bin/claude");
+    expect(env.AILOOP_CODEX_BIN).toBeUndefined();
+    expect(env.AILOOP_CODEX_MODEL).toBeUndefined();
+  });
+
   test("readRuntimeLoopConfig hydrates AI CLI overrides from the database", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-runtime-config-db-"));
     tempDirs.add(homeDir);

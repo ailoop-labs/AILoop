@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { getAiCliRuntimeInfo, type AiCliRuntimeInfo } from "./config/ai-runtime-info";
 import { loadConfig, resolveConfigDbPath, type AppConfig } from "./config/env";
 import { patchRuntimeLoopConfig, readRuntimeLoopConfig, resetRuntimeLoopConfig } from "./config/runtime";
 import { isDateBasedAdminTokenExpired } from "./auth/admin-token";
@@ -71,6 +72,10 @@ interface CreateConsoleFetchOptions {
   adminTokenIssuedDate?: string;
 }
 
+type RuntimeConfigResponse = Awaited<ReturnType<typeof readRuntimeLoopConfig>> & {
+  aiRuntime: AiCliRuntimeInfo;
+};
+
 function createConsoleRuntime(options: CreateConsoleFetchOptions = {}): ConsoleRuntime {
   const config = options.config ?? loadConfig();
   const adminToken = config.consoleAdminToken.trim();
@@ -91,6 +96,17 @@ function createConsoleRuntime(options: CreateConsoleFetchOptions = {}): ConsoleR
     tokenAuthEnabled: adminToken.length > 0,
     adminTokenIssuedDate,
     dbPath
+  };
+}
+
+async function buildRuntimeConfigResponse(
+  config: AppConfig,
+  runtimeConfig?: Awaited<ReturnType<typeof readRuntimeLoopConfig>>
+): Promise<RuntimeConfigResponse> {
+  const nextRuntimeConfig = runtimeConfig ?? (await readRuntimeLoopConfig(config));
+  return {
+    ...nextRuntimeConfig,
+    aiRuntime: await getAiCliRuntimeInfo(nextRuntimeConfig.codex.bin)
   };
 }
 
@@ -190,7 +206,7 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
       }
 
       if (url.pathname === "/api/config" && request.method === "GET") {
-        return json(await readRuntimeLoopConfig(config));
+        return json(await buildRuntimeConfigResponse(config));
       }
 
       if (url.pathname === "/api/base-config" && request.method === "GET") {
@@ -230,16 +246,18 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
 
       if (url.pathname === "/api/config" && request.method === "POST") {
         const body = await parseBody(request);
+        const nextConfig = await patchRuntimeLoopConfig(config, body);
         return json({
           ok: true,
-          config: await patchRuntimeLoopConfig(config, body)
+          config: await buildRuntimeConfigResponse(config, nextConfig)
         });
       }
 
       if (url.pathname === "/api/config/reset" && request.method === "POST") {
+        const nextConfig = await resetRuntimeLoopConfig(config);
         return json({
           ok: true,
-          config: await resetRuntimeLoopConfig(config)
+          config: await buildRuntimeConfigResponse(config, nextConfig)
         });
       }
 

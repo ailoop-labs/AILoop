@@ -59,6 +59,15 @@ const resumeOperations = new Map<string, Promise<void>>();
 const PAUSEABLE_STATES: LoopStateName[] = ["starting", "running", "cooldown"];
 const RESUMABLE_STATES: LoopStateName[] = ["paused"];
 const STOPPABLE_STATES: LoopStateName[] = ["starting", "running", "cooldown", "paused"];
+const LEGACY_CODEX_ENV_KEYS = [
+  "AILOOP_CODEX_BIN",
+  "AILOOP_CODEX_MODEL",
+  "AILOOP_CODEX_PROFILE",
+  "AILOOP_CODEX_PLANNER_SANDBOX",
+  "AILOOP_CODEX_EXECUTOR_SANDBOX",
+  "AILOOP_CODEX_EVALUATOR_SANDBOX",
+  "AILOOP_CODEX_TIMEOUT_MS"
+] as const;
 
 export class InvalidLifecycleTransitionError extends Error {
   readonly code = "invalid_lifecycle_transition";
@@ -79,6 +88,21 @@ function formatStateList(states: LoopStateName[]): string {
   }
 
   return `${states.slice(0, -1).join(", ")}, or ${states.at(-1)}`;
+}
+
+function mergeLoopChildEnv(runtimeEnv: Record<string, string>): NodeJS.ProcessEnv {
+  const childEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    ...runtimeEnv
+  };
+
+  for (const key of LEGACY_CODEX_ENV_KEYS) {
+    if (!(key in runtimeEnv)) {
+      delete childEnv[key];
+    }
+  }
+
+  return childEnv;
 }
 
 function assertValidLifecycleControlTransition(
@@ -231,10 +255,7 @@ export async function startBackgroundLoop(config: AppConfig): Promise<{ started:
         cwd: process.cwd(),
         detached: true,
         stdio: ["ignore", loopLogFd, loopLogFd],
-        env: {
-          ...process.env,
-          ...runtimeEnv
-        }
+        env: mergeLoopChildEnv(runtimeEnv)
       });
     } finally {
       closeSync(loopLogFd);

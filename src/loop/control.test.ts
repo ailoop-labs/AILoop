@@ -471,7 +471,7 @@ describe("startBackgroundLoop", () => {
       expect(spawnOptions?.env?.AILOOP_AI_CLI_BIN).toBe("/opt/homebrew/bin/claude");
       expect(spawnOptions?.env?.AILOOP_AI_CLI_MODEL).toBe("claude-opus-4-6");
       expect(spawnOptions?.env?.AILOOP_AI_CLI_TIMEOUT_MS).toBe("1800000");
-      expect(spawnOptions?.env?.AILOOP_CODEX_BIN).toBe("/opt/homebrew/bin/claude");
+      expect(spawnOptions?.env?.AILOOP_CODEX_BIN).toBeUndefined();
     } finally {
       process.chdir(originalCwd);
       mock.restore();
