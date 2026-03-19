@@ -148,7 +148,6 @@ function buildEvidenceCorpus(input: {
       input.evaluation.justification,
       ...input.evaluation.evidence,
       input.evaluation.recommended_next_action ?? "",
-      input.toolResult.summary,
       ...(input.toolResult.operational_evidence ?? []),
       input.stateChange
     ]

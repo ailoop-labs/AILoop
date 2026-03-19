@@ -72,6 +72,26 @@ describe("requirement completion heuristics", () => {
     ]);
   });
 
+  test("does not treat the executor summary as acceptance-criteria evidence on its own", () => {
+    const result = assessRequirementCompletion({
+      requirementMarkdown,
+      evaluation: makeEvaluation("pass", ["Observed diff requires more targeted evidence."]),
+      toolResult: {
+        ...makeToolResult(),
+        summary:
+          "requirement-completion.ts records a lifecycle status update for the active requirement artifact. ProjectPlanner requests a ProductManager refresh after the current slice is complete."
+      },
+      stateChange: "No state changes detected."
+    });
+
+    expect(result.isComplete).toBe(false);
+    expect(result.matchedCriteria).toEqual([]);
+    expect(result.unmatchedCriteria).toEqual([
+      "requirement-completion.ts records a lifecycle status update for the active requirement artifact.",
+      "ProjectPlanner requests a ProductManager refresh after the current slice is complete."
+    ]);
+  });
+
   test("does not mark completion when evaluator failed even if the evidence text overlaps with the acceptance criteria", () => {
     const result = assessRequirementCompletion({
       requirementMarkdown,
