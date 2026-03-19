@@ -24,7 +24,7 @@ function makeSubTask(objective: string, expectedOutcome: string): SubTask {
   };
 }
 
-function makeMetrics(round: number, timestamp: string, subTask: SubTask): RoundMetrics {
+function makeMetrics(round: number, timestamp: string, subTask: SubTask, usdUsed = 0.1): RoundMetrics {
   return {
     round,
     run_timestamp: timestamp,
@@ -35,7 +35,7 @@ function makeMetrics(round: number, timestamp: string, subTask: SubTask): RoundM
       actions: 5
     },
     budget_usage: {
-      usdUsed: 0.1,
+      usdUsed,
       actionsUsed: 1,
       elapsedMs: 1_000
     },
@@ -66,10 +66,11 @@ async function writeRoundRecord(
     subTask: SubTask;
     summary: string;
     stateChange: string;
+    usdUsed?: number;
   }
 ): Promise<void> {
   const artifacts = buildRoundArtifactPaths(runsDir, options.timestamp);
-  const metrics = makeMetrics(options.round, options.timestamp, options.subTask);
+  const metrics = makeMetrics(options.round, options.timestamp, options.subTask, options.usdUsed);
 
   await Promise.all([
     fs.writeFile(artifacts.summaryPath, `${options.summary}\n`, "utf8"),
@@ -132,6 +133,64 @@ describe("buildExternalValidationMetricsReport", () => {
       expect(controlTask).toBeDefined();
       expect(controlTask?.rounds).toBe(1);
       expect(controlTask?.no_op_claim_mismatches).toBe(0);
+    } finally {
+      await fs.rm(runsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("aggregates stable-id scoped cost totals and per-round averages from persisted budget usage", async () => {
+    const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-metrics-cost-test-"));
+    const primarySubTask = makeSubTask(
+      "Show external-validation cost by stable task identity.",
+      "The report attributes cost totals only to the matching stable id."
+    );
+    const siblingSubTask = makeSubTask(
+      "Show external-validation cost by stable task identity.",
+      "A different stable id keeps its own independent cost totals."
+    );
+
+    try {
+      await writeRoundRecord(runsDir, {
+        round: 1,
+        timestamp: "2026-03-12T00-00-00-000Z",
+        subTask: primarySubTask,
+        summary: "Recorded cost for the first retry.",
+        stateChange: "No state changes detected.",
+        usdUsed: 0.12
+      });
+
+      await writeRoundRecord(runsDir, {
+        round: 2,
+        timestamp: "2026-03-13T00-00-00-000Z",
+        subTask: primarySubTask,
+        summary: "Recorded cost for the second retry.",
+        stateChange: "No state changes detected.",
+        usdUsed: 0.18
+      });
+
+      await writeRoundRecord(runsDir, {
+        round: 3,
+        timestamp: "2026-03-14T00-00-00-000Z",
+        subTask: siblingSubTask,
+        summary: "Recorded cost for a different stable task identity.",
+        stateChange: "No state changes detected.",
+        usdUsed: 0.8
+      });
+
+      const report = await buildExternalValidationMetricsReport(runsDir);
+      const primaryTask = report.tasks.find((task) => task.stable_id === buildRoundSubTaskIdentity(primarySubTask).stable_id);
+      const siblingTask = report.tasks.find((task) => task.stable_id === buildRoundSubTaskIdentity(siblingSubTask).stable_id);
+
+      expect(report.task_count).toBe(2);
+      expect(primaryTask).toBeDefined();
+      expect(primaryTask?.rounds).toBe(2);
+      expect(primaryTask?.total_cost_usd).toBe(0.3);
+      expect(primaryTask?.average_cost_usd_per_round).toBe(0.15);
+
+      expect(siblingTask).toBeDefined();
+      expect(siblingTask?.rounds).toBe(1);
+      expect(siblingTask?.total_cost_usd).toBe(0.8);
+      expect(siblingTask?.average_cost_usd_per_round).toBe(0.8);
     } finally {
       await fs.rm(runsDir, { recursive: true, force: true });
     }

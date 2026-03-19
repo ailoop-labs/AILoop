@@ -49,6 +49,8 @@ export interface ExternalValidationTaskMetrics {
   objective: string;
   expected_outcome: string;
   rounds: number;
+  total_cost_usd: number;
+  average_cost_usd_per_round: number;
   successful: boolean;
   latest_decision: RoundMetrics["evaluator_decision"] | "unknown";
   human_interventions: number;
@@ -96,6 +98,10 @@ export async function readMetricsFile(metricsPath: string): Promise<RoundMetrics
 
 function normalizeCounter(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function normalizeUsd(value: unknown): number {
+  return Number(normalizeCounter(value).toFixed(6));
 }
 
 const NO_OP_CLAIM_PATTERNS: RegExp[] = [
@@ -185,6 +191,8 @@ export async function buildExternalValidationMetricsReport(runsDir: string): Pro
       objective: identity.objective,
       expected_outcome: identity.expected_outcome,
       rounds: 0,
+      total_cost_usd: 0,
+      average_cost_usd_per_round: 0,
       successful: false,
       latest_decision: "unknown" as const,
       human_interventions: 0,
@@ -196,6 +204,8 @@ export async function buildExternalValidationMetricsReport(runsDir: string): Pro
     };
 
     existing.rounds += 1;
+    existing.total_cost_usd = normalizeUsd(existing.total_cost_usd + normalizeUsd(metrics?.budget_usage?.usdUsed));
+    existing.average_cost_usd_per_round = normalizeUsd(existing.total_cost_usd / existing.rounds);
     existing.successful = existing.successful || latestDecision === "pass";
     existing.latest_decision = latestDecision;
     existing.human_interventions += normalizeCounter(metrics?.human_interventions);

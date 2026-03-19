@@ -174,6 +174,10 @@ export interface ExternalValidationMetricsCliReport {
   report: string;
 }
 
+function formatUsd(value: number): string {
+  return value.toFixed(4);
+}
+
 function roleTitle(role: ProjectRole): string {
   if (role === "planner") {
     return "Project Planner";
@@ -288,6 +292,17 @@ export function renderExternalValidationMetricsReport(report: ExternalValidation
   } else {
     for (const task of successfulTasks) {
       lines.push(`- ${task.objective} | stable_id=${task.stable_id} | rounds=${task.rounds}`);
+    }
+  }
+
+  lines.push("Cost per task (USD):");
+  if (report.tasks.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const task of report.tasks) {
+      lines.push(
+        `- ${task.objective} | stable_id=${task.stable_id} | total_usd=${formatUsd(task.total_cost_usd)} | avg_usd_per_round=${formatUsd(task.average_cost_usd_per_round)}`
+      );
     }
   }
 

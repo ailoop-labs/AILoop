@@ -276,6 +276,7 @@ function makePersistedRoundMetrics(input: {
   evaluator_decision: "pass" | "fail";
   human_interventions: number;
   hot_file_growth_lines: number;
+  usdUsed?: number;
   sub_task_identity?: ReturnType<typeof buildRoundSubTaskIdentity>;
 }): Record<string, unknown> {
   return {
@@ -288,7 +289,7 @@ function makePersistedRoundMetrics(input: {
       actions: 10
     },
     budget_usage: {
-      usdUsed: 0.1,
+      usdUsed: input.usdUsed ?? 0.1,
       elapsedMs: 500,
       actionsUsed: 2
     },
@@ -2535,6 +2536,100 @@ describe("external-validation report CLI", () => {
       );
       expect(result.stdout).toContain(
         `- Ship the intentional report update | stable_id=${unaffectedTask.stable_id} | count=0`
+      );
+    } finally {
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("renders per-task total and average USD cost in the external-validation report", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-control-external-validation-cost-report-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    const runsDir = path.join(homeDir, "runs");
+    const costTrackedTask = buildRoundSubTaskIdentity({
+      rationale: "Operators need round-level cost visibility for the same external-validation task.",
+      assignee: "executor",
+      objective: "Track pilot cost by task identity",
+      expected_outcome: "The report shows total USD and average USD per round for the matching stable id.",
+      impacted_files: ["/tmp/reporting.ts"],
+      recommended_tools: ["read_file", "write_file", "run_shell"]
+    });
+    const separateTask = buildRoundSubTaskIdentity({
+      rationale: "A different stable id should keep its own cost totals.",
+      assignee: "executor",
+      objective: "Track pilot cost by task identity",
+      expected_outcome: "A separate stable id reports its own per-task cost section entry.",
+      impacted_files: ["/tmp/control.ts"],
+      recommended_tools: ["read_file", "write_file", "run_shell"]
+    });
+
+    try {
+      await fs.mkdir(runsDir, { recursive: true });
+
+      await writeRunArtifacts(runsDir, "2026-03-18T11-00-00-000Z", {
+        summary: "# Round Summary\n\nRecorded initial task cost.\n",
+        metrics: makePersistedRoundMetrics({
+          round: 1,
+          run_timestamp: "2026-03-18T11:00:00.000Z",
+          evaluator_decision: "fail",
+          human_interventions: 0,
+          hot_file_growth_lines: 1,
+          usdUsed: 0.12,
+          sub_task_identity: costTrackedTask
+        }),
+        evaluation: {
+          decision: "fail",
+          justification: "One more bounded round required.",
+          evidence: []
+        }
+      });
+
+      await writeRunArtifacts(runsDir, "2026-03-18T11-05-00-000Z", {
+        summary: "# Round Summary\n\nRecorded follow-up task cost.\n",
+        metrics: makePersistedRoundMetrics({
+          round: 2,
+          run_timestamp: "2026-03-18T11:05:00.000Z",
+          evaluator_decision: "pass",
+          human_interventions: 0,
+          hot_file_growth_lines: 1,
+          usdUsed: 0.18,
+          sub_task_identity: costTrackedTask
+        }),
+        evaluation: {
+          decision: "pass",
+          justification: "Task completed within budget.",
+          evidence: []
+        }
+      });
+
+      await writeRunArtifacts(runsDir, "2026-03-18T11-10-00-000Z", {
+        summary: "# Round Summary\n\nRecorded cost for a separate stable id.\n",
+        metrics: makePersistedRoundMetrics({
+          round: 3,
+          run_timestamp: "2026-03-18T11:10:00.000Z",
+          evaluator_decision: "pass",
+          human_interventions: 0,
+          hot_file_growth_lines: 0,
+          usdUsed: 0.8,
+          sub_task_identity: separateTask
+        }),
+        evaluation: {
+          decision: "pass",
+          justification: "Independent task completed.",
+          evidence: []
+        }
+      });
+
+      const result = runAiloopCli(["external-validation", "report"], workspaceRoot);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toContain("Cost per task (USD):");
+      expect(result.stdout).toContain(
+        `- Track pilot cost by task identity | stable_id=${costTrackedTask.stable_id} | total_usd=0.3000 | avg_usd_per_round=0.1500`
+      );
+      expect(result.stdout).toContain(
+        `- Track pilot cost by task identity | stable_id=${separateTask.stable_id} | total_usd=0.8000 | avg_usd_per_round=0.8000`
       );
     } finally {
       await fs.rm(workspaceRoot, { recursive: true, force: true });
