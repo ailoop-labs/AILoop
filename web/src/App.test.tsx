@@ -17,10 +17,12 @@ import {
   StateChangeDigestPanel,
   SystemHealthPanel,
   applyCliProvider,
+  buildExternalValidationMetricsPath,
   deriveCliProvider,
   deriveControlAvailability,
   getCliModelOptions,
   parseFailureDiagnostics,
+  requestExternalValidationMetrics,
   requestExternalValidationPreflight,
   resolveCliModel,
   postControlAndRefresh,
@@ -710,6 +712,75 @@ describe("ExternalValidationChecklistCard", () => {
     expect(html).toContain("No qualifying Phase 3 pilot data yet");
     expect(html).toContain("did not find persisted round metrics with external-validation task identities");
   });
+
+  test("renders baseline comparison controls and delta cards when a baseline overlay is available", () => {
+    const html = renderToStaticMarkup(
+      <ExternalValidationChecklistCard
+        report={{
+          task_count: 4,
+          successful_task_count: 3,
+          checklist: {
+            rounds_per_successful_task: 2.33,
+            human_interventions_per_task: 0.75,
+            average_cost_usd_per_round: 0.1834,
+            evaluator_infrastructure_failures: 1,
+            hot_file_growth_lines: 6
+          },
+          baseline_comparison: {
+            baseline_runs_dir: "/tmp/baseline/.ailoop/runs",
+            checklist: {
+              rounds_per_successful_task: {
+                baseline: 3.5,
+                pilot: 2.33,
+                delta: -1.17
+              },
+              human_interventions_per_task: {
+                baseline: 1.25,
+                pilot: 0.75,
+                delta: -0.5
+              },
+              average_cost_usd_per_round: {
+                baseline: 0.2468,
+                pilot: 0.1834,
+                delta: -0.0634
+              },
+              evaluator_infrastructure_failures: {
+                baseline: 0,
+                pilot: 1,
+                delta: 1
+              },
+              hot_file_growth_lines: {
+                baseline: 14,
+                pilot: 6,
+                delta: -8
+              }
+            }
+          },
+          tasks: []
+        }}
+        baselineRunsDir="/tmp/baseline/.ailoop/runs"
+        onBaselineRunsDirChange={() => {}}
+        onApplyBaselineRunsDir={() => {}}
+        onClearBaselineRunsDir={() => {}}
+      />
+    );
+
+    expect(html).toContain("Baseline runs directory");
+    expect(html).toContain("Compare baseline");
+    expect(html).toContain("Checklist delta snapshot");
+    expect(html).toContain("Resolved baseline runs directory:");
+    expect(html).toContain("/tmp/baseline/.ailoop/runs");
+    expect(html).toContain("Improved metrics");
+    expect(html).toContain(">4 / 5<");
+    expect(html).toContain("Regressions");
+    expect(html).toContain(">1<");
+    expect(html).toContain("Pilot");
+    expect(html).toContain("Baseline");
+    expect(html).toContain("Delta");
+    expect(html).toContain("-1.17");
+    expect(html).toContain("-$0.0634");
+    expect(html).toContain("-8 lines");
+  });
 });
 
 describe("Phase3CandidatePreflightCard", () => {
@@ -841,6 +912,59 @@ describe("requestExternalValidationPreflight", () => {
     expect(headers.get("authorization")).toBe("Bearer admin-token");
     expect(headers.get("content-type")).toBe("application/json");
     expect(result.result.eligible).toBe(true);
+  });
+});
+
+describe("requestExternalValidationMetrics", () => {
+  test("adds the optional baseline runs directory to the metrics request path", async () => {
+    fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          task_count: 1,
+          successful_task_count: 1,
+          checklist: {
+            rounds_per_successful_task: 2,
+            human_interventions_per_task: 0,
+            average_cost_usd_per_round: 0.1,
+            evaluator_infrastructure_failures: 0,
+            hot_file_growth_lines: 0
+          },
+          baseline_comparison: {
+            baseline_runs_dir: "/tmp/baseline runs",
+            checklist: {
+              rounds_per_successful_task: { baseline: 3, pilot: 2, delta: -1 },
+              human_interventions_per_task: { baseline: 1, pilot: 0, delta: -1 },
+              average_cost_usd_per_round: { baseline: 0.2, pilot: 0.1, delta: -0.1 },
+              evaluator_infrastructure_failures: { baseline: 0, pilot: 0, delta: 0 },
+              hot_file_growth_lines: { baseline: 4, pilot: 0, delta: -4 }
+            }
+          },
+          tasks: []
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      )
+    );
+
+    const result = await requestExternalValidationMetrics("/tmp/baseline runs", "admin-token");
+
+    expect(buildExternalValidationMetricsPath("/tmp/baseline runs")).toBe(
+      "/api/metrics/external-validation?baselineRunsDir=%2Ftmp%2Fbaseline%20runs"
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/metrics/external-validation?baselineRunsDir=%2Ftmp%2Fbaseline%20runs",
+      expect.objectContaining({
+        headers: expect.any(Headers)
+      })
+    );
+    const headers = (fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined)?.headers as Headers;
+    expect(headers.get("authorization")).toBe("Bearer admin-token");
+    expect(result.baseline_comparison?.baseline_runs_dir).toBe("/tmp/baseline runs");
   });
 });
 

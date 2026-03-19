@@ -201,6 +201,23 @@ interface ExternalValidationChecklistMetrics {
   hot_file_growth_lines: number;
 }
 
+interface ExternalValidationChecklistMetricComparison {
+  baseline: number | null;
+  pilot: number | null;
+  delta: number | null;
+}
+
+interface ExternalValidationChecklistBaselineComparison {
+  baseline_runs_dir: string;
+  checklist: {
+    rounds_per_successful_task: ExternalValidationChecklistMetricComparison;
+    human_interventions_per_task: ExternalValidationChecklistMetricComparison;
+    average_cost_usd_per_round: ExternalValidationChecklistMetricComparison;
+    evaluator_infrastructure_failures: ExternalValidationChecklistMetricComparison;
+    hot_file_growth_lines: ExternalValidationChecklistMetricComparison;
+  };
+}
+
 interface ExternalValidationMetricsReport {
   task_count: number;
   successful_task_count: number;
@@ -209,6 +226,7 @@ interface ExternalValidationMetricsReport {
     stable_id: string;
     objective: string;
   }>;
+  baseline_comparison?: ExternalValidationChecklistBaselineComparison;
 }
 
 interface ExternalValidationPreflightChecks {
@@ -496,6 +514,22 @@ export async function requestExternalValidationPreflight(
   );
 }
 
+export function buildExternalValidationMetricsPath(baselineRunsDir?: string): string {
+  const trimmedBaselineRunsDir = baselineRunsDir?.trim() ?? "";
+  if (!trimmedBaselineRunsDir) {
+    return "/api/metrics/external-validation";
+  }
+
+  return `/api/metrics/external-validation?baselineRunsDir=${encodeURIComponent(trimmedBaselineRunsDir)}`;
+}
+
+export async function requestExternalValidationMetrics(
+  baselineRunsDir?: string,
+  token?: string
+): Promise<ExternalValidationMetricsReport> {
+  return api<ExternalValidationMetricsReport>(buildExternalValidationMetricsPath(baselineRunsDir), undefined, token);
+}
+
 function isUnauthorizedError(message: string): boolean {
   return message.includes("Unauthorized");
 }
@@ -576,6 +610,47 @@ function formatChecklistAverage(value: number | null): string {
 
 function formatChecklistUsd(value: number | null): string {
   return value === null ? "n/a" : `$${value.toFixed(4)}`;
+}
+
+function formatChecklistCount(value: number | null): string {
+  return value === null ? "n/a" : String(value);
+}
+
+function formatChecklistLines(value: number | null): string {
+  return value === null ? "n/a" : `${value} lines`;
+}
+
+function formatSignedChecklistAverage(value: number | null): string {
+  if (value === null) {
+    return "n/a";
+  }
+
+  return `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
+}
+
+function formatSignedChecklistUsd(value: number | null): string {
+  if (value === null) {
+    return "n/a";
+  }
+
+  const prefix = value < 0 ? "-" : value > 0 ? "+" : "";
+  return `${prefix}$${Math.abs(value).toFixed(4)}`;
+}
+
+function formatSignedChecklistCount(value: number | null): string {
+  if (value === null) {
+    return "n/a";
+  }
+
+  return `${value > 0 ? "+" : ""}${value}`;
+}
+
+function formatSignedChecklistLines(value: number | null): string {
+  if (value === null) {
+    return "n/a";
+  }
+
+  return `${value > 0 ? "+" : ""}${value} lines`;
 }
 
 function resolveChecklistThresholdTone(
@@ -1732,15 +1807,29 @@ export function Phase3CandidatePreflightCard({
 }
 
 export function ExternalValidationChecklistCard({
-  report
+  report,
+  baselineRunsDir = "",
+  baselineBusy = false,
+  onBaselineRunsDirChange,
+  onApplyBaselineRunsDir,
+  onClearBaselineRunsDir
 }: {
   report: ExternalValidationMetricsReport | null;
+  baselineRunsDir?: string;
+  baselineBusy?: boolean;
+  onBaselineRunsDirChange?: (value: string) => void;
+  onApplyBaselineRunsDir?: () => void;
+  onClearBaselineRunsDir?: () => void;
 }) {
   if (!report) {
     return null;
   }
 
   const successRate = report.task_count > 0 ? Math.round((report.successful_task_count / report.task_count) * 100) : 0;
+  const showBaselineControls =
+    typeof onBaselineRunsDirChange === "function" &&
+    typeof onApplyBaselineRunsDir === "function" &&
+    typeof onClearBaselineRunsDir === "function";
   const checklistCards = [
     {
       label: "Rounds / successful task",
@@ -1766,17 +1855,57 @@ export function ExternalValidationChecklistCard({
     },
     {
       label: "Evaluator infra failures",
-      value: String(report.checklist.evaluator_infrastructure_failures),
+      value: formatChecklistCount(report.checklist.evaluator_infrastructure_failures),
       detail: "Target 0",
       tone: report.checklist.evaluator_infrastructure_failures === 0 ? "good" : "critical"
     },
     {
       label: "Hot-file growth",
-      value: `${report.checklist.hot_file_growth_lines} lines`,
+      value: formatChecklistLines(report.checklist.hot_file_growth_lines),
       detail: "Target 0",
       tone: report.checklist.hot_file_growth_lines === 0 ? "good" : "warning"
     }
   ];
+  const comparisonCards = report.baseline_comparison
+    ? [
+        {
+          label: "Rounds / successful task",
+          comparison: report.baseline_comparison.checklist.rounds_per_successful_task,
+          formatValue: formatChecklistAverage,
+          formatDelta: formatSignedChecklistAverage
+        },
+        {
+          label: "Human interventions / task",
+          comparison: report.baseline_comparison.checklist.human_interventions_per_task,
+          formatValue: formatChecklistAverage,
+          formatDelta: formatSignedChecklistAverage
+        },
+        {
+          label: "Average cost / round",
+          comparison: report.baseline_comparison.checklist.average_cost_usd_per_round,
+          formatValue: formatChecklistUsd,
+          formatDelta: formatSignedChecklistUsd
+        },
+        {
+          label: "Evaluator infra failures",
+          comparison: report.baseline_comparison.checklist.evaluator_infrastructure_failures,
+          formatValue: formatChecklistCount,
+          formatDelta: formatSignedChecklistCount
+        },
+        {
+          label: "Hot-file growth",
+          comparison: report.baseline_comparison.checklist.hot_file_growth_lines,
+          formatValue: formatChecklistLines,
+          formatDelta: formatSignedChecklistLines
+        }
+      ].map((card) => ({
+        ...card,
+        tone:
+          card.comparison.delta === null ? "neutral" : card.comparison.delta < 0 ? "good" : card.comparison.delta > 0 ? "warning" : "neutral"
+      }))
+    : [];
+  const improvedMetricCount = comparisonCards.filter((card) => card.comparison.delta !== null && card.comparison.delta < 0).length;
+  const regressedMetricCount = comparisonCards.filter((card) => card.comparison.delta !== null && card.comparison.delta > 0).length;
 
   return (
     <section className="mt-4 rounded-2xl border border-white/10 bg-ink/60 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.04)]">
@@ -1797,6 +1926,110 @@ export function ExternalValidationChecklistCard({
           {report.successful_task_count > 0 ? "pilot evidence present" : "waiting for pilot data"}
         </span>
       </div>
+
+      {showBaselineControls ? (
+        <div className="mt-4 rounded-2xl border border-sky-300/20 bg-sky-300/10 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-sky-100/70">Baseline Comparison</p>
+              <h3 className="mt-2 text-lg font-semibold text-mist">Compare pilot results to a baseline run set</h3>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-mist/75">
+                Supply an optional runs directory to request baseline deltas for the five checklist metrics.
+              </p>
+            </div>
+            {report.baseline_comparison ? (
+              <span className="rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-accent">
+                baseline loaded
+              </span>
+            ) : (
+              <span className="rounded-full border border-white/10 bg-ink/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-mist/65">
+                optional overlay
+              </span>
+            )}
+          </div>
+          <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-end">
+            <label className="flex-1">
+              <span className="text-[11px] uppercase tracking-[0.18em] text-mist/55">Baseline runs directory</span>
+              <input
+                value={baselineRunsDir}
+                onChange={(event) => onBaselineRunsDirChange(event.target.value)}
+                placeholder="/path/to/baseline/.ailoop/runs"
+                className="mt-2 w-full rounded-xl border border-white/12 bg-ink/80 px-4 py-3 text-sm text-mist outline-none ring-sky-300/40 transition focus:ring"
+              />
+            </label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={onApplyBaselineRunsDir}
+                disabled={baselineBusy || baselineRunsDir.trim().length === 0}
+                className="rounded-xl bg-sky-300 px-4 py-3 text-sm font-semibold text-ink transition hover:bg-sky-200 disabled:cursor-not-allowed disabled:bg-sky-300/40"
+              >
+                {baselineBusy ? "Comparing..." : "Compare baseline"}
+              </button>
+              <button
+                type="button"
+                onClick={onClearBaselineRunsDir}
+                disabled={baselineBusy}
+                className="rounded-xl border border-white/15 bg-ink/70 px-4 py-3 text-sm font-semibold text-mist/80 transition hover:border-white/30 hover:text-mist disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {report.baseline_comparison ? (
+        <div className="mt-4 rounded-2xl border border-white/10 bg-panel/50 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-mist/55">Baseline vs pilot</p>
+              <h3 className="mt-2 text-lg font-semibold text-mist">Checklist delta snapshot</h3>
+              <p className="mt-2 flex flex-wrap items-center gap-2 text-sm leading-6 text-mist/75">
+                <span>Resolved baseline runs directory:</span>
+                <span className="rounded-full border border-white/10 bg-ink/70 px-3 py-1 font-mono text-xs text-mist/80">
+                  {report.baseline_comparison.baseline_runs_dir}
+                </span>
+              </p>
+            </div>
+            <div className="grid min-w-[220px] gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border border-accent/30 bg-accent/10 p-4">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-accent/80">Improved metrics</p>
+                <p className="mt-2 text-2xl font-semibold text-mist">{improvedMetricCount} / 5</p>
+              </div>
+              <div className="rounded-2xl border border-warning/40 bg-warning/10 p-4">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-warning/80">Regressions</p>
+                <p className="mt-2 text-2xl font-semibold text-mist">{regressedMetricCount}</p>
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            {comparisonCards.map((card) => (
+              <div key={card.label} className={`rounded-2xl border p-4 ${checklistSignalTone[card.tone]}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-current/80">{card.label}</p>
+                  <span className="h-2.5 w-2.5 rounded-full bg-current shadow-[0_0_10px_currentColor]" />
+                </div>
+                <dl className="mt-4 space-y-2 text-sm leading-6">
+                  <div className="flex items-center justify-between gap-3">
+                    <dt className="text-current/70">Pilot</dt>
+                    <dd className="font-semibold text-mist">{card.formatValue(card.comparison.pilot)}</dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <dt className="text-current/70">Baseline</dt>
+                    <dd className="font-semibold text-mist">{card.formatValue(card.comparison.baseline)}</dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 border-t border-current/15 pt-2">
+                    <dt className="text-current/70">Delta</dt>
+                    <dd className="font-semibold text-mist">{card.formatDelta(card.comparison.delta)}</dd>
+                  </div>
+                </dl>
+                <p className="mt-3 text-[11px] uppercase tracking-[0.16em] text-current/75">Lower is better</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {report.task_count === 0 ? (
         <div className="mt-4 rounded-2xl border border-dashed border-white/15 bg-panel/40 p-5">
@@ -1967,6 +2200,9 @@ export default function App() {
   const [status, setStatus] = useState<LoopStatus | null>(null);
   const [frictionIndex, setFrictionIndex] = useState<FrictionIndex | null>(null);
   const [externalValidation, setExternalValidation] = useState<ExternalValidationMetricsReport | null>(null);
+  const [baselineRunsDirInput, setBaselineRunsDirInput] = useState("");
+  const [appliedBaselineRunsDir, setAppliedBaselineRunsDir] = useState("");
+  const [baselineBusy, setBaselineBusy] = useState(false);
   const [preflightRepoPath, setPreflightRepoPath] = useState("");
   const [preflightResult, setPreflightResult] = useState<ExternalValidationPreflightReport | null>(null);
   const [preflightBusy, setPreflightBusy] = useState(false);
@@ -2034,6 +2270,8 @@ export default function App() {
       setAuthError(unauthorizedMessage);
       setRoles([]);
       setExternalValidation(null);
+      setBaselineRunsDirInput("");
+      setAppliedBaselineRunsDir("");
       setPreflightResult(null);
       setPreflightError(null);
       setSelectedRole(null);
@@ -2045,6 +2283,7 @@ export default function App() {
 
   const refresh = async (tokenOverride?: string): Promise<void> => {
     const activeToken = tokenOverride ?? authToken;
+    const shouldRequireBaselineComparison = appliedBaselineRunsDir.trim().length > 0;
     try {
       const [nextStatus, nextGoal, nextRuns, nextLogs, nextRoles, nextFriction, nextExternalValidation] = await Promise.all([
         api<LoopStatus>("/api/status", undefined, activeToken),
@@ -2053,9 +2292,9 @@ export default function App() {
         api<{ lines: string[] }>("/api/logs/tail?lines=120", undefined, activeToken),
         api<ProjectRoleResponse>("/api/roles", undefined, activeToken),
         api<FrictionIndex>("/api/metrics/friction-index", undefined, activeToken).catch(() => null),
-        api<ExternalValidationMetricsReport>("/api/metrics/external-validation", undefined, activeToken).catch(
-          () => null
-        )
+        shouldRequireBaselineComparison
+          ? requestExternalValidationMetrics(appliedBaselineRunsDir, activeToken)
+          : requestExternalValidationMetrics(undefined, activeToken).catch(() => null)
       ]);
       setStatus(nextStatus);
       setGoal(nextGoal.goal ?? "");
@@ -2121,7 +2360,7 @@ export default function App() {
       void refresh();
     }, 4000);
     return () => clearInterval(timer);
-  }, [isAuthenticated, authToken]);
+  }, [isAuthenticated, authToken, appliedBaselineRunsDir]);
 
   const controlAvailability = useMemo(() => deriveControlAvailability(status?.state), [status?.state]);
   const cliProvider = runtimeConfig ? deriveCliProvider(runtimeConfig.codex.bin) : "codex";
@@ -2228,6 +2467,8 @@ export default function App() {
     setRuns([]);
     setLogs([]);
     setExternalValidation(null);
+    setBaselineRunsDirInput("");
+    setAppliedBaselineRunsDir("");
     setPreflightResult(null);
     setPreflightError(null);
     setSelectedRole(null);
@@ -2284,6 +2525,41 @@ export default function App() {
       }
     } finally {
       setPreflightBusy(false);
+    }
+  };
+
+  const submitExternalValidationBaseline = async (): Promise<void> => {
+    const trimmedBaselineRunsDir = baselineRunsDirInput.trim();
+    if (!trimmedBaselineRunsDir) {
+      return;
+    }
+
+    try {
+      setBaselineBusy(true);
+      const nextReport = await requestExternalValidationMetrics(trimmedBaselineRunsDir, authToken);
+      setExternalValidation(nextReport);
+      setAppliedBaselineRunsDir(trimmedBaselineRunsDir);
+      setBaselineRunsDirInput(trimmedBaselineRunsDir);
+      setError(null);
+    } catch (requestError) {
+      handleRequestError(requestError, "Baseline comparison failed: please log in again.");
+    } finally {
+      setBaselineBusy(false);
+    }
+  };
+
+  const clearExternalValidationBaseline = async (): Promise<void> => {
+    try {
+      setBaselineBusy(true);
+      const nextReport = await requestExternalValidationMetrics(undefined, authToken);
+      setExternalValidation(nextReport);
+      setAppliedBaselineRunsDir("");
+      setBaselineRunsDirInput("");
+      setError(null);
+    } catch (requestError) {
+      handleRequestError(requestError, "Baseline comparison failed: please log in again.");
+    } finally {
+      setBaselineBusy(false);
     }
   };
 
@@ -2496,7 +2772,14 @@ export default function App() {
           }}
           onSubmit={() => void submitExternalValidationPreflight()}
         />
-        <ExternalValidationChecklistCard report={externalValidation} />
+        <ExternalValidationChecklistCard
+          report={externalValidation}
+          baselineRunsDir={baselineRunsDirInput}
+          baselineBusy={baselineBusy}
+          onBaselineRunsDirChange={setBaselineRunsDirInput}
+          onApplyBaselineRunsDir={() => void submitExternalValidationBaseline()}
+          onClearBaselineRunsDir={() => void clearExternalValidationBaseline()}
+        />
 
         <div className="mt-4 rounded-xl border border-white/10 bg-ink/60 p-4">
           <div className="flex items-center justify-between gap-3">
