@@ -154,13 +154,18 @@ async function writeExecutorDiagnosticsArtifact(
 ): Promise<string> {
   const redactor = new SecretRedactor(process.env);
   const diagnosticsPath = resolveExecutorDiagnosticsPath(runsDir);
+  const diagnostics = result.diagnostics;
   await writeJsonFile(diagnosticsPath, {
     created_at: new Date().toISOString(),
     exit_code: parseExitCode(result.error),
-    timed_out: /timed out/i.test(result.error ?? ""),
+    timed_out: diagnostics?.timedOut ?? /timed out/i.test(result.error ?? ""),
     sandbox,
     cwd,
-    prompt_chars: prompt.length,
+    model: diagnostics?.model ?? null,
+    prompt_chars: diagnostics?.promptChars ?? prompt.length,
+    input_tokens: diagnostics?.inputTokens ?? null,
+    output_tokens: diagnostics?.outputTokens ?? null,
+    total_tokens: diagnostics?.totalTokens ?? null,
     prompt_sha256: createHash("sha256").update(prompt).digest("hex"),
     role_contract_mode: "runtime_json_v1",
     stdout_tail: normalizeDiagnosticExcerpt(result.stdout, redactor, 800),
@@ -334,6 +339,18 @@ export class ExecutorAgent {
     if (!aiResult.ok || !aiResult.data) {
       let diagnosticsPath: string | undefined;
       let diagnosticsWriteError: string | undefined;
+      const timeoutContext = {
+        timed_out: aiResult.diagnostics?.timedOut ?? /timed out/i.test(aiResult.error ?? ""),
+        model: aiResult.diagnostics?.model ?? null,
+        prompt_chars: aiResult.diagnostics?.promptChars ?? prompt.length,
+        input_tokens: aiResult.diagnostics?.inputTokens ?? null,
+        output_tokens: aiResult.diagnostics?.outputTokens ?? null,
+        total_tokens: aiResult.diagnostics?.totalTokens ?? null
+      };
+
+      if (timeoutContext.timed_out) {
+        emitLog(options, `Executor timeout context: ${JSON.stringify(timeoutContext)}`);
+      }
 
       try {
         diagnosticsPath = await writeExecutorDiagnosticsArtifact(

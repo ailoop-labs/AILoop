@@ -363,6 +363,10 @@ describe("ExecutorAgent", () => {
       const payload = await readJsonFile<Record<string, unknown>>(diagnosticsPath!, {});
       expect(payload.exit_code).toBe(7);
       expect(payload.timed_out).toBe(false);
+      expect(payload.model).toBeNull();
+      expect(payload.input_tokens).toBeNull();
+      expect(payload.output_tokens).toBeNull();
+      expect(payload.total_tokens).toBeNull();
       expect(String(payload.stdout_tail || "")).toContain("[REDACTED]");
       expect(String(payload.stdout_tail || "")).not.toContain("supersecret123");
       expect(String(payload.stderr_tail || "")).toContain("apiToken=[REDACTED]");
@@ -463,6 +467,108 @@ describe("ExecutorAgent", () => {
       expect(result.toolResult.error?.message).not.toContain("diagnostics:");
       expect(result.actions[0]?.error).toBe(result.toolResult.error?.message);
       expect(logs.some((message) => message.includes("Executor diagnostics artifact failed:"))).toBe(true);
+    } finally {
+      process.chdir(originalCwd);
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("writes structured timeout context into executor diagnostics artifacts", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-executor-agent-timeout-debug-artifact-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    const runsDir = path.join(homeDir, "runs");
+    await fs.mkdir(runsDir, { recursive: true });
+    await fs.writeFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "# Executor Role\n\nCustom executor guidance.\n", "utf8");
+
+    const logs: string[] = [];
+    const mockCodex = {
+      async runJson() {
+        return {
+          ok: false,
+          data: undefined,
+          rawMessage: "",
+          stdout: '{"type":"turn.completed","usage":{"input_tokens":210,"output_tokens":45,"total_tokens":255}}',
+          stderr: "runner timed out",
+          error: "AI CLI process timed out after 30000ms",
+          diagnostics: {
+            timedOut: true,
+            model: "gpt-5.4",
+            promptChars: 4321,
+            inputTokens: 210,
+            outputTokens: 45,
+            totalTokens: 255
+          }
+        };
+      }
+    };
+    const stubTools = {
+      async initialize() {},
+      listTools() {
+        return [{ name: "read_file", description: "Reads a file." }];
+      },
+      getSkillManager() {
+        return {
+          getAvailableSkills() {
+            return [];
+          }
+        };
+      }
+    };
+    const guardrails = {
+      recordAction() {}
+    };
+
+    const originalCwd = process.cwd();
+    process.chdir(workspaceRoot);
+
+    try {
+      const agent = new ExecutorAgent(stubTools as never, makeConfig(homeDir), mockCodex as never);
+      const result = await agent.execute({
+        subTask: sampleSubTask,
+        round: 2,
+        goal: "Ship feature",
+        instructions: ["Keep scope minimal"],
+        guardrails: guardrails as never,
+        paths: {
+          homeDir,
+          runsDir,
+          taskPath: path.join(homeDir, "README.md"),
+          productRequirementsDirPath: path.join(homeDir, "product-requirements"),
+          activeRequirementPath: path.join(homeDir, "product-requirements/current.md"),
+          plannerRolePath: path.join(homeDir, "PLANNER_ROLE.md"),
+          productManagerRolePath: path.join(homeDir, "PRODUCT_MANAGER_ROLE.md"),
+          executorRolePath: path.join(homeDir, "EXECUTOR_ROLE.md"),
+          designerRolePath: path.join(homeDir, "DESIGNER_ROLE.md"),
+          evaluatorRolePath: path.join(homeDir, "EVALUATOR_ROLE.md"),
+          leaderRolePath: path.join(homeDir, "LEADER_ROLE.md"),
+          instructionsPath: path.join(homeDir, "instructions.queue.json"),
+          legacyInstructionsPath: path.join(homeDir, "instructions.queue.legacy.json"),
+          statePath: path.join(homeDir, "loop.state.json"),
+          legacyStatePath: path.join(homeDir, "loop.state.legacy.json"),
+          pidPath: path.join(homeDir, "engine.pid"),
+          stopFlagPath: path.join(homeDir, "STOP"),
+          pauseFlagPath: path.join(homeDir, "PAUSE"),
+          lockPath: path.join(homeDir, "engine.lock"),
+          dbPath: path.join(homeDir, "ailoop.db")
+        },
+        onLog: async (message) => {
+          logs.push(message);
+        }
+      });
+
+      expect(result.toolResult.status).toBe("failure");
+      expect(logs.some((message) => message.includes("Executor timeout context:"))).toBe(true);
+
+      const diagnosticsPath = result.toolResult.error?.message.match(/diagnostics: ([^|]+)/)?.[1]?.trim();
+      expect(diagnosticsPath).toBeTruthy();
+
+      const payload = await readJsonFile<Record<string, unknown>>(diagnosticsPath!, {});
+      expect(payload.timed_out).toBe(true);
+      expect(payload.model).toBe("gpt-5.4");
+      expect(payload.prompt_chars).toBe(4321);
+      expect(payload.input_tokens).toBe(210);
+      expect(payload.output_tokens).toBe(45);
+      expect(payload.total_tokens).toBe(255);
     } finally {
       process.chdir(originalCwd);
       await fs.rm(workspaceRoot, { recursive: true, force: true });

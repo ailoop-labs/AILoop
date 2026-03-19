@@ -678,6 +678,45 @@ describe("AIClient.runJson", () => {
     expect(result.error).not.toContain("not valid JSON");
   });
 
+  test("captures configured model and token counts in timeout diagnostics when provider metadata is available", async () => {
+    const runner: ProcessRunner = async (_cmd, args) => {
+      await fs.writeFile(outputPathFromArgs(args), "", "utf8");
+      return {
+        code: 1,
+        stdout:
+          '{"type":"session.started","model":"provider-fallback-model"}\n' +
+          '{"type":"turn.completed","usage":{"input_tokens":321,"output_tokens":34,"total_tokens":355}}\n',
+        stderr: "runner timed out",
+        timedOut: true
+      };
+    };
+
+    const client = new AIClient(
+      {
+        ...createCodexConfig(),
+        model: "gpt-5.4"
+      },
+      runner
+    );
+    const result = await client.runJson({
+      prompt: "Return JSON",
+      schema: { type: "object" },
+      cwd: process.cwd(),
+      sandbox: "read-only",
+      maxRetries: 0
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics).toEqual({
+      timedOut: true,
+      model: "gpt-5.4",
+      promptChars: "Return JSON".length,
+      inputTokens: 321,
+      outputTokens: 34,
+      totalTokens: 355
+    });
+  });
+
   test("waits one minute and retries transient interface errors before succeeding", async () => {
     const attempts = [
       { code: 1, output: "", stdout: "", stderr: "ERROR: unexpected status 502 Bad Gateway: upstream" },

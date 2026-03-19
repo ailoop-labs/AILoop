@@ -31,6 +31,16 @@ export interface AIJsonCallResult<T> {
   stdout: string;
   stderr: string;
   error?: string;
+  diagnostics?: AIJsonCallDiagnostics;
+}
+
+export interface AIJsonCallDiagnostics {
+  timedOut: boolean;
+  model: string | null;
+  promptChars: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
 }
 
 export interface ProcessRunResult {
@@ -267,6 +277,10 @@ interface CodexJsonlMetadata {
   sessionId: string | null;
   errorMessages: string[];
   assistantMessages: string[];
+  model: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
 }
 
 interface CodexCliInvocationOptions {
@@ -283,6 +297,17 @@ function maybePushString(target: string[], value: unknown): void {
     return;
   }
   target.push(normalized);
+}
+
+function findLastNonNull<T>(values: Array<T | null | undefined>): T | null {
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    const candidate = values[index];
+    if (candidate !== null && candidate !== undefined) {
+      return candidate;
+    }
+  }
+
+  return null;
 }
 
 function collectSessionId(value: unknown): string | null {
@@ -350,10 +375,95 @@ function collectCodexMessages(value: unknown, errors: string[], assistantMessage
   }
 }
 
-function parseCodexJsonlMetadata(payload: string): CodexJsonlMetadata {
-  const sessionCandidates: string[] = [];
-  const errorMessages: string[] = [];
-  const assistantMessages: string[] = [];
+function maybePushNumber(target: number[], value: unknown): void {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    target.push(value);
+    return;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      target.push(parsed);
+    }
+  }
+}
+
+function maybePushModelName(models: string[], value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      maybePushModelName(models, item);
+    }
+    return;
+  }
+
+  if (typeof value !== "string") {
+    return;
+  }
+
+  maybePushString(models, value);
+}
+
+function collectModelNames(value: unknown, models: string[]): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectModelNames(item, models);
+    }
+    return;
+  }
+
+  if (!isRecord(value)) {
+    return;
+  }
+
+  for (const key of ["model", "model_name", "modelName", "requested_model", "requestedModel"]) {
+    if (key in value) {
+      maybePushModelName(models, value[key]);
+    }
+  }
+
+  for (const child of Object.values(value)) {
+    collectModelNames(child, models);
+  }
+}
+
+function collectTokenCounts(
+  value: unknown,
+  inputTokens: number[],
+  outputTokens: number[],
+  totalTokens: number[]
+): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectTokenCounts(item, inputTokens, outputTokens, totalTokens);
+    }
+    return;
+  }
+
+  if (!isRecord(value)) {
+    return;
+  }
+
+  maybePushNumber(inputTokens, value.input_tokens);
+  maybePushNumber(inputTokens, value.inputTokens);
+  maybePushNumber(inputTokens, value.prompt_tokens);
+  maybePushNumber(inputTokens, value.promptTokens);
+
+  maybePushNumber(outputTokens, value.output_tokens);
+  maybePushNumber(outputTokens, value.outputTokens);
+  maybePushNumber(outputTokens, value.completion_tokens);
+  maybePushNumber(outputTokens, value.completionTokens);
+
+  maybePushNumber(totalTokens, value.total_tokens);
+  maybePushNumber(totalTokens, value.totalTokens);
+
+  for (const child of Object.values(value)) {
+    collectTokenCounts(child, inputTokens, outputTokens, totalTokens);
+  }
+}
+
+function parsePayloadJsonObjects(payload: string): unknown[] {
+  const parsedObjects: unknown[] = [];
 
   for (const line of payload.split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -362,7 +472,32 @@ function parseCodexJsonlMetadata(payload: string): CodexJsonlMetadata {
     }
 
     const parsed = parseJsonSafely<unknown>(trimmed);
-    if (!parsed) {
+    if (parsed !== null) {
+      parsedObjects.push(parsed);
+    }
+  }
+
+  for (const embedded of extractJsonObjects(payload)) {
+    const parsed = parseJsonSafely<unknown>(embedded);
+    if (parsed !== null) {
+      parsedObjects.push(parsed);
+    }
+  }
+
+  return parsedObjects;
+}
+
+function parseCodexJsonlMetadata(payload: string): CodexJsonlMetadata {
+  const sessionCandidates: string[] = [];
+  const errorMessages: string[] = [];
+  const assistantMessages: string[] = [];
+  const modelCandidates: string[] = [];
+  const inputTokens: number[] = [];
+  const outputTokens: number[] = [];
+  const totalTokens: number[] = [];
+
+  for (const parsed of parsePayloadJsonObjects(payload)) {
+    if (parsed === null) {
       continue;
     }
 
@@ -371,12 +506,40 @@ function parseCodexJsonlMetadata(payload: string): CodexJsonlMetadata {
       sessionCandidates.push(sessionId);
     }
     collectCodexMessages(parsed, errorMessages, assistantMessages);
+    collectModelNames(parsed, modelCandidates);
+    collectTokenCounts(parsed, inputTokens, outputTokens, totalTokens);
   }
 
   return {
     sessionId: sessionCandidates.at(-1) ?? null,
     errorMessages: Array.from(new Set(errorMessages)),
-    assistantMessages: Array.from(new Set(assistantMessages))
+    assistantMessages: Array.from(new Set(assistantMessages)),
+    model: modelCandidates.at(-1) ?? null,
+    inputTokens: inputTokens.at(-1) ?? null,
+    outputTokens: outputTokens.at(-1) ?? null,
+    totalTokens: totalTokens.at(-1) ?? null
+  };
+}
+
+function buildAICallDiagnostics(
+  config: AIConfig,
+  prompt: string,
+  runResult?: ProcessRunResult,
+  payloads: string[] = []
+): AIJsonCallDiagnostics {
+  const metadata = payloads
+    .filter((payload) => payload.trim().length > 0)
+    .map((payload) => parseCodexJsonlMetadata(payload));
+
+  const configuredModel = config.model.trim();
+
+  return {
+    timedOut: Boolean(runResult?.timedOut),
+    model: configuredModel || findLastNonNull(metadata.map((item) => item.model)),
+    promptChars: prompt.length,
+    inputTokens: findLastNonNull(metadata.map((item) => item.inputTokens)),
+    outputTokens: findLastNonNull(metadata.map((item) => item.outputTokens)),
+    totalTokens: findLastNonNull(metadata.map((item) => item.totalTokens))
   };
 }
 
@@ -787,6 +950,11 @@ export class AIClient {
         const parsedCandidate = outputCandidate ?? stdoutCandidate ?? stderrCandidate;
         const rawMessage = parsedCandidate?.rawMessage ?? outputPayload;
         const parsed = parsedCandidate?.data;
+        const diagnostics = buildAICallDiagnostics(this.config, finalPrompt, runResult, [
+          runResult.stdout,
+          runResult.stderr,
+          outputPayload
+        ]);
 
         if (combinedStdout) {
           combinedStdout += "\n";
@@ -804,7 +972,8 @@ export class AIClient {
             data: parsed,
             rawMessage,
             stdout: combinedStdout,
-            stderr: combinedStderr
+            stderr: combinedStderr,
+            diagnostics
           };
         }
 
@@ -821,7 +990,8 @@ export class AIClient {
           rawMessage,
           stdout: combinedStdout,
           stderr: combinedStderr,
-          error: errorMessage
+          error: errorMessage,
+          diagnostics
         };
 
         const shouldRetryByPolicy = attempt < maxRetries && isRetryableFailure(errorMessage, Boolean(runResult.timedOut));
@@ -858,7 +1028,8 @@ export class AIClient {
           rawMessage: "",
           stdout: combinedStdout,
           stderr: combinedStderr,
-          error: "AI CLI execution failed with unknown retry state"
+          error: "AI CLI execution failed with unknown retry state",
+          diagnostics: buildAICallDiagnostics(this.config, basePrompt)
         }
       );
     } catch (error) {
@@ -867,7 +1038,8 @@ export class AIClient {
         rawMessage: "",
         stdout: "",
         stderr: "",
-        error: (error as Error).message
+        error: (error as Error).message,
+        diagnostics: buildAICallDiagnostics(this.config, options.prompt)
       };
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });
