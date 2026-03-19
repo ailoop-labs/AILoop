@@ -709,6 +709,50 @@ describe("buildDimensionPrompt", () => {
     expect(targetedExcerpts.some((excerpt) => excerpt.source === "log_lines")).toBe(true);
   });
 
+  test("surfaces round-level no-mutation claim mismatches with file-scoped diff evidence", () => {
+    const context = makeRoundContext();
+    context.toolResult.summary =
+      "No code change was required; verified the focused Codex regression contract and reran the targeted bun test.";
+    context.toolResult.operational_evidence = [
+      "$ bun test /Users/yinjames/projects/AILoop/src/agent/codex-client.test.ts",
+      "24 pass",
+      "0 fail"
+    ];
+    context.stateChange = [
+      "### Snapshot File Diffs",
+      "```diff",
+      "--- src/agent/codex-client.test.ts",
+      "+++ src/agent/codex-client.test.ts",
+      "@@ -287,6 +287,12 @@ describe(\"AIClient.runJson\", () => {",
+      "+    const round76ResumeFailure =",
+      '+      "Warning: no last agent message; wrote empty content to /tmp/round-76-result.json\\n\\n" +',
+      "+            stderr: round76ResumeFailure",
+      "```"
+    ].join("\n");
+
+    const roundContext = extractPromptRoundContext(buildDimensionPrompt("causal_validity", context));
+    const inconsistencySummary = roundContext.round_inconsistency_summary as Record<string, unknown>;
+    const directEvidence = inconsistencySummary.direct_evidence as Array<Record<string, string>>;
+    const targetedExcerpts = roundContext.targeted_excerpts as Array<Record<string, string>>;
+
+    expect(inconsistencySummary.status).toBe("present");
+    expect(String(inconsistencySummary.summary)).toContain("claims no code change");
+    expect(String(inconsistencySummary.summary)).toContain("src/agent/codex-client.test.ts");
+    expect((inconsistencySummary.conflicting_signals as string[])[0]).toContain("No code change was required");
+    expect((inconsistencySummary.conflicting_signals as string[])[1]).toContain("src/agent/codex-client.test.ts");
+    expect(directEvidence[0]?.file_path).toBe("src/agent/codex-client.test.ts");
+    expect(directEvidence[0]?.artifact_path).toBe(".ailoop/runs/example.round.state_change.txt");
+    expect(directEvidence[0]?.excerpt).toContain("src/agent/codex-client.test.ts");
+    expect(directEvidence[0]?.excerpt).toContain("const round76ResumeFailure");
+    expect(
+      targetedExcerpts.some(
+        (excerpt) =>
+          excerpt.source === "round_inconsistency_summary.direct_evidence" &&
+          excerpt.excerpt.includes("src/agent/codex-client.test.ts")
+      )
+    ).toBe(true);
+  });
+
   test("prefers executor validation evidence over planner guidance when deriving excerpts", () => {
     const context = makeRoundContext();
     context.stateChange = [

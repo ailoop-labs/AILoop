@@ -594,6 +594,8 @@ function buildArtifactManifest(context: RoundEvaluationContext): Record<string, 
 const MAX_VALIDATION_HIGHLIGHTS = 4;
 const MAX_TARGETED_EXCERPTS = 6;
 const MAX_EXCERPT_LENGTH = 220;
+const MAX_INCONSISTENCY_DIRECT_EVIDENCE = 2;
+const MAX_FILE_SCOPED_DIFF_LINES = 3;
 
 const VALIDATION_SIGNAL_PATTERNS: RegExp[] = [
   /\btest(?:s|ed|ing)?\b/i,
@@ -633,6 +635,26 @@ const STATE_CHANGE_EXCERPT_PATTERNS: RegExp[] = [
   /\btoContain\s*\(/i
 ];
 
+const NO_MUTATION_CLAIM_PATTERNS: RegExp[] = [
+  /\bno code change(?:s)? (?:was|were) required\b/i,
+  /\bno code change(?:s)? needed\b/i,
+  /\bno code change(?:s)? required\b/i,
+  /\bno changes? (?:was|were) required\b/i,
+  /\bno file edits? (?:was|were) required\b/i,
+  /\bno file mutations?\b/i
+];
+
+type RoundInconsistencySummary = {
+  status: "none" | "present";
+  summary: string;
+  conflicting_signals: string[];
+  direct_evidence: Array<{
+    file_path: string;
+    artifact_path: string;
+    excerpt: string;
+  }>;
+};
+
 function normalizePromptText(value: string): string {
   return redactSecretLikeText(value.replace(/\s+/g, " ").trim());
 }
@@ -643,6 +665,118 @@ function truncatePromptText(value: string, maxLength = MAX_EXCERPT_LENGTH): stri
   }
 
   return `${value.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
+function summarizeNoMutationClaim(summary: string): string | null {
+  const normalized = normalizePromptText(summary);
+  if (!normalized || !hasPattern(NO_MUTATION_CLAIM_PATTERNS, normalized)) {
+    return null;
+  }
+
+  return normalized;
+}
+
+function collectFileScopedStateChangeExcerpts(
+  stateChange: string,
+  changedFiles: string[]
+): Array<{ file_path: string; excerpt: string }> {
+  if (changedFiles.length === 0) {
+    return [];
+  }
+
+  const requestedFiles = new Set(changedFiles);
+  const results: Array<{ file_path: string; excerpt: string }> = [];
+  const lines = stateChange.split("\n");
+
+  for (let index = 0; index < lines.length && results.length < MAX_INCONSISTENCY_DIRECT_EVIDENCE; index += 1) {
+    const line = lines[index]?.trimEnd() ?? "";
+    if (!line.startsWith("+++ ")) {
+      continue;
+    }
+
+    const filePath = line.slice(4).trim().replace(/^b\//, "");
+    if (!requestedFiles.has(filePath) || filePath.startsWith(".ailoop/runs/")) {
+      continue;
+    }
+
+    const excerptLines: string[] = [];
+    for (let innerIndex = index + 1; innerIndex < lines.length; innerIndex += 1) {
+      const nextLine = lines[innerIndex]?.trimEnd() ?? "";
+      if (nextLine.startsWith("### ") || nextLine.startsWith("+++ ")) {
+        break;
+      }
+
+      const normalized = normalizePromptText(nextLine);
+      if (!normalized) {
+        continue;
+      }
+
+      if (nextLine.startsWith("@@")) {
+        excerptLines.push(normalized);
+        continue;
+      }
+
+      if (
+        (nextLine.startsWith("+") || nextLine.startsWith("-")) &&
+        !nextLine.startsWith("+++") &&
+        !nextLine.startsWith("---")
+      ) {
+        excerptLines.push(normalized);
+      }
+
+      if (excerptLines.length >= MAX_FILE_SCOPED_DIFF_LINES + 1) {
+        break;
+      }
+    }
+
+    if (excerptLines.length === 0) {
+      continue;
+    }
+
+    results.push({
+      file_path: filePath,
+      excerpt: [filePath, ...excerptLines].join(" | ")
+    });
+    requestedFiles.delete(filePath);
+  }
+
+  return results;
+}
+
+function buildRoundInconsistencySummary(
+  context: RoundEvaluationContext,
+  stateChangeSummary: ReturnType<typeof summarizeStateChangeForEvaluation>,
+  artifactManifest: Record<string, string>
+): RoundInconsistencySummary {
+  const noMutationClaim = summarizeNoMutationClaim(context.toolResult.summary);
+  if (!noMutationClaim || stateChangeSummary.changed_files.length === 0) {
+    return {
+      status: "none",
+      summary: "No round-level inconsistency detected between executor summary and recorded state-change artifact.",
+      conflicting_signals: [],
+      direct_evidence: []
+    };
+  }
+
+  const directEvidence = collectFileScopedStateChangeExcerpts(context.stateChange, stateChangeSummary.changed_files).map(
+    (item) => ({
+      ...item,
+      artifact_path: artifactManifest.state_change_path || ""
+    })
+  );
+  const changedFilesLabel = stateChangeSummary.changed_files.join(", ");
+
+  return {
+    status: "present",
+    summary:
+      `Executor summary claims no code change, but the state-change artifact records edits in ` +
+      `${stateChangeSummary.changed_files.length} file(s): ${changedFilesLabel}.`,
+    conflicting_signals: [
+      `executor_summary: ${noMutationClaim}`,
+      `state_change_summary: changed_files=${JSON.stringify(stateChangeSummary.changed_files)}, added_lines=${stateChangeSummary.added_lines}, removed_lines=${stateChangeSummary.removed_lines}`
+    ],
+    direct_evidence: directEvidence
+  };
 }
 
 function scoreLogEvidence(line: string): number {
@@ -778,7 +912,8 @@ function buildValidationSummary(
 function buildTargetedExcerpts(
   context: RoundEvaluationContext,
   stateChangeSummary: ReturnType<typeof summarizeStateChangeForEvaluation>,
-  artifactManifest: Record<string, string>
+  artifactManifest: Record<string, string>,
+  roundInconsistencySummary: RoundInconsistencySummary
 ): Array<Record<string, string>> {
   const targeted: Array<Record<string, string>> = [];
   const seen = new Set<string>();
@@ -801,6 +936,16 @@ function buildTargetedExcerpts(
       excerpt
     });
   };
+
+  for (const evidence of roundInconsistencySummary.direct_evidence) {
+    addExcerpt({
+      source: "round_inconsistency_summary.direct_evidence",
+      artifactPath: evidence.artifact_path,
+      selectionReason:
+        "Executor summary and state-change artifact conflict; include the file-scoped diff excerpt that makes the mismatch concrete.",
+      excerpt: evidence.excerpt
+    });
+  }
 
   for (const line of context.toolResult.operational_evidence ?? []) {
     addExcerpt({
@@ -858,6 +1003,7 @@ function buildTargetedExcerpts(
 function buildCompactEvaluationContext(context: RoundEvaluationContext): Record<string, unknown> {
   const artifactManifest = buildArtifactManifest(context);
   const stateChangeSummary = summarizeStateChangeForEvaluation(context.stateChange);
+  const roundInconsistencySummary = buildRoundInconsistencySummary(context, stateChangeSummary, artifactManifest);
 
   return {
     objective: context.subTask.objective,
@@ -878,7 +1024,13 @@ function buildCompactEvaluationContext(context: RoundEvaluationContext): Record<
     budget_limits: context.budgetLimits,
     budget_usage: context.budgetUsage,
     state_change_summary: stateChangeSummary,
-    targeted_excerpts: buildTargetedExcerpts(context, stateChangeSummary, artifactManifest)
+    round_inconsistency_summary: roundInconsistencySummary,
+    targeted_excerpts: buildTargetedExcerpts(
+      context,
+      stateChangeSummary,
+      artifactManifest,
+      roundInconsistencySummary
+    )
   };
 }
 
