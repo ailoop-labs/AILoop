@@ -14,9 +14,12 @@ import { readRuntimeLoopConfig, runtimeLoopConfigToEnv } from "../config/runtime
 import { readActiveRequirementSnapshot } from "../product/requirements";
 import {
   buildExternalValidationMetricsReport,
-  type ExternalValidationChecklistMetricComparison,
   type ExternalValidationMetricsReport
 } from "../reporting/metrics";
+import {
+  buildExternalValidationChecklistBaselineComparison,
+  renderExternalValidationMetricsReport
+} from "../reporting/external-validation";
 import { buildRoundArtifactPaths, listRunRecords, readLastLogTail } from "../reporting/summary";
 import { evaluateExternalValidationPreflight } from "../environment/workspace";
 import type {
@@ -166,35 +169,6 @@ export interface ExternalValidationMetricsCliReport {
   report: string;
 }
 
-function formatUsd(value: number): string {
-  return value.toFixed(4);
-}
-
-function formatAverage(value: number | null): string {
-  return value === null ? "n/a" : value.toFixed(2);
-}
-
-function formatCount(value: number | null): string {
-  return value === null ? "n/a" : String(value);
-}
-
-function formatDelta(value: number | null, formatter: (value: number | null) => string): string {
-  if (value === null) {
-    return "n/a";
-  }
-
-  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
-  return `${sign}${formatter(Math.abs(value))}`;
-}
-
-function formatChecklistComparisonLine(
-  label: string,
-  metric: ExternalValidationChecklistMetricComparison,
-  formatter: (value: number | null) => string
-): string {
-  return `- ${label}: baseline=${formatter(metric.baseline)} | pilot=${formatter(metric.pilot)} | delta=${formatDelta(metric.delta, formatter)}`;
-}
-
 function roleTitle(role: ProjectRole): string {
   if (role === "planner") {
     return "Project Planner";
@@ -295,121 +269,6 @@ export async function runExternalValidationPreflight(
   };
 }
 
-export function renderExternalValidationMetricsReport(report: ExternalValidationMetricsReport): string {
-  const lines = [
-    "External validation metrics report",
-    `Tasks analyzed: ${report.task_count}`,
-    `Successful tasks: ${report.successful_task_count}`,
-    "Verification checklist summary:",
-    `- Rounds per successful task: ${formatAverage(report.checklist.rounds_per_successful_task)} (target < 5)`,
-    `- Human interventions per task: ${formatAverage(report.checklist.human_interventions_per_task)} (target < 2)`,
-    `- Average cost per round (USD): ${report.checklist.average_cost_usd_per_round === null ? "n/a" : formatUsd(report.checklist.average_cost_usd_per_round)}`,
-    `- Evaluator infrastructure failures: ${report.checklist.evaluator_infrastructure_failures} (target 0)`,
-    `- Hot-file growth lines: ${report.checklist.hot_file_growth_lines} (target 0)`,
-    "Rounds per successful task:"
-  ];
-
-  const successfulTasks = report.tasks.filter((task) => task.successful);
-  if (successfulTasks.length === 0) {
-    lines.push("- none");
-  } else {
-    for (const task of successfulTasks) {
-      lines.push(`- ${task.objective} | stable_id=${task.stable_id} | rounds=${task.rounds}`);
-    }
-  }
-
-  lines.push("Cost per task (USD):");
-  if (report.tasks.length === 0) {
-    lines.push("- none");
-  } else {
-    for (const task of report.tasks) {
-      lines.push(
-        `- ${task.objective} | stable_id=${task.stable_id} | total_usd=${formatUsd(task.total_cost_usd)} | avg_usd_per_round=${formatUsd(task.average_cost_usd_per_round)}`
-      );
-    }
-  }
-
-  lines.push("Human interventions per task:");
-  if (report.tasks.length === 0) {
-    lines.push("- none");
-  } else {
-    for (const task of report.tasks) {
-      lines.push(`- ${task.objective} | stable_id=${task.stable_id} | count=${task.human_interventions}`);
-    }
-  }
-
-  lines.push("No-op claim mismatches per task:");
-  if (report.tasks.length === 0) {
-    lines.push("- none");
-  } else {
-    for (const task of report.tasks) {
-      lines.push(`- ${task.objective} | stable_id=${task.stable_id} | count=${task.no_op_claim_mismatches}`);
-    }
-  }
-
-  lines.push("Evaluator infrastructure failure count:");
-  if (report.tasks.length === 0) {
-    lines.push("- none");
-  } else {
-    for (const task of report.tasks) {
-      lines.push(
-        `- ${task.objective} | stable_id=${task.stable_id} | count=${task.evaluator_infrastructure_failures}`
-      );
-    }
-  }
-
-  lines.push("Hot-file growth totals:");
-  if (report.tasks.length === 0) {
-    lines.push("- none");
-  } else {
-    for (const task of report.tasks) {
-      lines.push(`- ${task.objective} | stable_id=${task.stable_id} | lines=${task.hot_file_growth_lines}`);
-    }
-  }
-
-  if (report.baseline_comparison) {
-    lines.push(`Baseline comparison runs dir: ${report.baseline_comparison.baseline_runs_dir}`);
-    lines.push("Baseline checklist comparison:");
-    lines.push(
-      formatChecklistComparisonLine(
-        "Rounds per successful task",
-        report.baseline_comparison.checklist.rounds_per_successful_task,
-        formatAverage
-      )
-    );
-    lines.push(
-      formatChecklistComparisonLine(
-        "Human interventions per task",
-        report.baseline_comparison.checklist.human_interventions_per_task,
-        formatAverage
-      )
-    );
-    lines.push(
-      formatChecklistComparisonLine(
-        "Average cost per round (USD)",
-        report.baseline_comparison.checklist.average_cost_usd_per_round,
-        (value) => (value === null ? "n/a" : formatUsd(value))
-      )
-    );
-    lines.push(
-      formatChecklistComparisonLine(
-        "Evaluator infrastructure failures",
-        report.baseline_comparison.checklist.evaluator_infrastructure_failures,
-        formatCount
-      )
-    );
-    lines.push(
-      formatChecklistComparisonLine(
-        "Hot-file growth lines",
-        report.baseline_comparison.checklist.hot_file_growth_lines,
-        formatCount
-      )
-    );
-  }
-
-  return lines.join("\n");
-}
-
 export async function runExternalValidationMetricsReport(
   config: AppConfig,
   baselineRunsDir?: string,
@@ -426,11 +285,14 @@ export async function runExternalValidationMetricsReport(
     }
   }
 
-  const metrics = await buildExternalValidationMetricsReport(paths.runsDir, resolvedBaselineRunsDir);
+  const metrics = await buildExternalValidationMetricsReport(paths.runsDir);
+  const baselineComparison = resolvedBaselineRunsDir
+    ? await buildExternalValidationChecklistBaselineComparison(metrics.checklist, resolvedBaselineRunsDir)
+    : undefined;
 
   return {
     metrics,
-    report: renderExternalValidationMetricsReport(metrics)
+    report: renderExternalValidationMetricsReport(metrics, baselineComparison)
   };
 }
 

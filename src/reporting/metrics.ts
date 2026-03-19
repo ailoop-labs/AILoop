@@ -6,6 +6,7 @@ import type {
   BudgetUsage,
   EvaluationResult,
   ExternalValidationChecklistMetrics,
+  ExternalValidationMetricsReport,
   ExternalValidationTaskMetrics,
   SubTask
 } from "../types/contracts";
@@ -50,32 +51,11 @@ export interface RoundMetrics {
   sub_task_identity?: RoundSubTaskIdentity;
 }
 
-export interface ExternalValidationChecklistMetricComparison {
-  baseline: number | null;
-  pilot: number | null;
-  delta: number | null;
-}
-
-export interface ExternalValidationChecklistBaselineComparison {
-  baseline_runs_dir: string;
-  checklist: {
-    rounds_per_successful_task: ExternalValidationChecklistMetricComparison;
-    human_interventions_per_task: ExternalValidationChecklistMetricComparison;
-    average_cost_usd_per_round: ExternalValidationChecklistMetricComparison;
-    evaluator_infrastructure_failures: ExternalValidationChecklistMetricComparison;
-    hot_file_growth_lines: ExternalValidationChecklistMetricComparison;
-  };
-}
-
-export interface ExternalValidationMetricsReport {
-  task_count: number;
-  successful_task_count: number;
-  checklist: ExternalValidationChecklistMetrics;
-  tasks: ExternalValidationTaskMetrics[];
-  baseline_comparison?: ExternalValidationChecklistBaselineComparison;
-}
-
-export type { ExternalValidationChecklistMetrics, ExternalValidationTaskMetrics };
+export type {
+  ExternalValidationChecklistMetrics,
+  ExternalValidationMetricsReport,
+  ExternalValidationTaskMetrics
+};
 
 function normalizeSubTaskIdentityText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -116,18 +96,6 @@ function normalizeUsd(value: unknown): number {
 
 function normalizeAverage(value: number): number {
   return Number(value.toFixed(6));
-}
-
-function buildChecklistMetricComparison(
-  pilot: number | null,
-  baseline: number | null,
-  normalizeDelta: (value: number) => number = normalizeAverage
-): ExternalValidationChecklistMetricComparison {
-  return {
-    baseline,
-    pilot,
-    delta: pilot === null || baseline === null ? null : normalizeDelta(pilot - baseline)
-  };
 }
 
 const NO_OP_CLAIM_PATTERNS: RegExp[] = [
@@ -191,36 +159,6 @@ function isEvaluatorInfrastructureFailure(evaluation: EvaluationResult | null): 
   }
 
   return /^Evaluator infrastructure failure:/i.test(evaluation.justification);
-}
-
-function buildChecklistBaselineComparison(
-  pilot: ExternalValidationChecklistMetrics,
-  baseline: ExternalValidationChecklistMetrics,
-  baselineRunsDir: string
-): ExternalValidationChecklistBaselineComparison {
-  return {
-    baseline_runs_dir: baselineRunsDir,
-    checklist: {
-      rounds_per_successful_task: buildChecklistMetricComparison(
-        pilot.rounds_per_successful_task,
-        baseline.rounds_per_successful_task
-      ),
-      human_interventions_per_task: buildChecklistMetricComparison(
-        pilot.human_interventions_per_task,
-        baseline.human_interventions_per_task
-      ),
-      average_cost_usd_per_round: buildChecklistMetricComparison(
-        pilot.average_cost_usd_per_round,
-        baseline.average_cost_usd_per_round,
-        normalizeUsd
-      ),
-      evaluator_infrastructure_failures: buildChecklistMetricComparison(
-        pilot.evaluator_infrastructure_failures,
-        baseline.evaluator_infrastructure_failures
-      ),
-      hot_file_growth_lines: buildChecklistMetricComparison(pilot.hot_file_growth_lines, baseline.hot_file_growth_lines)
-    }
-  };
 }
 
 async function summarizeExternalValidationMetricsReport(runsDir: string): Promise<ExternalValidationMetricsReport> {
@@ -306,17 +244,7 @@ async function summarizeExternalValidationMetricsReport(runsDir: string): Promis
 }
 
 export async function buildExternalValidationMetricsReport(
-  runsDir: string,
-  baselineRunsDir?: string
+  runsDir: string
 ): Promise<ExternalValidationMetricsReport> {
-  const report = await summarizeExternalValidationMetricsReport(runsDir);
-  if (!baselineRunsDir) {
-    return report;
-  }
-
-  const baselineReport = await summarizeExternalValidationMetricsReport(baselineRunsDir);
-  return {
-    ...report,
-    baseline_comparison: buildChecklistBaselineComparison(report.checklist, baselineReport.checklist, baselineRunsDir)
-  };
+  return summarizeExternalValidationMetricsReport(runsDir);
 }

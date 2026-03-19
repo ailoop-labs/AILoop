@@ -4,7 +4,12 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import type { EvaluationResult, SubTask } from "../types/contracts";
 import type { RoundMetrics } from "./metrics";
-import { buildExternalValidationMetricsReport, buildRoundSubTaskIdentity } from "./metrics";
+import {
+  buildExternalValidationMetricsReport,
+  buildRoundSubTaskIdentity,
+  type ExternalValidationMetricsReport
+} from "./metrics";
+import { buildExternalValidationChecklistBaselineComparison } from "./external-validation";
 import { buildRoundArtifactPaths } from "./summary";
 
 const DEFAULT_EVALUATION: EvaluationResult = {
@@ -182,7 +187,6 @@ describe("buildExternalValidationMetricsReport", () => {
       const siblingTask = report.tasks.find((task) => task.stable_id === buildRoundSubTaskIdentity(siblingSubTask).stable_id);
 
       expect(report.task_count).toBe(2);
-      expect(report.baseline_comparison).toBeUndefined();
       expect(primaryTask).toBeDefined();
       expect(primaryTask?.rounds).toBe(2);
       expect(primaryTask?.total_cost_usd).toBe(0.3);
@@ -298,7 +302,7 @@ describe("buildExternalValidationMetricsReport", () => {
     }
   });
 
-  test("adds checklist baseline comparison values when an explicit baseline runs directory is supplied", async () => {
+  test("keeps shared aggregate metrics payload free of baseline-only presentation fields", async () => {
     const pilotRunsDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-metrics-pilot-baseline-test-"));
     const baselineRunsDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-metrics-self-iteration-baseline-test-"));
     const comparedTask = makeSubTask(
@@ -377,9 +381,16 @@ describe("buildExternalValidationMetricsReport", () => {
         )
       ]);
 
-      const report = await buildExternalValidationMetricsReport(pilotRunsDir, baselineRunsDir);
+      const report = await buildExternalValidationMetricsReport(pilotRunsDir);
+      const baselineComparison = await buildExternalValidationChecklistBaselineComparison(
+        report.checklist,
+        baselineRunsDir
+      );
 
-      expect(report.baseline_comparison).toEqual({
+      expect(Object.prototype.hasOwnProperty.call(report as ExternalValidationMetricsReport, "baseline_comparison")).toBe(
+        false
+      );
+      expect(baselineComparison).toEqual({
         baseline_runs_dir: baselineRunsDir,
         checklist: {
           rounds_per_successful_task: {
