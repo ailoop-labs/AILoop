@@ -48,12 +48,13 @@ const PLANNER_DIAGNOSTIC_LIST_LIMIT = 16;
 type PlannerTransientFailureKind = "provider_rate_limit" | "provider_upstream_error" | "timeout";
 type PlannerFailureSnapshot = Record<string, unknown>;
 type PlannerFailureSnapshotBuilder = (tools: ToolRegistry) => Promise<PlannerFailureSnapshot>;
-interface PlannerTimeoutContext {
+interface PlannerDiagnosticsContext {
   timeout_duration_ms: number | null;
   partial_output: Record<string, unknown>;
   exit_status: Record<string, unknown>;
   environment_state: Record<string, unknown>;
   failure_snapshot: PlannerFailureSnapshot;
+  provider_error_context: Record<string, unknown> | null;
 }
 
 export class PlannerInfrastructureError extends Error {
@@ -163,6 +164,11 @@ function parsePlannerExitCode(error?: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
+function parsePlannerProviderStatusCode(result: Pick<AIJsonCallResult<unknown>, "error" | "stderr" | "rawMessage">): number | null {
+  const match = `${result.error ?? ""}\n${result.stderr}\n${result.rawMessage}`.match(/\b(502|503|504)\b/);
+  return match ? Number(match[1]) : null;
+}
+
 function normalizeTimingBreakdown(value: AIProcessTimingBreakdown | null | undefined): Record<string, unknown> | null {
   if (!value) {
     return null;
@@ -207,6 +213,24 @@ function normalizePlannerEnvironmentState(
     process_cwd: process.cwd(),
     node_env: process.env.NODE_ENV ?? null,
     pid: process.pid
+  };
+}
+
+function buildPlannerExitStatus(result: AIJsonCallResult<unknown>): Record<string, unknown> {
+  return {
+    exit_code: result.diagnostics?.exitCode ?? parsePlannerExitCode(result.error),
+    exit_signal: result.diagnostics?.exitSignal ?? null,
+    timed_out: result.diagnostics?.timedOut ?? /timed out/i.test(`${result.error ?? ""}\n${result.stderr}\n${result.rawMessage}`)
+  };
+}
+
+function buildPlannerPartialOutput(result: AIJsonCallResult<unknown>): Record<string, unknown> {
+  const redactor = new SecretRedactor(process.env);
+  return {
+    checkpoint: normalizePartialOutput(result.diagnostics?.partialProgress, redactor),
+    stdout_tail: normalizeDiagnosticExcerpt(result.stdout, redactor),
+    stderr_tail: normalizeDiagnosticExcerpt(result.stderr, redactor),
+    raw_tail: normalizeDiagnosticExcerpt(result.rawMessage, redactor)
   };
 }
 
@@ -291,25 +315,39 @@ function buildPlannerTimeoutContext(
   sandbox: AppConfig["ai"]["plannerSandbox"],
   cwd: string,
   failureSnapshot: PlannerFailureSnapshot
-): PlannerTimeoutContext {
+): PlannerDiagnosticsContext {
+  return {
+    timeout_duration_ms: result.diagnostics?.timingBreakdown?.timeoutMs ?? null,
+    partial_output: buildPlannerPartialOutput(result),
+    exit_status: buildPlannerExitStatus(result),
+    environment_state: normalizePlannerEnvironmentState(sandbox, cwd),
+    failure_snapshot: failureSnapshot,
+    provider_error_context: null
+  };
+}
+
+function buildPlannerProviderUpstreamContext(
+  result: AIJsonCallResult<unknown>,
+  sandbox: AppConfig["ai"]["plannerSandbox"],
+  cwd: string,
+  failureSnapshot: PlannerFailureSnapshot
+): PlannerDiagnosticsContext {
   const redactor = new SecretRedactor(process.env);
-  const diagnostics = result.diagnostics;
 
   return {
-    timeout_duration_ms: diagnostics?.timingBreakdown?.timeoutMs ?? null,
-    partial_output: {
-      checkpoint: normalizePartialOutput(diagnostics?.partialProgress, redactor),
-      stdout_tail: normalizeDiagnosticExcerpt(result.stdout, redactor),
-      stderr_tail: normalizeDiagnosticExcerpt(result.stderr, redactor),
-      raw_tail: normalizeDiagnosticExcerpt(result.rawMessage, redactor)
-    },
-    exit_status: {
-      exit_code: diagnostics?.exitCode ?? parsePlannerExitCode(result.error),
-      exit_signal: diagnostics?.exitSignal ?? null,
-      timed_out: diagnostics?.timedOut ?? /timed out/i.test(`${result.error ?? ""}\n${result.stderr}\n${result.rawMessage}`)
-    },
+    timeout_duration_ms: result.diagnostics?.timingBreakdown?.timeoutMs ?? null,
+    partial_output: buildPlannerPartialOutput(result),
+    exit_status: buildPlannerExitStatus(result),
     environment_state: normalizePlannerEnvironmentState(sandbox, cwd),
-    failure_snapshot: failureSnapshot
+    failure_snapshot: failureSnapshot,
+    provider_error_context: {
+      failure_kind: "provider_upstream_error",
+      status_code: parsePlannerProviderStatusCode(result),
+      retry_exhausted: true,
+      error_excerpt: normalizeDiagnosticExcerpt(result.error, redactor),
+      stderr_excerpt: normalizeDiagnosticExcerpt(result.stderr, redactor),
+      raw_excerpt: normalizeDiagnosticExcerpt(result.rawMessage, redactor)
+    }
   };
 }
 
@@ -318,7 +356,7 @@ async function writePlannerDiagnosticsArtifact(
   prompt: string,
   result: AIJsonCallResult<unknown>,
   failureKind: PlannerTransientFailureKind,
-  timeoutContext: PlannerTimeoutContext
+  diagnosticsContext: PlannerDiagnosticsContext
 ): Promise<string> {
   const redactor = new SecretRedactor(process.env);
   const diagnosticsPath = resolvePlannerDiagnosticsPath(homeDir);
@@ -330,8 +368,8 @@ async function writePlannerDiagnosticsArtifact(
     exit_code: diagnostics?.exitCode ?? parsePlannerExitCode(result.error),
     exit_signal: diagnostics?.exitSignal ?? null,
     timed_out: diagnostics?.timedOut ?? /timed out/i.test(`${result.error ?? ""}\n${result.stderr}\n${result.rawMessage}`),
-    sandbox: timeoutContext.environment_state?.sandbox ?? null,
-    cwd: timeoutContext.environment_state?.cwd ?? null,
+    sandbox: diagnosticsContext.environment_state?.sandbox ?? null,
+    cwd: diagnosticsContext.environment_state?.cwd ?? null,
     model: diagnostics?.model ?? null,
     prompt_chars: diagnostics?.promptChars ?? prompt.length,
     input_tokens: diagnostics?.inputTokens ?? null,
@@ -339,11 +377,12 @@ async function writePlannerDiagnosticsArtifact(
     total_tokens: diagnostics?.totalTokens ?? null,
     timing_breakdown: normalizeTimingBreakdown(diagnostics?.timingBreakdown),
     partial_progress_checkpoint: normalizePartialOutput(diagnostics?.partialProgress, redactor),
-    timeout_duration_ms: timeoutContext.timeout_duration_ms,
-    partial_output: timeoutContext.partial_output,
-    exit_status: timeoutContext.exit_status,
-    environment_state: timeoutContext.environment_state,
-    failure_snapshot: timeoutContext.failure_snapshot,
+    timeout_duration_ms: diagnosticsContext.timeout_duration_ms,
+    partial_output: diagnosticsContext.partial_output,
+    exit_status: diagnosticsContext.exit_status,
+    environment_state: diagnosticsContext.environment_state,
+    failure_snapshot: diagnosticsContext.failure_snapshot,
+    provider_error_context: diagnosticsContext.provider_error_context,
     prompt_sha256: createHash("sha256").update(prompt).digest("hex"),
     role_contract_mode: "runtime_json_v1",
     stdout_tail: normalizeDiagnosticExcerpt(result.stdout, redactor),
@@ -353,6 +392,15 @@ async function writePlannerDiagnosticsArtifact(
   });
 
   return diagnosticsPath;
+}
+
+function buildPlannerActionableFailureContext(diagnosticsContext: PlannerDiagnosticsContext | null): string {
+  if (!diagnosticsContext?.provider_error_context) {
+    return "";
+  }
+
+  const statusCode = diagnosticsContext.provider_error_context.status_code;
+  return typeof statusCode === "number" ? ` | provider_status: ${statusCode}` : "";
 }
 
 function hasNoDiffSignal(previousRoundError: string | null): boolean {
@@ -712,27 +760,36 @@ export class PlannerAgent {
     if (!result.ok || !result.data) {
       if (finalTransientFailure) {
         let diagnosticsPath: string | undefined;
-        if (finalTransientFailure === "timeout") {
-          const timeoutContext = buildPlannerTimeoutContext(
-            result,
-            this.sandbox,
-            this.workspaceRoot,
-            await this.buildFailureSnapshot(this.tools)
-          );
+        let diagnosticsContext: PlannerDiagnosticsContext | null = null;
+        if (finalTransientFailure === "timeout" || finalTransientFailure === "provider_upstream_error") {
+          diagnosticsContext =
+            finalTransientFailure === "timeout"
+              ? buildPlannerTimeoutContext(
+                  result,
+                  this.sandbox,
+                  this.workspaceRoot,
+                  await this.buildFailureSnapshot(this.tools)
+                )
+              : buildPlannerProviderUpstreamContext(
+                  result,
+                  this.sandbox,
+                  this.workspaceRoot,
+                  await this.buildFailureSnapshot(this.tools)
+                );
           emitLog(
-            `ProjectPlanner timeout context: ${JSON.stringify(timeoutContext)}`
+            `ProjectPlanner ${finalTransientFailure === "timeout" ? "timeout" : "provider upstream"} context: ${JSON.stringify(diagnosticsContext)}`
           );
           diagnosticsPath = await writePlannerDiagnosticsArtifact(
             this.homeDir,
             prompt,
             result,
             finalTransientFailure,
-            timeoutContext
+            diagnosticsContext
           );
           emitLog(`ProjectPlanner diagnostics artifact: ${diagnosticsPath}`);
         }
         throw new PlannerInfrastructureError(
-          `Planner AI CLI ${describeTransientPlannerFailure(finalTransientFailure)} after ${PLANNER_TRANSIENT_RETRY_MAX_ATTEMPTS} attempts: ${summarizeInfrastructureFailure(result)}${diagnosticsPath ? ` | diagnostics: ${diagnosticsPath}` : ""}`
+          `Planner AI CLI ${describeTransientPlannerFailure(finalTransientFailure)} after ${PLANNER_TRANSIENT_RETRY_MAX_ATTEMPTS} attempts: ${summarizeInfrastructureFailure(result)}${buildPlannerActionableFailureContext(diagnosticsContext)}${diagnosticsPath ? ` | diagnostics: ${diagnosticsPath}` : ""}`
         );
       }
       return fallbackPlan(context);

@@ -235,6 +235,22 @@ const artifactCompletenessTone: Record<ArtifactCompletenessStatus["kind"], strin
   full_bundle: "border-accent/30 bg-accent/10 text-accent"
 };
 
+type FailureDiagnosticsTone = "neutral" | "warning" | "critical" | "accent";
+
+interface FailureDiagnosticSignal {
+  kind: "provider_rate_limit" | "provider_quota" | "provider_timeout" | "provider_upstream";
+  label: string;
+  tone: Exclude<FailureDiagnosticsTone, "neutral" | "accent">;
+  detail: string;
+  guidance: string;
+}
+
+interface FailureDiagnosticsView {
+  summary: string;
+  diagnosticsPath: string | null;
+  providerSignal: FailureDiagnosticSignal | null;
+}
+
 const budgetHealthTone: Record<BudgetHealth, string> = {
   healthy: "border-accent/30 bg-accent/10 text-accent",
   warning: "border-warning/40 bg-warning/10 text-warning",
@@ -245,6 +261,13 @@ const budgetBarTone: Record<BudgetHealth, string> = {
   healthy: "bg-accent",
   warning: "bg-warning",
   breached: "bg-ember"
+};
+
+const failureDiagnosticsTone: Record<FailureDiagnosticsTone, string> = {
+  neutral: "border-white/10 bg-ink/60 text-mist/80",
+  warning: "border-warning/40 bg-warning/10 text-warning",
+  critical: "border-ember/40 bg-ember/10 text-ember",
+  accent: "border-accent/30 bg-accent/10 text-accent"
 };
 
 const TOKEN_STORAGE_KEY = "ailoop-console-admin-token";
@@ -722,6 +745,171 @@ export function ControlErrorPanel({
         </span>
       </div>
       <p className="mt-4 text-sm text-mist/70">The request did not mutate the backend lifecycle state.</p>
+    </div>
+  );
+}
+
+function normalizeFailureMessage(message: string): string {
+  return message.replace(/\s+/g, " ").trim();
+}
+
+function extractFailureDiagnosticsPath(message: string): string | null {
+  const match = message.match(/\|\s*diagnostics:\s*([^|]+)$/i);
+  return match?.[1]?.trim() ?? null;
+}
+
+function extractFailureSignalDetail(message: string, matcher: RegExp, fallback: string): string {
+  const segments = message
+    .split(/\s+\|\s+/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  const matchedSegment = segments.find((segment) => matcher.test(segment));
+  if (matchedSegment) {
+    return matchedSegment;
+  }
+
+  const normalizedMatcher = new RegExp(matcher.source, matcher.flags.replaceAll("g", ""));
+  const match = normalizedMatcher.exec(message);
+  if (!match) {
+    return fallback;
+  }
+
+  const start = Math.max(0, match.index - 24);
+  const end = Math.min(message.length, match.index + 120);
+  return message.slice(start, end).trim();
+}
+
+export function parseFailureDiagnostics(message: string): FailureDiagnosticsView {
+  const normalized = normalizeFailureMessage(message);
+  const diagnosticsPath = extractFailureDiagnosticsPath(normalized);
+  const summary = normalized.split(/\s+\|\s+/)[0]?.trim() || normalized;
+
+  const signalDefinitions: Array<{
+    kind: FailureDiagnosticSignal["kind"];
+    label: string;
+    tone: FailureDiagnosticSignal["tone"];
+    matcher: RegExp;
+    fallback: string;
+    guidance: string;
+  }> = [
+    {
+      kind: "provider_rate_limit",
+      label: "Provider rate limit",
+      tone: "warning",
+      matcher: /\b429\b|rate_limit_error|usage limit exceeded|too many requests/i,
+      fallback: "The provider reported a temporary request or usage limit.",
+      guidance: "Wait for the limit window to recover or reduce concurrent provider demand before retrying."
+    },
+    {
+      kind: "provider_quota",
+      label: "Provider quota / credits",
+      tone: "critical",
+      matcher: /requires more credits|insufficient credits|max_tokens|quota/i,
+      fallback: "The provider blocked the round because credits or token budget were exhausted.",
+      guidance: "Restore provider credits or lower the requested token budget before resuming."
+    },
+    {
+      kind: "provider_timeout",
+      label: "Provider timeout",
+      tone: "warning",
+      matcher: /timed out|timeout/i,
+      fallback: "The AI CLI did not finish within the configured timeout window.",
+      guidance: "Inspect the linked diagnostics artifact and reduce prompt size or runtime pressure before retrying."
+    },
+    {
+      kind: "provider_upstream",
+      label: "Provider upstream error",
+      tone: "warning",
+      matcher: /502 bad gateway|503 service unavailable|504 gateway timeout|upstream|network error/i,
+      fallback: "The provider or network path failed before the round could complete cleanly.",
+      guidance: "Verify provider availability and network health before restarting the loop."
+    }
+  ];
+
+  const providerSignal =
+    signalDefinitions
+      .map((definition) => {
+        if (!definition.matcher.test(normalized)) {
+          return null;
+        }
+
+        return {
+          kind: definition.kind,
+          label: definition.label,
+          tone: definition.tone,
+          detail: extractFailureSignalDetail(normalized, definition.matcher, definition.fallback),
+          guidance: definition.guidance
+        } satisfies FailureDiagnosticSignal;
+      })
+      .find((value) => value !== null) ?? null;
+
+  return {
+    summary,
+    diagnosticsPath,
+    providerSignal
+  };
+}
+
+export function FailureDiagnosticsPanel({ message }: { message: string | null }) {
+  if (!message) {
+    return null;
+  }
+
+  const diagnostics = parseFailureDiagnostics(message);
+  const providerTone = diagnostics.providerSignal ? failureDiagnosticsTone[diagnostics.providerSignal.tone] : failureDiagnosticsTone.neutral;
+  const diagnosticsTone = diagnostics.diagnosticsPath ? failureDiagnosticsTone.accent : failureDiagnosticsTone.neutral;
+
+  return (
+    <div className="mt-4 rounded-2xl border border-white/10 bg-ink/60 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.04)]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-warning">Failure Diagnostics</p>
+          <h2 className="mt-2 text-xl font-semibold text-mist">{diagnostics.providerSignal?.label ?? "Last recorded failure"}</h2>
+          <p className="mt-2 text-sm leading-6 text-mist/85">{diagnostics.summary}</p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.16em]">
+          {diagnostics.providerSignal ? (
+            <span className={`rounded-full border px-3 py-1 ${providerTone}`}>{diagnostics.providerSignal.kind.replace(/_/g, " ")}</span>
+          ) : (
+            <span className="rounded-full border border-white/10 bg-panel/70 px-3 py-1 text-mist/70">no provider signal</span>
+          )}
+          <span
+            className={`rounded-full border px-3 py-1 ${
+              diagnostics.diagnosticsPath ? failureDiagnosticsTone.accent : "border-white/10 bg-panel/70 text-mist/70"
+            }`}
+          >
+            {diagnostics.diagnosticsPath ? "artifact linked" : "no artifact path"}
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 xl:grid-cols-3">
+        <div className="rounded-xl border border-white/10 bg-panel/60 p-3">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-mist/60">Summary</p>
+          <p className="mt-2 text-sm font-semibold text-mist">{diagnostics.summary}</p>
+        </div>
+        <div className={`rounded-xl border p-3 ${providerTone}`}>
+          <p className="text-[11px] uppercase tracking-[0.18em] text-current/80">Provider Condition</p>
+          {diagnostics.providerSignal ? (
+            <>
+              <p className="mt-2 text-sm font-semibold text-mist">{diagnostics.providerSignal.label}</p>
+              <p className="mt-2 text-sm leading-6 text-mist/80">{diagnostics.providerSignal.detail}</p>
+              <p className="mt-2 text-xs leading-5 text-mist/70">{diagnostics.providerSignal.guidance}</p>
+            </>
+          ) : (
+            <p className="mt-2 text-sm text-mist/70">No provider-specific condition detected in the persisted failure text.</p>
+          )}
+        </div>
+        <div className={`rounded-xl border p-3 ${diagnosticsTone}`}>
+          <p className="text-[11px] uppercase tracking-[0.18em] text-current/80">Diagnostics Artifact</p>
+          {diagnostics.diagnosticsPath ? (
+            <p className="mt-2 break-all font-mono text-sm text-mist">{diagnostics.diagnosticsPath}</p>
+          ) : (
+            <p className="mt-2 text-sm text-mist/70">No diagnostics artifact path was attached to the last error.</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -2121,9 +2309,7 @@ export default function App() {
           </div>
 
           {error ? <p className="mt-4 rounded-lg bg-red-500/20 p-3 text-sm text-red-200">{error}</p> : null}
-          {status?.last_error ? (
-            <p className="mt-4 rounded-lg bg-warning/20 p-3 text-sm text-warning">Last error: {status.last_error}</p>
-          ) : null}
+          <FailureDiagnosticsPanel message={status?.last_error ?? null} />
         </article>
 
         <article className="rounded-3xl border border-white/10 bg-panel/70 p-5 backdrop-blur">

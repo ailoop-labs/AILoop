@@ -6,6 +6,7 @@ import {
   BudgetHealthPanel,
   ControlErrorPanel,
   CrashRecoveryPanel,
+  FailureDiagnosticsPanel,
   HotFileGovernancePanel,
   LifecycleStatusGrid,
   OperatorReasonPanel,
@@ -16,6 +17,7 @@ import {
   deriveCliProvider,
   deriveControlAvailability,
   getCliModelOptions,
+  parseFailureDiagnostics,
   resolveCliModel,
   postControlAndRefresh,
   summarizeApiError
@@ -320,6 +322,47 @@ describe("OperatorReasonPanel", () => {
 
     expect(html).toContain("No active pause or risk signal");
     expect(html).toContain("The current status surface does not show a live pause or safety block.");
+  });
+});
+
+describe("Failure diagnostics", () => {
+  test("extracts a provider rate-limit signal and diagnostics artifact from persisted last_error text", () => {
+    const diagnostics = parseFailureDiagnostics(
+      'Governance failed due to provider/network error: AI CLI exited with code 1 | detail: API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)"}} | diagnostics: /tmp/leader.debug.json'
+    );
+
+    expect(diagnostics.summary).toBe("Governance failed due to provider/network error: AI CLI exited with code 1");
+    expect(diagnostics.providerSignal?.kind).toBe("provider_rate_limit");
+    expect(diagnostics.providerSignal?.label).toBe("Provider rate limit");
+    expect(diagnostics.providerSignal?.detail).toContain("usage limit exceeded");
+    expect(diagnostics.diagnosticsPath).toBe("/tmp/leader.debug.json");
+  });
+
+  test("renders a sectioned diagnostics panel with summary, provider signal, and artifact path", () => {
+    const html = renderToStaticMarkup(
+      <FailureDiagnosticsPanel
+        message={
+          'Planner AI CLI rate-limited: AI CLI exited with code 1 | stderr: API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)"}} | diagnostics: /tmp/planner.debug.json'
+        }
+      />
+    );
+
+    expect(html).toContain("Failure Diagnostics");
+    expect(html).toContain("Planner AI CLI rate-limited: AI CLI exited with code 1");
+    expect(html).toContain("Provider Condition");
+    expect(html).toContain("Provider rate limit");
+    expect(html).toContain("usage limit exceeded");
+    expect(html).toContain("Diagnostics Artifact");
+    expect(html).toContain("/tmp/planner.debug.json");
+  });
+
+  test("renders stable empty-state copy when the error has no provider marker or diagnostics path", () => {
+    const html = renderToStaticMarkup(<FailureDiagnosticsPanel message="Evaluator blocked the round." />);
+
+    expect(html).toContain("Last recorded failure");
+    expect(html).toContain("Evaluator blocked the round.");
+    expect(html).toContain("No provider-specific condition detected in the persisted failure text.");
+    expect(html).toContain("No diagnostics artifact path was attached to the last error.");
   });
 });
 
