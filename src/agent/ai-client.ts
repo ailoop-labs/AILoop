@@ -41,6 +41,15 @@ export interface AIJsonCallDiagnostics {
   inputTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
+  partialProgress: AIJsonPartialProgressCheckpoint | null;
+}
+
+export interface AIJsonPartialProgressCheckpoint {
+  source: "stdout" | "stderr" | "output";
+  kind: "assistant_message" | "json_object";
+  eventType: string | null;
+  sessionId: string | null;
+  excerpt: string;
 }
 
 export interface ProcessRunResult {
@@ -283,6 +292,11 @@ interface CodexJsonlMetadata {
   totalTokens: number | null;
 }
 
+interface PayloadWithSource {
+  source: AIJsonPartialProgressCheckpoint["source"];
+  payload: string;
+}
+
 interface CodexCliInvocationOptions {
   resumeSessionId?: string | null;
   skipGitRepoCheck?: boolean;
@@ -487,6 +501,134 @@ function parsePayloadJsonObjects(payload: string): unknown[] {
   return parsedObjects;
 }
 
+function normalizeCheckpointText(value: string | null): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized ? normalized : null;
+}
+
+function extractCheckpointText(value: unknown): string | null {
+  if (typeof value === "string") {
+    return normalizeCheckpointText(value);
+  }
+
+  if (Array.isArray(value)) {
+    let candidate: string | null = null;
+    for (const item of value) {
+      const extracted = extractCheckpointText(item);
+      if (extracted) {
+        candidate = extracted;
+      }
+    }
+    return candidate;
+  }
+
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const typeValue = typeof value.type === "string" ? value.type.toLowerCase() : "";
+  if (typeValue.includes("error") || typeValue.includes("failed")) {
+    return null;
+  }
+
+  const directKeys = [
+    "text",
+    "output_text",
+    "outputText",
+    "partial_response",
+    "partialResponse",
+    "response",
+    "content",
+    "parts",
+    "delta",
+    "item",
+    "message"
+  ] as const;
+
+  let candidate: string | null = null;
+  for (const key of directKeys) {
+    const extracted = extractCheckpointText(value[key]);
+    if (extracted) {
+      candidate = extracted;
+    }
+  }
+
+  return candidate;
+}
+
+function isRecoverableCheckpointObject(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const typeValue = typeof value.type === "string" ? value.type.toLowerCase() : "";
+  if (typeValue.includes("error") || typeValue.includes("failed")) {
+    return false;
+  }
+
+  const ignoredOnlyKeys = new Set([
+    "type",
+    "usage",
+    "model",
+    "session_id",
+    "sessionId",
+    "conversation_id",
+    "conversationId"
+  ]);
+
+  return Object.keys(value).some((key) => !ignoredOnlyKeys.has(key));
+}
+
+function extractLastPartialProgressCheckpoint(
+  payloads: PayloadWithSource[]
+): AIJsonPartialProgressCheckpoint | null {
+  const perSourceCandidates = new Map<AIJsonPartialProgressCheckpoint["source"], AIJsonPartialProgressCheckpoint>();
+
+  for (const { source, payload } of payloads) {
+    if (!payload.trim()) {
+      continue;
+    }
+
+    for (const parsed of parsePayloadJsonObjects(payload)) {
+      const sessionId = collectSessionId(parsed);
+      const eventType = isRecord(parsed) && typeof parsed.type === "string" ? parsed.type : null;
+      const messageExcerpt = extractCheckpointText(parsed);
+
+      if (messageExcerpt) {
+        perSourceCandidates.set(source, {
+          source,
+          kind: "assistant_message",
+          eventType,
+          sessionId,
+          excerpt: messageExcerpt
+        });
+        continue;
+      }
+
+      if (isRecoverableCheckpointObject(parsed)) {
+        perSourceCandidates.set(source, {
+          source,
+          kind: "json_object",
+          eventType,
+          sessionId,
+          excerpt: JSON.stringify(parsed)
+        });
+      }
+    }
+  }
+
+  return (
+    perSourceCandidates.get("output") ??
+    perSourceCandidates.get("stdout") ??
+    perSourceCandidates.get("stderr") ??
+    null
+  );
+}
+
 function parseCodexJsonlMetadata(payload: string): CodexJsonlMetadata {
   const sessionCandidates: string[] = [];
   const errorMessages: string[] = [];
@@ -525,9 +667,10 @@ function buildAICallDiagnostics(
   config: AIConfig,
   prompt: string,
   runResult?: ProcessRunResult,
-  payloads: string[] = []
+  payloads: PayloadWithSource[] = []
 ): AIJsonCallDiagnostics {
   const metadata = payloads
+    .map((item) => item.payload)
     .filter((payload) => payload.trim().length > 0)
     .map((payload) => parseCodexJsonlMetadata(payload));
 
@@ -539,7 +682,8 @@ function buildAICallDiagnostics(
     promptChars: prompt.length,
     inputTokens: findLastNonNull(metadata.map((item) => item.inputTokens)),
     outputTokens: findLastNonNull(metadata.map((item) => item.outputTokens)),
-    totalTokens: findLastNonNull(metadata.map((item) => item.totalTokens))
+    totalTokens: findLastNonNull(metadata.map((item) => item.totalTokens)),
+    partialProgress: extractLastPartialProgressCheckpoint(payloads)
   };
 }
 
@@ -951,9 +1095,9 @@ export class AIClient {
         const rawMessage = parsedCandidate?.rawMessage ?? outputPayload;
         const parsed = parsedCandidate?.data;
         const diagnostics = buildAICallDiagnostics(this.config, finalPrompt, runResult, [
-          runResult.stdout,
-          runResult.stderr,
-          outputPayload
+          { source: "stdout", payload: runResult.stdout },
+          { source: "stderr", payload: runResult.stderr },
+          { source: "output", payload: outputPayload }
         ]);
 
         if (combinedStdout) {

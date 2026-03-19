@@ -4,7 +4,7 @@ import type { AppConfig } from "../config/env";
 import type { LoopPaths } from "../types/contracts";
 import type { ActionRecord, SubTask, ToolResult } from "../types/contracts";
 import { writeJsonFile } from "../utils/fs";
-import { SecretRedactor } from "../utils/redaction";
+import { redactJsonStrings, SecretRedactor } from "../utils/redaction";
 import type { Guardrails } from "./guardrails";
 import { AIClient, type CodexJsonCallResult, type JsonSchema } from "./ai-client";
 import { loadProjectRoleDefinition } from "./role-definitions";
@@ -145,6 +145,31 @@ function resolveExecutorDiagnosticsPath(runsDir: string): string {
   return path.join(runsDir, `${stamp}.executor.debug.json`);
 }
 
+function normalizePartialProgressCheckpoint(
+  checkpoint: CodexJsonCallResult<CodexExecutorResponse>["diagnostics"] extends infer Diagnostics
+    ? Diagnostics extends { partialProgress: infer PartialProgress }
+      ? PartialProgress
+      : never
+    : never,
+  redactor: SecretRedactor
+): Record<string, unknown> | null {
+  if (!checkpoint) {
+    return null;
+  }
+
+  const redacted = redactJsonStrings(checkpoint, redactor);
+  const excerpt = normalizeDiagnosticExcerpt(
+    typeof redacted.excerpt === "string" ? redacted.excerpt : undefined,
+    redactor,
+    800
+  );
+
+  return {
+    ...redacted,
+    excerpt
+  };
+}
+
 async function writeExecutorDiagnosticsArtifact(
   runsDir: string,
   prompt: string,
@@ -166,6 +191,7 @@ async function writeExecutorDiagnosticsArtifact(
     input_tokens: diagnostics?.inputTokens ?? null,
     output_tokens: diagnostics?.outputTokens ?? null,
     total_tokens: diagnostics?.totalTokens ?? null,
+    partial_progress_checkpoint: normalizePartialProgressCheckpoint(diagnostics?.partialProgress, redactor),
     prompt_sha256: createHash("sha256").update(prompt).digest("hex"),
     role_contract_mode: "runtime_json_v1",
     stdout_tail: normalizeDiagnosticExcerpt(result.stdout, redactor, 800),

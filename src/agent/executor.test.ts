@@ -481,13 +481,17 @@ describe("ExecutorAgent", () => {
     await fs.writeFile(path.join(homeDir, "EXECUTOR_ROLE.md"), "# Executor Role\n\nCustom executor guidance.\n", "utf8");
 
     const logs: string[] = [];
+    const originalSecret = process.env.AILOOP_TIMEOUT_CHECKPOINT_SECRET;
+    process.env.AILOOP_TIMEOUT_CHECKPOINT_SECRET = "checkpointsecret456";
     const mockCodex = {
       async runJson() {
         return {
           ok: false,
           data: undefined,
           rawMessage: "",
-          stdout: '{"type":"turn.completed","usage":{"input_tokens":210,"output_tokens":45,"total_tokens":255}}',
+          stdout:
+            '{"type":"response.output_text.done","text":"Read files and staged checkpointsecret456 timeout checkpoint."}\n' +
+            '{"type":"turn.completed","usage":{"input_tokens":210,"output_tokens":45,"total_tokens":255}}',
           stderr: "runner timed out",
           error: "AI CLI process timed out after 30000ms",
           diagnostics: {
@@ -496,7 +500,14 @@ describe("ExecutorAgent", () => {
             promptChars: 4321,
             inputTokens: 210,
             outputTokens: 45,
-            totalTokens: 255
+            totalTokens: 255,
+            partialProgress: {
+              source: "stdout",
+              kind: "assistant_message",
+              eventType: "response.output_text.done",
+              sessionId: null,
+              excerpt: "Read files and staged checkpointsecret456 timeout checkpoint."
+            }
           }
         };
       }
@@ -569,8 +580,20 @@ describe("ExecutorAgent", () => {
       expect(payload.input_tokens).toBe(210);
       expect(payload.output_tokens).toBe(45);
       expect(payload.total_tokens).toBe(255);
+      expect(payload.partial_progress_checkpoint).toEqual({
+        source: "stdout",
+        kind: "assistant_message",
+        eventType: "response.output_text.done",
+        sessionId: null,
+        excerpt: "Read files and staged [REDACTED] timeout checkpoint."
+      });
     } finally {
       process.chdir(originalCwd);
+      if (originalSecret === undefined) {
+        delete process.env.AILOOP_TIMEOUT_CHECKPOINT_SECRET;
+      } else {
+        process.env.AILOOP_TIMEOUT_CHECKPOINT_SECRET = originalSecret;
+      }
       await fs.rm(workspaceRoot, { recursive: true, force: true });
     }
   });

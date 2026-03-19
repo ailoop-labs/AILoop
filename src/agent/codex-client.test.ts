@@ -713,7 +713,41 @@ describe("AIClient.runJson", () => {
       promptChars: "Return JSON".length,
       inputTokens: 321,
       outputTokens: 34,
-      totalTokens: 355
+      totalTokens: 355,
+      partialProgress: null
+    });
+  });
+
+  test("captures the last assistant progress checkpoint from timeout stdout metadata", async () => {
+    const runner: ProcessRunner = async (_cmd, args) => {
+      await fs.writeFile(outputPathFromArgs(args), "", "utf8");
+      return {
+        code: 1,
+        stdout:
+          '{"type":"response.output_text.delta","delta":{"text":"Read executor diagnostics flow"}}\n' +
+          '{"type":"response.output_text.done","text":"Read executor diagnostics flow and prepared timeout checkpoint artifact."}\n' +
+          '{"type":"turn.completed","usage":{"input_tokens":210,"output_tokens":45,"total_tokens":255}}\n',
+        stderr: "runner timed out",
+        timedOut: true
+      };
+    };
+
+    const client = new AIClient(createCodexConfig(), runner);
+    const result = await client.runJson({
+      prompt: "Return JSON",
+      schema: { type: "object" },
+      cwd: process.cwd(),
+      sandbox: "read-only",
+      maxRetries: 0
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics?.partialProgress).toEqual({
+      source: "stdout",
+      kind: "assistant_message",
+      eventType: "response.output_text.done",
+      sessionId: null,
+      excerpt: "Read executor diagnostics flow and prepared timeout checkpoint artifact."
     });
   });
 
