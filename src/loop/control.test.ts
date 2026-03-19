@@ -33,6 +33,7 @@ import {
 import type { AppConfig } from "../config/env";
 import { saveRuntimeLoopConfig } from "../config/runtime";
 import { writeActiveRequirementArtifact } from "../product/requirements";
+import { buildRoundSubTaskIdentity } from "../reporting/metrics";
 
 function makeTestConfig(homeDir: string): AppConfig {
   return {
@@ -267,6 +268,47 @@ async function writeRunArtifacts(
   if (contents.stateChange !== undefined) {
     await fs.writeFile(path.join(runsDir, `${timestamp}.round.state_change.txt`), contents.stateChange, "utf8");
   }
+}
+
+function makePersistedRoundMetrics(input: {
+  round: number;
+  run_timestamp: string;
+  evaluator_decision: "pass" | "fail";
+  human_interventions: number;
+  hot_file_growth_lines: number;
+  sub_task_identity?: ReturnType<typeof buildRoundSubTaskIdentity>;
+}): Record<string, unknown> {
+  return {
+    round: input.round,
+    run_timestamp: input.run_timestamp,
+    duration_ms: 1_000,
+    budget_limits: {
+      usdPerRound: 1,
+      timeMinutes: 1,
+      actions: 10
+    },
+    budget_usage: {
+      usdUsed: 0.1,
+      elapsedMs: 500,
+      actionsUsed: 2
+    },
+    evaluator_decision: input.evaluator_decision,
+    tool_status: "success",
+    retries: {
+      evidence_remediation_attempts: 0,
+      auto_rework_attempts: 0,
+      auto_rework_limit: 1
+    },
+    phase_timings_ms: {
+      planning: 100,
+      execution: 200,
+      evaluation: 300,
+      operational_followup: 50
+    },
+    human_interventions: input.human_interventions,
+    hot_file_growth_lines: input.hot_file_growth_lines,
+    ...(input.sub_task_identity ? { sub_task_identity: input.sub_task_identity } : {})
+  };
 }
 
 async function seedRoundHistory(
@@ -2285,6 +2327,116 @@ describe("listProjectRoles", () => {
     expect(typeof roles[3]?.exists).toBe("boolean");
 
     await fs.rm(workspaceRoot, { recursive: true, force: true });
+  });
+});
+
+describe("external-validation report CLI", () => {
+  test("groups persisted metrics by sub_task_identity stable_id instead of summary markdown", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-control-external-validation-report-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    const runsDir = path.join(homeDir, "runs");
+    const parserBugTask = buildRoundSubTaskIdentity({
+      rationale: "Fix a parser bug exposed in pilot validation.",
+      assignee: "executor",
+      objective: "Fix parser bug",
+      expected_outcome: "Parser accepts escaped commas reliably.",
+      impacted_files: ["/tmp/parser.ts"],
+      recommended_tools: ["read_file", "write_file", "run_shell"]
+    });
+    const addFlagTask = buildRoundSubTaskIdentity({
+      rationale: "Add a bounded feature to the pilot repository.",
+      assignee: "executor",
+      objective: "Add feature flag",
+      expected_outcome: "Feature flag toggles the new behavior.",
+      impacted_files: ["/tmp/feature.ts"],
+      recommended_tools: ["read_file", "write_file", "run_shell"]
+    });
+
+    try {
+      await fs.mkdir(runsDir, { recursive: true });
+
+      await writeRunArtifacts(runsDir, "2026-03-18T09-00-00-000Z", {
+        summary: "# Round Summary\n\nTask: shared summary label\n",
+        metrics: makePersistedRoundMetrics({
+          round: 1,
+          run_timestamp: "2026-03-18T09:00:00.000Z",
+          evaluator_decision: "fail",
+          human_interventions: 1,
+          hot_file_growth_lines: 3,
+          sub_task_identity: parserBugTask
+        }),
+        evaluation: {
+          decision: "fail",
+          justification: "Need one more bounded retry.",
+          evidence: []
+        }
+      });
+
+      await writeRunArtifacts(runsDir, "2026-03-18T09-05-00-000Z", {
+        summary: "# Round Summary\n\nTask: different summary label\n",
+        metrics: makePersistedRoundMetrics({
+          round: 2,
+          run_timestamp: "2026-03-18T09:05:00.000Z",
+          evaluator_decision: "pass",
+          human_interventions: 0,
+          hot_file_growth_lines: 2,
+          sub_task_identity: parserBugTask
+        }),
+        evaluation: {
+          decision: "pass",
+          justification: "Task completed successfully.",
+          evidence: []
+        }
+      });
+
+      await writeRunArtifacts(runsDir, "2026-03-18T09-10-00-000Z", {
+        summary: "# Round Summary\n\nTask: shared summary label\n",
+        metrics: makePersistedRoundMetrics({
+          round: 3,
+          run_timestamp: "2026-03-18T09:10:00.000Z",
+          evaluator_decision: "fail",
+          human_interventions: 2,
+          hot_file_growth_lines: 4,
+          sub_task_identity: addFlagTask
+        }),
+        evaluation: {
+          decision: "fail",
+          justification: "Evaluator infrastructure failure: provider rate limiting blocked evaluation.",
+          root_cause: "evaluator_infrastructure:provider_rate_limit",
+          evidence: []
+        }
+      });
+
+      const result = runAiloopCli(["external-validation", "report"], workspaceRoot);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toContain("External validation metrics report");
+      expect(result.stdout).toContain("Tasks analyzed: 2");
+      expect(result.stdout).toContain("Successful tasks: 1");
+      expect(result.stdout).toContain(
+        `- Fix parser bug | stable_id=${parserBugTask.stable_id} | rounds=2`
+      );
+      expect(result.stdout).toContain(
+        `- Fix parser bug | stable_id=${parserBugTask.stable_id} | count=1`
+      );
+      expect(result.stdout).toContain(
+        `- Add feature flag | stable_id=${addFlagTask.stable_id} | count=2`
+      );
+      expect(result.stdout).toContain(
+        `- Add feature flag | stable_id=${addFlagTask.stable_id} | count=1`
+      );
+      expect(result.stdout).toContain(
+        `- Fix parser bug | stable_id=${parserBugTask.stable_id} | lines=5`
+      );
+      expect(result.stdout).toContain(
+        `- Add feature flag | stable_id=${addFlagTask.stable_id} | lines=4`
+      );
+      expect(result.stdout).not.toContain("shared summary label");
+      expect(result.stdout).not.toContain("different summary label");
+    } finally {
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
   });
 });
 

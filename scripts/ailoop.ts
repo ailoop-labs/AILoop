@@ -9,6 +9,7 @@ import {
   pauseLoop,
   renderCliStatus,
   resumeLoop,
+  runExternalValidationMetricsReport,
   runExternalValidationPreflight,
   startBackgroundLoop,
   stopLoop,
@@ -135,18 +136,43 @@ async function main(): Promise<void> {
     }
     case "external-validation": {
       const subCommand = rest[0];
-      const repoPath = rest.slice(1).join(" ").trim();
-      if (subCommand !== "preflight" || !repoPath) {
-        console.error("Usage: bun run ailoop external-validation preflight <repo-path>");
-        process.exitCode = 1;
-        return;
+      if (subCommand === "preflight") {
+        const repoPath = rest.slice(1).join(" ").trim();
+        if (!repoPath) {
+          console.error("Usage: bun run ailoop external-validation preflight <repo-path>");
+          process.exitCode = 1;
+          return;
+        }
+
+        const report = await runExternalValidationPreflight(repoPath);
+        console.log(report.report);
+        if (!report.result.eligible) {
+          process.exitCode = 1;
+        }
+        break;
       }
 
-      const report = await runExternalValidationPreflight(repoPath);
-      console.log(report.report);
-      if (!report.result.eligible) {
-        process.exitCode = 1;
+      if (subCommand === "report") {
+        if (rest.length > 1) {
+          console.error("Usage: bun run ailoop external-validation report");
+          process.exitCode = 1;
+          return;
+        }
+
+        const config = loadConfig();
+        const report = await runExternalValidationMetricsReport(config);
+        console.log(report.report);
+        break;
       }
+
+      console.error(
+        [
+          "Usage:",
+          "  bun run ailoop external-validation preflight <repo-path>",
+          "  bun run ailoop external-validation report"
+        ].join("\n")
+      );
+      process.exitCode = 1;
       break;
     }
     case undefined: {
@@ -164,7 +190,8 @@ async function main(): Promise<void> {
         "  instruct <message>",
         "  history",
         "  roles generate [--regen]",
-        "  external-validation preflight <repo-path>"
+        "  external-validation preflight <repo-path>",
+        "  external-validation report"
       ].join("\n"));
       break;
     }

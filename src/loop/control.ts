@@ -12,6 +12,10 @@ import {
 import type { AppConfig } from "../config/env";
 import { readRuntimeLoopConfig, runtimeLoopConfigToEnv } from "../config/runtime";
 import { readActiveRequirementSnapshot } from "../product/requirements";
+import {
+  buildExternalValidationMetricsReport,
+  type ExternalValidationMetricsReport
+} from "../reporting/metrics";
 import { buildRoundArtifactPaths, listRunRecords, readLastLogTail } from "../reporting/summary";
 import {
   evaluateExternalValidationPreflight,
@@ -165,6 +169,11 @@ export interface ExternalValidationPreflightReport {
   report: string;
 }
 
+export interface ExternalValidationMetricsCliReport {
+  metrics: ExternalValidationMetricsReport;
+  report: string;
+}
+
 function roleTitle(role: ProjectRole): string {
   if (role === "planner") {
     return "Project Planner";
@@ -262,6 +271,65 @@ export async function runExternalValidationPreflight(
     repoPath,
     result,
     report: renderExternalValidationPreflightReport(repoPath, result)
+  };
+}
+
+export function renderExternalValidationMetricsReport(report: ExternalValidationMetricsReport): string {
+  const lines = [
+    "External validation metrics report",
+    `Tasks analyzed: ${report.task_count}`,
+    `Successful tasks: ${report.successful_task_count}`,
+    "Rounds per successful task:"
+  ];
+
+  const successfulTasks = report.tasks.filter((task) => task.successful);
+  if (successfulTasks.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const task of successfulTasks) {
+      lines.push(`- ${task.objective} | stable_id=${task.stable_id} | rounds=${task.rounds}`);
+    }
+  }
+
+  lines.push("Human interventions per task:");
+  if (report.tasks.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const task of report.tasks) {
+      lines.push(`- ${task.objective} | stable_id=${task.stable_id} | count=${task.human_interventions}`);
+    }
+  }
+
+  lines.push("Evaluator infrastructure failure count:");
+  if (report.tasks.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const task of report.tasks) {
+      lines.push(
+        `- ${task.objective} | stable_id=${task.stable_id} | count=${task.evaluator_infrastructure_failures}`
+      );
+    }
+  }
+
+  lines.push("Hot-file growth totals:");
+  if (report.tasks.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const task of report.tasks) {
+      lines.push(`- ${task.objective} | stable_id=${task.stable_id} | lines=${task.hot_file_growth_lines}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+export async function runExternalValidationMetricsReport(config: AppConfig): Promise<ExternalValidationMetricsCliReport> {
+  const paths = await ensureLoopHomeAndGetPaths(config);
+  const metrics = await buildExternalValidationMetricsReport(paths.runsDir);
+
+  return {
+    metrics,
+    report: renderExternalValidationMetricsReport(metrics)
   };
 }
 
