@@ -445,6 +445,81 @@ describe("PlannerAgent", () => {
     }
   });
 
+  test("persists provider upstream diagnostics after exhausted 502/503/504 retries", async () => {
+    const upstreamFailures = [
+      { statusCode: 502, statusText: "Bad Gateway" },
+      { statusCode: 503, statusText: "Service Unavailable" },
+      { statusCode: 504, statusText: "Gateway Timeout" }
+    ] as const;
+
+    for (const { statusCode, statusText } of upstreamFailures) {
+      const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), `ailoop-planner-upstream-${statusCode}-`));
+      const homeDir = path.join(workspaceRoot, ".ailoop");
+      await fs.mkdir(path.join(homeDir, "runs"), { recursive: true });
+      await fs.writeFile(path.join(homeDir, "PLANNER_ROLE.md"), "# Planner Role\n\nCustom planner guidance.\n", "utf8");
+
+      let attempts = 0;
+      const sleepCalls: number[] = [];
+      const mockCodex = {
+        async runJson<T>() {
+          attempts += 1;
+          return {
+            ok: false,
+            data: undefined as T | undefined,
+            rawMessage: "",
+            stdout: "",
+            stderr: `API Error: ${statusCode} ${statusText}`,
+            error: "AI CLI exited with code 1"
+          };
+        }
+      };
+
+      const originalCwd = process.cwd();
+      process.chdir(workspaceRoot);
+
+      try {
+        const agent = new PlannerAgent(
+          createStubTools() as never,
+          makeConfig(homeDir),
+          mockCodex as never,
+          async (ms) => {
+            sleepCalls.push(ms);
+          }
+        );
+
+        let failure: unknown;
+        try {
+          await agent.plan(createContext(), { onLog: async () => {} });
+        } catch (error) {
+          failure = error;
+        }
+
+        expect(failure).toBeInstanceOf(PlannerInfrastructureError);
+        expect(attempts).toBe(3);
+        expect(sleepCalls).toEqual([1000, 2000]);
+
+        const diagnosticsPathMatch = (failure as Error).message.match(/diagnostics: (.+\.planner\.debug\.json)/);
+        expect(diagnosticsPathMatch).toBeTruthy();
+
+        const diagnosticsPath = diagnosticsPathMatch![1];
+        const payload = await readJsonFile<Record<string, unknown>>(diagnosticsPath, {});
+
+        expect(payload.failure_classification).toBe("provider_upstream_error");
+        expect(payload.provider_error_context).toEqual({
+          failure_kind: "provider_upstream_error",
+          status_code: statusCode,
+          retry_exhausted: true,
+          error_excerpt: "AI CLI exited with code 1",
+          stderr_excerpt: `API Error: ${statusCode} ${statusText}`,
+          raw_excerpt: null
+        });
+      } finally {
+        process.chdir(originalCwd);
+        await fs.rm(workspaceRoot, { recursive: true, force: true });
+      }
+    }
+  });
+
   test("persists planner timeout diagnostics after retry budget exhaustion", async () => {
     const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-planner-timeout-debug-artifact-"));
     const homeDir = path.join(workspaceRoot, ".ailoop");
