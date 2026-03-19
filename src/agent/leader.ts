@@ -44,6 +44,10 @@ function extractUsefulDiagnosticExcerpt(value: string | undefined, redactor: Sec
     "insufficient credits",
     "max_tokens",
     "quota",
+    "api error: 429",
+    "429",
+    "rate_limit_error",
+    "usage limit exceeded",
     "429 too many requests",
     "too many requests",
     "502 bad gateway",
@@ -101,7 +105,13 @@ function classifyLeaderFailure(result: CodexJsonCallResult<LeaderDecision>): str
   ) {
     return "provider_quota";
   }
-  if (combined.includes("429 too many requests") || combined.includes("too many requests")) {
+  if (
+    combined.includes("api error: 429") ||
+    combined.includes("rate_limit_error") ||
+    combined.includes("usage limit exceeded") ||
+    combined.includes("429 too many requests") ||
+    combined.includes("too many requests")
+  ) {
     return "provider_rate_limit";
   }
   if (combined.includes("502 bad gateway") || combined.includes("503 service unavailable") || combined.includes("504 gateway timeout")) {
@@ -302,10 +312,7 @@ export class LeaderAgent {
 
         if (!result.ok || !result.data) {
           const classification = classifyLeaderFailure(result);
-          const isTransient =
-            classification === "provider_upstream_error" ||
-            classification === "provider_rate_limit" ||
-            classification === "timeout";
+          const isTransient = classification === "timeout";
 
           if (isTransient && attempt < MAX_RETRIES) {
             const delay = RETRY_DELAY_MS * attempt;

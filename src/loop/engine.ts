@@ -306,6 +306,9 @@ export function summarizeGovernanceFailureForState(message: string): string {
     "insufficient credits",
     "max_tokens",
     "quota",
+    "api error: 429",
+    "rate_limit_error",
+    "usage limit exceeded",
     "429 too many requests",
     "502 bad gateway",
     "503 service unavailable",
@@ -751,18 +754,23 @@ export class LoopEngine {
             // Check if this is a network/upstream error (502, 503, timeout, etc.)
             // For these errors, we should exit cleanly and let the operator restart
             // rather than holding the lock indefinitely in waitWhilePaused
+            const normalizedErrorMessage = errorMessage.toLowerCase();
             const isNetworkError =
-              errorMessage.includes("402") ||
-              errorMessage.includes("requires more credits") ||
-              errorMessage.includes("insufficient credits") ||
-              errorMessage.includes("max_tokens") ||
-              errorMessage.includes("quota") ||
-              errorMessage.includes("429 Too Many Requests") ||
-              errorMessage.includes("502 Bad Gateway") ||
-              errorMessage.includes("503 Service Unavailable") ||
-              errorMessage.includes("Upstream request failed") ||
-              errorMessage.includes("ECONNREFUSED") ||
-              errorMessage.includes("ETIMEDOUT");
+              normalizedErrorMessage.includes("402") ||
+              normalizedErrorMessage.includes("requires more credits") ||
+              normalizedErrorMessage.includes("insufficient credits") ||
+              normalizedErrorMessage.includes("max_tokens") ||
+              normalizedErrorMessage.includes("quota") ||
+              normalizedErrorMessage.includes("api error: 429") ||
+              normalizedErrorMessage.includes("rate_limit_error") ||
+              normalizedErrorMessage.includes("usage limit exceeded") ||
+              normalizedErrorMessage.includes("429 too many requests") ||
+              normalizedErrorMessage.includes("too many requests") ||
+              normalizedErrorMessage.includes("502 bad gateway") ||
+              normalizedErrorMessage.includes("503 service unavailable") ||
+              normalizedErrorMessage.includes("upstream request failed") ||
+              normalizedErrorMessage.includes("econnrefused") ||
+              normalizedErrorMessage.includes("etimedout");
 
             if (isNetworkError) {
               await this.setState(

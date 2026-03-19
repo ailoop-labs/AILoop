@@ -188,6 +188,18 @@ describe("summarizeGovernanceFailureForState", () => {
     expect(summary).toContain("max_tokens");
     expect(summary).toContain("/tmp/leader.debug.json");
   });
+
+  test("preserves provider rate-limit details reported as usage-limit errors", () => {
+    const summary = summarizeGovernanceFailureForState(
+      'AI CLI exited with code 1 | stderr: API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)"}} | diagnostics: /tmp/leader.debug.json'
+    );
+
+    expect(summary).toContain("AI CLI exited with code 1");
+    expect(summary).toContain("detail:");
+    expect(summary).toContain("429");
+    expect(summary).toContain("usage limit exceeded");
+    expect(summary).toContain("/tmp/leader.debug.json");
+  });
 });
 
 describe("buildEvaluatorReworkInstructions", () => {
@@ -362,6 +374,51 @@ describe("LoopEngine auto rework", () => {
     expect(finalState.state).toBe("paused");
     expect(finalState.last_error).toContain("Governance failed due to provider/network error:");
     expect(finalState.last_error).toContain("more credits");
+    expect(finalState.last_error).toContain("/tmp/leader.debug.json");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("keeps the run paused when governance fails due to provider rate limiting", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-governance-rate-limit-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir,
+      AILOOP_MAX_CYCLES: "1"
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const seeded = await readLoopState(paths);
+    await writeLoopState(paths, {
+      ...seeded,
+      state: "paused",
+      round: 25,
+      last_error: "Evaluator blocked the round."
+    });
+    await setFlag(paths.pauseFlagPath);
+
+    const mutable = engine as unknown as {
+      leader: {
+        execute: (input: { paths: LoopPaths }) => Promise<never>;
+      };
+      run: () => Promise<void>;
+    };
+
+    mutable.leader = {
+      execute: async () => {
+        throw new Error(
+          'AI CLI exited with code 1 | stderr: API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)"}} | diagnostics: /tmp/leader.debug.json'
+        );
+      }
+    };
+
+    await mutable.run();
+
+    const finalState = await readLoopState(paths);
+    expect(finalState.state).toBe("paused");
+    expect(finalState.last_error).toContain("Governance failed due to provider/network error:");
+    expect(finalState.last_error).toContain("usage limit exceeded");
     expect(finalState.last_error).toContain("/tmp/leader.debug.json");
 
     await fs.rm(homeDir, { recursive: true, force: true });

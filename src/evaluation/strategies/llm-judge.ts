@@ -444,6 +444,13 @@ const PROVIDER_QUOTA_FAILURE_PATTERNS: RegExp[] = [
   /quota/i
 ];
 
+const PROVIDER_RATE_LIMIT_FAILURE_PATTERNS: RegExp[] = [
+  /\b429\b/i,
+  /rate_limit_error/i,
+  /usage limit exceeded/i,
+  /too many requests/i
+];
+
 const CODEX_PROCESS_FAILURE_PATTERNS: RegExp[] = [
   /(?:codex|ai cli) exited with code [1-9]\d*/i,
   /prompt likely exceeded/i,
@@ -457,6 +464,54 @@ function hasPattern(patterns: RegExp[], text: string): boolean {
 
 function toAssessmentText(assessment: DimensionAssessment): string {
   return [assessment.justification, ...assessment.evidence, ...assessment.blocking_issues].join("\n");
+}
+
+function extractInfrastructureDetail(assessments: DimensionAssessment[]): string | null {
+  const normalized = assessments
+    .map((assessment) => toAssessmentText(assessment))
+    .join("\n")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  const markers = [
+    "usage limit exceeded",
+    "rate_limit_error",
+    "too many requests",
+    "api error: 429",
+    "requires more credits",
+    "insufficient credits",
+    "max_tokens",
+    "401",
+    "unauthorized",
+    "command not found",
+    "enoent",
+    "permission denied",
+    "timed out",
+    "502 bad gateway",
+    "503 service unavailable",
+    "504 gateway timeout"
+  ];
+  const lower = normalized.toLowerCase();
+  let markerIndex = -1;
+  for (const marker of markers) {
+    const index = lower.indexOf(marker);
+    if (index >= 0) {
+      markerIndex = index;
+      break;
+    }
+  }
+
+  if (markerIndex < 0) {
+    return normalized.slice(0, 220);
+  }
+
+  const start = Math.max(0, markerIndex - 24);
+  const end = Math.min(normalized.length, markerIndex + 180);
+  return normalized.slice(start, end).trim();
 }
 
 function toLogLines(_source: "stdout" | "stderr", chunk: string): string[] {
@@ -904,12 +959,32 @@ function detectEvaluatorInfrastructureFailure(
   });
   if (providerQuotaFailures.length > 0) {
     const dimensions = providerQuotaFailures.map((assessment) => assessment.dimension).join(", ");
+    const detail = extractInfrastructureDetail(providerQuotaFailures);
     return {
       matchedAssessments: providerQuotaFailures,
-      justification: `Evaluator infrastructure failure: provider credits or token limits blocked evaluation while checking ${dimensions}.`,
+      justification: `Evaluator infrastructure failure: provider credits or token limits blocked evaluation while checking ${dimensions}.${detail ? ` Detail: ${detail}` : ""}`,
       rootCause: "evaluator_infrastructure:provider_quota",
       recommendedNextAction:
         "pause and repair evaluator provider credits/quota or reduce requested max_tokens/prompt size before retrying evaluation"
+    };
+  }
+
+  const providerRateLimitFailures = assessments.filter((assessment) => {
+    if (assessment.decision !== "unknown") {
+      return false;
+    }
+
+    return hasPattern(PROVIDER_RATE_LIMIT_FAILURE_PATTERNS, toAssessmentText(assessment));
+  });
+  if (providerRateLimitFailures.length > 0) {
+    const dimensions = providerRateLimitFailures.map((assessment) => assessment.dimension).join(", ");
+    const detail = extractInfrastructureDetail(providerRateLimitFailures);
+    return {
+      matchedAssessments: providerRateLimitFailures,
+      justification: `Evaluator infrastructure failure: provider rate limiting blocked evaluation while checking ${dimensions}.${detail ? ` Detail: ${detail}` : ""}`,
+      rootCause: "evaluator_infrastructure:provider_rate_limit",
+      recommendedNextAction:
+        "pause and wait for provider rate limits to recover or reduce concurrent evaluator demand before retrying evaluation"
     };
   }
 
@@ -922,9 +997,10 @@ function detectEvaluatorInfrastructureFailure(
   });
   if (genericProcessFailures.length > 0) {
     const dimensions = genericProcessFailures.map((assessment) => assessment.dimension).join(", ");
+    const detail = extractInfrastructureDetail(genericProcessFailures);
     return {
       matchedAssessments: genericProcessFailures,
-      justification: `Evaluator infrastructure failure: Codex process execution failed while checking ${dimensions}.`,
+      justification: `Evaluator infrastructure failure: Codex process execution failed while checking ${dimensions}.${detail ? ` Detail: ${detail}` : ""}`,
       rootCause: "evaluator_infrastructure:codex_process_failure",
       recommendedNextAction:
         "pause and inspect evaluator Codex stderr, CLI health, and prompt size before retrying evaluation"
@@ -1166,19 +1242,26 @@ export class LLMJudgeEvaluator implements Evaluator {
               aiResult.error ?? "missing evaluator JSON payload"
             }).`
           );
-          const evidence = [aiResult.error, aiResult.stderr].filter(Boolean).map((item) => String(item));
-          assessments.push(
-            sanitizeDimensionAssessment(dimension, {
-              dimension,
-              decision: "unknown",
-              score: 0,
-              confidence: 0,
-              justification: "Dimension evaluator call failed.",
-              evidence: evidence.length > 0 ? evidence : ["Evaluator response unavailable"],
-              blocking_issues: [],
-              recommended_next_action: "pause and inspect evaluator failure"
-            })
-          );
+          const evidence = [aiResult.error, aiResult.stderr, aiResult.rawMessage].filter(Boolean).map((item) => String(item));
+          const failedAssessment = sanitizeDimensionAssessment(dimension, {
+            dimension,
+            decision: "unknown",
+            score: 0,
+            confidence: 0,
+            justification: "Dimension evaluator call failed.",
+            evidence: evidence.length > 0 ? evidence : ["Evaluator response unavailable"],
+            blocking_issues: [],
+            recommended_next_action: "pause and inspect evaluator failure"
+          });
+          assessments.push(failedAssessment);
+          const infrastructureFailure = detectEvaluatorInfrastructureFailure([failedAssessment]);
+          if (infrastructureFailure) {
+            emitEvaluationLog(
+              context,
+              `Evaluator detected infrastructure failure (${infrastructureFailure.rootCause}); aborting remaining dimension checks.`
+            );
+            break;
+          }
           continue;
         }
 

@@ -439,4 +439,72 @@ Return a Markdown governance memo with:
       await fs.rm(workspaceRoot, { recursive: true, force: true });
     }
   });
+
+  test("classifies provider rate limits reported as usage-limit errors in diagnostics", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-leader-agent-rate-limit-debug-artifact-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    await fs.mkdir(path.join(homeDir, "runs"), { recursive: true });
+    await fs.writeFile(path.join(homeDir, "LEADER_ROLE.md"), "# Leader Role\n\nCustom leader guidance.\n", "utf8");
+
+    const logs: string[] = [];
+    const logArtifactPath = path.join(homeDir, "runs", "2026-03-18T19-26-15-772Z.round.log");
+    const stateChangePath = path.join(homeDir, "runs", "2026-03-18T19-26-15-772Z.round.state_change.txt");
+    await fs.writeFile(logArtifactPath, "round log\n", "utf8");
+    await fs.writeFile(stateChangePath, "diff\n", "utf8");
+
+    const mockCodex = {
+      async runJson() {
+        return {
+          ok: false,
+          data: undefined,
+          rawMessage: "",
+          stdout: "",
+          stderr:
+            'API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)"}}',
+          error: "AI CLI exited with code 1"
+        };
+      }
+    };
+
+    const originalCwd = process.cwd();
+    process.chdir(workspaceRoot);
+
+    try {
+      const agent = new LeaderAgent(makeConfig(homeDir));
+      (agent as { codex: typeof mockCodex }).codex = mockCodex;
+
+      const context: LeaderContext = {
+        ...sampleLeaderContext,
+        previousToolResult: {
+          ...samplePreviousToolResult,
+          artifacts: {
+            log_path: logArtifactPath,
+            state_change_path: stateChangePath
+          }
+        }
+      };
+
+      await expect(
+        agent.execute({
+          context,
+          paths: { homeDir },
+          onLog: async (message) => {
+            logs.push(message);
+          }
+        })
+      ).rejects.toThrow(/diagnostics: .*leader\.debug\.json/);
+
+      const diagnosticsLog = logs.find((message) => message.includes("Leader diagnostics artifact:"));
+      expect(diagnosticsLog).toBeTruthy();
+      const diagnosticsPath = diagnosticsLog!.split("Leader diagnostics artifact: ")[1];
+      const payload = await readJsonFile<Record<string, unknown>>(diagnosticsPath, {});
+
+      expect(payload.failure_classification).toBe("provider_rate_limit");
+      expect(String(payload.stderr_tail || "")).toContain("429");
+      expect(String(payload.stderr_tail || "")).toContain("usage limit exceeded");
+    } finally {
+      process.chdir(originalCwd);
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
 });

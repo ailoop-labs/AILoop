@@ -288,6 +288,51 @@ describe("aggregateDimensionAssessments", () => {
     expect(result.recovery_path).toBe("strategic_governance");
   });
 
+  test("surfaces provider rate limits as evaluator infrastructure blockers", () => {
+    const result = aggregateDimensionAssessments(
+      [
+        makeAssessment({
+          dimension: "goal_alignment",
+          decision: "unknown",
+          score: 0,
+          confidence: 0,
+          justification: "Dimension evaluator call failed.",
+          evidence: [
+            "AI CLI exited with code 1",
+            'API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)"}}'
+          ],
+          recommended_next_action: "pause and inspect evaluator failure"
+        }),
+        makeAssessment({
+          dimension: "causal_validity",
+          decision: "unknown",
+          score: 0,
+          confidence: 0,
+          justification: "Dimension evaluator call failed.",
+          evidence: ["AI CLI exited with code 1"],
+          recommended_next_action: "pause and inspect evaluator failure"
+        }),
+        makeAssessment({
+          dimension: "constraint_compliance",
+          decision: "unknown",
+          score: 0,
+          confidence: 0,
+          justification: "Dimension evaluator call failed.",
+          evidence: ["AI CLI exited with code 1"],
+          recommended_next_action: "pause and inspect evaluator failure"
+        })
+      ],
+      75
+    );
+
+    expect(result.decision).toBe("fail");
+    expect(result.justification).toContain("Evaluator infrastructure failure");
+    expect(result.root_cause).toBe("evaluator_infrastructure:provider_rate_limit");
+    expect(result.evidence.some((line) => line.includes("usage limit exceeded"))).toBe(true);
+    expect(result.recommended_next_action).toContain("rate limit");
+    expect(result.recovery_path).toBe("strategic_governance");
+  });
+
   test("surfaces concrete evidence and follow-up actions when a key dimension fails", () => {
     const result = aggregateDimensionAssessments(
       [
@@ -780,5 +825,59 @@ describe("LLMJudgeEvaluator logging", () => {
     expect(logs.some((line) => line.includes("Evaluator checking dimension: goal_alignment"))).toBe(true);
     expect(logs.some((line) => line.includes("[evaluator] stdout from evaluator"))).toBe(true);
     expect(logs.some((line) => line.includes("[evaluator] stderr from evaluator"))).toBe(true);
+  });
+
+  test("short-circuits remaining dimensions after the first evaluator infrastructure failure", async () => {
+    const context: RoundEvaluationContext = {
+      ...makeRoundContext(),
+      onLog: async () => {}
+    };
+
+    let callCount = 0;
+    const mockCodex = {
+      async runJson<T>() {
+        callCount += 1;
+        if (callCount === 1) {
+          return {
+            ok: false,
+            data: undefined,
+            rawMessage: "",
+            stdout: "",
+            stderr:
+              'API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)"}}',
+            error: "AI CLI exited with code 1"
+          };
+        }
+
+        return {
+          ok: true,
+          data: {
+            dimension: "causal_validity",
+            decision: "pass",
+            score: 90,
+            confidence: 0.9,
+            justification: "ok",
+            evidence: ["evidence"],
+            blocking_issues: [],
+            recommended_next_action: "continue"
+          } as unknown as T,
+          rawMessage: "{}",
+          stdout: "",
+          stderr: ""
+        };
+      }
+    };
+
+    const evaluator = new LLMJudgeEvaluator(
+      makeLlmConfig(["goal_alignment", "causal_validity", "constraint_compliance"]),
+      mockCodex as never
+    );
+    const result = await evaluator.evaluate(context);
+
+    expect(callCount).toBe(1);
+    expect(result.decision).toBe("fail");
+    expect(result.root_cause).toBe("evaluator_infrastructure:provider_rate_limit");
+    expect(result.dimensions).toHaveLength(1);
+    expect(result.evidence.some((line) => line.includes("usage limit exceeded"))).toBe(true);
   });
 });
