@@ -883,7 +883,13 @@ function buildArgs(
     args.push("--skip-git-repo-check");
   }
 
-  args.push("--json", "--output-schema", schemaPath, "-o", outputPath);
+  args.push("--json");
+
+  if (invocation.resumeSessionId) {
+    args.push("-o", outputPath);
+  } else {
+    args.push("--output-schema", schemaPath, "-o", outputPath);
+  }
 
   if (config.model.trim()) {
     args.push("--model", config.model.trim());
@@ -1078,8 +1084,13 @@ export class AIClient {
             ? buildRetryPrompt(basePrompt, attempt, summarizeForRetry(lastFailure.error ?? "unknown error", lastFailure.stderr))
             : basePrompt;
 
+        const resumeSessionId =
+          provider === "codex" && attempt > 0 && previousSessionId && shouldResumeCodexSession(lastFailure)
+            ? previousSessionId
+            : null;
+
         let finalPrompt = prompt;
-        if (provider === "gemini" || provider === "claude") {
+        if (provider === "gemini" || provider === "claude" || (provider === "codex" && resumeSessionId)) {
           finalPrompt = `${prompt}\n\nIMPORTANT: You MUST return a single JSON object strictly matching this schema. Output ONLY the raw JSON object, no markdown formatting or backticks.\nSCHEMA:\n${JSON.stringify(options.schema, null, 2)}`;
         }
 
@@ -1087,10 +1098,6 @@ export class AIClient {
           ...options,
           prompt: finalPrompt
         };
-        const resumeSessionId =
-          provider === "codex" && attempt > 0 && previousSessionId && shouldResumeCodexSession(lastFailure)
-            ? previousSessionId
-            : null;
 
         await fs.writeFile(outputPath, "", "utf8");
         const args = buildArgs(this.config, attemptOptions, schemaPath, outputPath, {

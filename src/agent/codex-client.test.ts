@@ -330,8 +330,11 @@ describe("AIClient.runJson", () => {
     expect(capturedArgv[1][0]).toBe("exec");
     expect(capturedArgv[1][1]).toBe("resume");
     expect(capturedArgv[1]).toContain("123e4567-e89b-12d3-a456-426614174000");
+    expect(capturedArgv[1]).not.toContain("--output-schema");
+    expect(capturedArgv[1]).toContain("-o");
     expect(capturedArgv[1].at(-1)).toBe("-");
     expect(prompts[1]).toContain("Retry attempt 1");
+    expect(prompts[1]).toContain("IMPORTANT: You MUST return a single JSON object");
   });
 
   test("extracts structured error details from Codex JSONL events", async () => {
