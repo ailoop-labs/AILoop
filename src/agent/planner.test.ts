@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import type { AppConfig } from "../config/env";
 import type { PlannerContext } from "../types/contracts";
+import { readJsonFile } from "../utils/fs";
 import {
   buildAdaptivePlannerDirectives,
   buildPlannerPrompt,
@@ -394,6 +395,106 @@ describe("PlannerAgent", () => {
       expect((failure as Error).message).toContain("usage limit exceeded");
       expect(attempts).toBe(3);
       expect(sleepCalls).toEqual([1000, 2000]);
+    } finally {
+      process.chdir(originalCwd);
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("persists planner timeout diagnostics after retry budget exhaustion", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-planner-timeout-debug-artifact-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    await fs.mkdir(path.join(homeDir, "runs"), { recursive: true });
+    await fs.writeFile(path.join(homeDir, "PLANNER_ROLE.md"), "# Planner Role\n\nCustom planner guidance.\n", "utf8");
+
+    let attempts = 0;
+    const sleepCalls: number[] = [];
+    const logs: string[] = [];
+    const mockCodex = {
+      async runJson<T>() {
+        attempts += 1;
+        return {
+          ok: false,
+          data: undefined as T | undefined,
+          rawMessage: "",
+          stdout:
+            '{"type":"response.output_text.done","text":"Planner reached timeout while collecting a sub-task."}\n',
+          stderr: "planner request timed out after 30000ms",
+          error: "AI CLI process timed out after 30000ms",
+          diagnostics: {
+            timedOut: true,
+            model: "gpt-5.4",
+            promptChars: 12,
+            inputTokens: 21,
+            outputTokens: 8,
+            totalTokens: 29,
+            exitCode: 1,
+            exitSignal: "SIGKILL" as const,
+            timingBreakdown: {
+              timeoutMs: 30_000,
+              totalRuntimeMs: 30_250,
+              sigtermSentAfterMs: 30_000,
+              sigkillSentAfterMs: 30_240,
+              exitObservedAfterMs: 30_250,
+              shutdownAfterSigtermMs: 250,
+              requiredSigkill: true
+            },
+            partialProgress: {
+              source: "stdout" as const,
+              kind: "assistant_message" as const,
+              eventType: "response.output_text.done",
+              sessionId: null,
+              excerpt: "Planner reached timeout while collecting a sub-task."
+            }
+          }
+        };
+      }
+    };
+
+    const originalCwd = process.cwd();
+    process.chdir(workspaceRoot);
+
+    try {
+      const agent = new PlannerAgent(
+        createStubTools() as never,
+        makeConfig(homeDir),
+        mockCodex as never,
+        async (ms) => {
+          sleepCalls.push(ms);
+        }
+      );
+
+      let failure: unknown;
+      try {
+        await agent.plan(createContext(), {
+          onLog: async (message) => {
+            logs.push(message);
+          }
+        });
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(failure).toBeInstanceOf(PlannerInfrastructureError);
+      expect((failure as Error).message).toMatch(/diagnostics: .*planner\.debug\.json/);
+      expect(attempts).toBe(3);
+      expect(sleepCalls).toEqual([1000, 2000]);
+
+      const diagnosticsLog = logs.find((message) => message.includes("ProjectPlanner diagnostics artifact:"));
+      expect(diagnosticsLog).toBeTruthy();
+
+      const diagnosticsPath = diagnosticsLog!.split("ProjectPlanner diagnostics artifact: ")[1];
+      const payload = await readJsonFile<Record<string, unknown>>(diagnosticsPath, {});
+
+      expect(payload.failure_classification).toBe("timeout");
+      expect(payload.timed_out).toBe(true);
+      expect(payload.partial_progress_checkpoint).toEqual({
+        source: "stdout",
+        kind: "assistant_message",
+        eventType: "response.output_text.done",
+        sessionId: null,
+        excerpt: "Planner reached timeout while collecting a sub-task."
+      });
     } finally {
       process.chdir(originalCwd);
       await fs.rm(workspaceRoot, { recursive: true, force: true });

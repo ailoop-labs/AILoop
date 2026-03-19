@@ -1,5 +1,9 @@
+import { createHash } from "node:crypto";
+import path from "node:path";
 import type { AppConfig } from "../config/env";
 import type { PlannerContext, SubTask } from "../types/contracts";
+import { writeJsonFile } from "../utils/fs";
+import { redactJsonStrings, SecretRedactor } from "../utils/redaction";
 import { AIClient, type AIJsonCallResult, type JsonSchema } from "./ai-client";
 import { loadProjectRoleDefinition } from "./role-definitions";
 import { buildInternalRuntimeSessionGuide } from "./runtime-policy";
@@ -115,6 +119,66 @@ function summarizeInfrastructureFailure(result: { error?: string; stderr: string
     return message;
   }
   return `${message} | stderr: ${stderr}`;
+}
+
+function normalizeDiagnosticExcerpt(
+  value: string | undefined,
+  redactor: SecretRedactor,
+  maxLength = 800
+): string | null {
+  const normalized = redactor.redact((value ?? "").replace(/\s+/g, " ").trim());
+  if (!normalized) {
+    return null;
+  }
+  return normalized.slice(0, maxLength);
+}
+
+function resolvePlannerDiagnosticsPath(homeDir: string): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return path.join(homeDir, "runs", `${stamp}.planner.debug.json`);
+}
+
+function parsePlannerExitCode(error?: string): number | null {
+  const match = (error ?? "").match(/code (\d+)/i);
+  return match ? Number(match[1]) : null;
+}
+
+async function writePlannerDiagnosticsArtifact(
+  homeDir: string,
+  prompt: string,
+  result: AIJsonCallResult<unknown>,
+  failureKind: PlannerTransientFailureKind,
+  sandbox: AppConfig["ai"]["plannerSandbox"],
+  cwd: string
+): Promise<string> {
+  const redactor = new SecretRedactor(process.env);
+  const diagnosticsPath = resolvePlannerDiagnosticsPath(homeDir);
+  const diagnostics = result.diagnostics;
+
+  await writeJsonFile(diagnosticsPath, {
+    created_at: new Date().toISOString(),
+    failure_classification: failureKind,
+    exit_code: diagnostics?.exitCode ?? parsePlannerExitCode(result.error),
+    exit_signal: diagnostics?.exitSignal ?? null,
+    timed_out: diagnostics?.timedOut ?? /timed out/i.test(`${result.error ?? ""}\n${result.stderr}\n${result.rawMessage}`),
+    sandbox,
+    cwd,
+    model: diagnostics?.model ?? null,
+    prompt_chars: diagnostics?.promptChars ?? prompt.length,
+    input_tokens: diagnostics?.inputTokens ?? null,
+    output_tokens: diagnostics?.outputTokens ?? null,
+    total_tokens: diagnostics?.totalTokens ?? null,
+    timing_breakdown: redactJsonStrings(diagnostics?.timingBreakdown ?? null, redactor),
+    partial_progress_checkpoint: redactJsonStrings(diagnostics?.partialProgress ?? null, redactor),
+    prompt_sha256: createHash("sha256").update(prompt).digest("hex"),
+    role_contract_mode: "runtime_json_v1",
+    stdout_tail: normalizeDiagnosticExcerpt(result.stdout, redactor),
+    stderr_tail: normalizeDiagnosticExcerpt(result.stderr, redactor),
+    raw_tail: normalizeDiagnosticExcerpt(result.rawMessage, redactor),
+    error: normalizeDiagnosticExcerpt(result.error, redactor)
+  });
+
+  return diagnosticsPath;
 }
 
 function hasNoDiffSignal(previousRoundError: string | null): boolean {
@@ -470,8 +534,20 @@ export class PlannerAgent {
 
     if (!result.ok || !result.data) {
       if (finalTransientFailure) {
+        let diagnosticsPath: string | undefined;
+        if (finalTransientFailure === "timeout") {
+          diagnosticsPath = await writePlannerDiagnosticsArtifact(
+            this.homeDir,
+            prompt,
+            result,
+            finalTransientFailure,
+            this.sandbox,
+            this.workspaceRoot
+          );
+          emitLog(`ProjectPlanner diagnostics artifact: ${diagnosticsPath}`);
+        }
         throw new PlannerInfrastructureError(
-          `Planner AI CLI ${describeTransientPlannerFailure(finalTransientFailure)} after ${PLANNER_TRANSIENT_RETRY_MAX_ATTEMPTS} attempts: ${summarizeInfrastructureFailure(result)}`
+          `Planner AI CLI ${describeTransientPlannerFailure(finalTransientFailure)} after ${PLANNER_TRANSIENT_RETRY_MAX_ATTEMPTS} attempts: ${summarizeInfrastructureFailure(result)}${diagnosticsPath ? ` | diagnostics: ${diagnosticsPath}` : ""}`
         );
       }
       return fallbackPlan(context);
