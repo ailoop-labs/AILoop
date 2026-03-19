@@ -501,6 +501,17 @@ describe("ExecutorAgent", () => {
             inputTokens: 210,
             outputTokens: 45,
             totalTokens: 255,
+            exitCode: 137,
+            exitSignal: "SIGKILL",
+            timingBreakdown: {
+              timeoutMs: 30_000,
+              totalRuntimeMs: 30_260,
+              sigtermSentAfterMs: 30_000,
+              sigkillSentAfterMs: 30_250,
+              exitObservedAfterMs: 30_260,
+              shutdownAfterSigtermMs: 260,
+              requiredSigkill: true
+            },
             partialProgress: {
               source: "stdout",
               kind: "assistant_message",
@@ -568,18 +579,33 @@ describe("ExecutorAgent", () => {
       });
 
       expect(result.toolResult.status).toBe("failure");
-      expect(logs.some((message) => message.includes("Executor timeout context:"))).toBe(true);
+      const timeoutContextLog = logs.find((message) => message.includes("Executor timeout context:"));
+      expect(timeoutContextLog).toBeTruthy();
+      expect(timeoutContextLog).toContain("\"exit_code\":137");
+      expect(timeoutContextLog).toContain("\"exit_signal\":\"SIGKILL\"");
+      expect(timeoutContextLog).toContain("\"timing_breakdown\":{\"timeout_ms\":30000");
 
       const diagnosticsPath = result.toolResult.error?.message.match(/diagnostics: ([^|]+)/)?.[1]?.trim();
       expect(diagnosticsPath).toBeTruthy();
 
       const payload = await readJsonFile<Record<string, unknown>>(diagnosticsPath!, {});
       expect(payload.timed_out).toBe(true);
+      expect(payload.exit_code).toBe(137);
+      expect(payload.exit_signal).toBe("SIGKILL");
       expect(payload.model).toBe("gpt-5.4");
       expect(payload.prompt_chars).toBe(4321);
       expect(payload.input_tokens).toBe(210);
       expect(payload.output_tokens).toBe(45);
       expect(payload.total_tokens).toBe(255);
+      expect(payload.timing_breakdown).toEqual({
+        timeout_ms: 30_000,
+        total_runtime_ms: 30_260,
+        sigterm_sent_after_ms: 30_000,
+        sigkill_sent_after_ms: 30_250,
+        exit_observed_after_ms: 30_260,
+        shutdown_after_sigterm_ms: 260,
+        required_sigkill: true
+      });
       expect(payload.partial_progress_checkpoint).toEqual({
         source: "stdout",
         kind: "assistant_message",

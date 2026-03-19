@@ -682,12 +682,22 @@ describe("AIClient.runJson", () => {
     const runner: ProcessRunner = async (_cmd, args) => {
       await fs.writeFile(outputPathFromArgs(args), "", "utf8");
       return {
-        code: 1,
+        code: 0,
         stdout:
           '{"type":"session.started","model":"provider-fallback-model"}\n' +
           '{"type":"turn.completed","usage":{"input_tokens":321,"output_tokens":34,"total_tokens":355}}\n',
         stderr: "runner timed out",
-        timedOut: true
+        timedOut: true,
+        signal: null,
+        timing: {
+          timeoutMs: 30_000,
+          totalRuntimeMs: 30_120,
+          sigtermSentAfterMs: 30_000,
+          sigkillSentAfterMs: null,
+          exitObservedAfterMs: 30_120,
+          shutdownAfterSigtermMs: 120,
+          requiredSigkill: false
+        }
       };
     };
 
@@ -714,6 +724,17 @@ describe("AIClient.runJson", () => {
       inputTokens: 321,
       outputTokens: 34,
       totalTokens: 355,
+      exitCode: 0,
+      exitSignal: null,
+      timingBreakdown: {
+        timeoutMs: 30_000,
+        totalRuntimeMs: 30_120,
+        sigtermSentAfterMs: 30_000,
+        sigkillSentAfterMs: null,
+        exitObservedAfterMs: 30_120,
+        shutdownAfterSigtermMs: 120,
+        requiredSigkill: false
+      },
       partialProgress: null
     });
   });
@@ -728,7 +749,17 @@ describe("AIClient.runJson", () => {
           '{"type":"response.output_text.done","text":"Read executor diagnostics flow and prepared timeout checkpoint artifact."}\n' +
           '{"type":"turn.completed","usage":{"input_tokens":210,"output_tokens":45,"total_tokens":255}}\n',
         stderr: "runner timed out",
-        timedOut: true
+        timedOut: true,
+        signal: "SIGKILL",
+        timing: {
+          timeoutMs: 30_000,
+          totalRuntimeMs: 30_260,
+          sigtermSentAfterMs: 30_000,
+          sigkillSentAfterMs: 30_250,
+          exitObservedAfterMs: 30_260,
+          shutdownAfterSigtermMs: 260,
+          requiredSigkill: true
+        }
       };
     };
 
@@ -748,6 +779,17 @@ describe("AIClient.runJson", () => {
       eventType: "response.output_text.done",
       sessionId: null,
       excerpt: "Read executor diagnostics flow and prepared timeout checkpoint artifact."
+    });
+    expect(result.diagnostics?.exitCode).toBe(1);
+    expect(result.diagnostics?.exitSignal).toBe("SIGKILL");
+    expect(result.diagnostics?.timingBreakdown).toEqual({
+      timeoutMs: 30_000,
+      totalRuntimeMs: 30_260,
+      sigtermSentAfterMs: 30_000,
+      sigkillSentAfterMs: 30_250,
+      exitObservedAfterMs: 30_260,
+      shutdownAfterSigtermMs: 260,
+      requiredSigkill: true
     });
   });
 

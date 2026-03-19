@@ -140,6 +140,28 @@ function parseExitCode(error: string | undefined): number | null {
   return match ? Number(match[1]) : null;
 }
 
+function normalizeTimingBreakdown(
+  value: CodexJsonCallResult<CodexExecutorResponse>["diagnostics"] extends infer Diagnostics
+    ? Diagnostics extends { timingBreakdown: infer TimingBreakdown }
+      ? TimingBreakdown
+      : never
+    : never
+): Record<string, unknown> | null {
+  if (!value) {
+    return null;
+  }
+
+  return {
+    timeout_ms: value.timeoutMs,
+    total_runtime_ms: value.totalRuntimeMs,
+    sigterm_sent_after_ms: value.sigtermSentAfterMs,
+    sigkill_sent_after_ms: value.sigkillSentAfterMs,
+    exit_observed_after_ms: value.exitObservedAfterMs,
+    shutdown_after_sigterm_ms: value.shutdownAfterSigtermMs,
+    required_sigkill: value.requiredSigkill
+  };
+}
+
 function resolveExecutorDiagnosticsPath(runsDir: string): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   return path.join(runsDir, `${stamp}.executor.debug.json`);
@@ -182,7 +204,8 @@ async function writeExecutorDiagnosticsArtifact(
   const diagnostics = result.diagnostics;
   await writeJsonFile(diagnosticsPath, {
     created_at: new Date().toISOString(),
-    exit_code: parseExitCode(result.error),
+    exit_code: result.diagnostics?.exitCode ?? parseExitCode(result.error),
+    exit_signal: result.diagnostics?.exitSignal ?? null,
     timed_out: diagnostics?.timedOut ?? /timed out/i.test(result.error ?? ""),
     sandbox,
     cwd,
@@ -191,6 +214,7 @@ async function writeExecutorDiagnosticsArtifact(
     input_tokens: diagnostics?.inputTokens ?? null,
     output_tokens: diagnostics?.outputTokens ?? null,
     total_tokens: diagnostics?.totalTokens ?? null,
+    timing_breakdown: normalizeTimingBreakdown(diagnostics?.timingBreakdown),
     partial_progress_checkpoint: normalizePartialProgressCheckpoint(diagnostics?.partialProgress, redactor),
     prompt_sha256: createHash("sha256").update(prompt).digest("hex"),
     role_contract_mode: "runtime_json_v1",
@@ -371,7 +395,10 @@ export class ExecutorAgent {
         prompt_chars: aiResult.diagnostics?.promptChars ?? prompt.length,
         input_tokens: aiResult.diagnostics?.inputTokens ?? null,
         output_tokens: aiResult.diagnostics?.outputTokens ?? null,
-        total_tokens: aiResult.diagnostics?.totalTokens ?? null
+        total_tokens: aiResult.diagnostics?.totalTokens ?? null,
+        exit_code: aiResult.diagnostics?.exitCode ?? parseExitCode(aiResult.error),
+        exit_signal: aiResult.diagnostics?.exitSignal ?? null,
+        timing_breakdown: normalizeTimingBreakdown(aiResult.diagnostics?.timingBreakdown)
       };
 
       if (timeoutContext.timed_out) {

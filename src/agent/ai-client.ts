@@ -41,7 +41,20 @@ export interface AIJsonCallDiagnostics {
   inputTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
+  exitCode: number | null;
+  exitSignal: NodeJS.Signals | null;
+  timingBreakdown: AIProcessTimingBreakdown | null;
   partialProgress: AIJsonPartialProgressCheckpoint | null;
+}
+
+export interface AIProcessTimingBreakdown {
+  timeoutMs: number;
+  totalRuntimeMs: number;
+  sigtermSentAfterMs: number | null;
+  sigkillSentAfterMs: number | null;
+  exitObservedAfterMs: number;
+  shutdownAfterSigtermMs: number | null;
+  requiredSigkill: boolean;
 }
 
 export interface AIJsonPartialProgressCheckpoint {
@@ -57,6 +70,8 @@ export interface ProcessRunResult {
   stdout: string;
   stderr: string;
   timedOut?: boolean;
+  signal?: NodeJS.Signals | null;
+  timing?: AIProcessTimingBreakdown | null;
 }
 
 export type ProcessRunner = (
@@ -684,6 +699,9 @@ function buildAICallDiagnostics(
     inputTokens: findLastNonNull(metadata.map((item) => item.inputTokens)),
     outputTokens: findLastNonNull(metadata.map((item) => item.outputTokens)),
     totalTokens: findLastNonNull(metadata.map((item) => item.totalTokens)),
+    exitCode: typeof runResult?.code === "number" ? runResult.code : null,
+    exitSignal: runResult?.signal ?? null,
+    timingBreakdown: runResult?.timing ?? null,
     partialProgress: extractLastPartialProgressCheckpoint(payloads)
   };
 }
@@ -909,6 +927,7 @@ export async function runProcess(
   stdin?: string
 ): Promise<ProcessRunResult> {
   return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
     const child = spawn(cmd, args, {
       cwd,
       env
@@ -925,14 +944,18 @@ export async function runProcess(
     let finished = false;
 
     let timedOut = false;
+    let sigtermSentAt: number | null = null;
+    let sigkillSentAt: number | null = null;
     let killTimer: ReturnType<typeof setTimeout> | null = null;
     const timer = setTimeout(() => {
       if (!finished) {
         timedOut = true;
+        sigtermSentAt = Date.now();
         child.kill("SIGTERM");
         // Give cooperative CLIs a short window to flush final state before forcing exit.
         killTimer = setTimeout(() => {
           if (!finished) {
+            sigkillSentAt = Date.now();
             child.kill("SIGKILL");
           }
         }, PROCESS_TIMEOUT_GRACE_MS);
@@ -970,18 +993,30 @@ export async function runProcess(
       }
     });
 
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       clearTimeout(timer);
       if (killTimer) {
         clearTimeout(killTimer);
       }
       if (!finished) {
         finished = true;
+        const finishedAt = Date.now();
+        const totalRuntimeMs = finishedAt - startedAt;
         resolve({
           code: code ?? 1,
           stdout,
           stderr,
-          timedOut
+          timedOut,
+          signal,
+          timing: {
+            timeoutMs,
+            totalRuntimeMs,
+            sigtermSentAfterMs: sigtermSentAt === null ? null : sigtermSentAt - startedAt,
+            sigkillSentAfterMs: sigkillSentAt === null ? null : sigkillSentAt - startedAt,
+            exitObservedAfterMs: totalRuntimeMs,
+            shutdownAfterSigtermMs: sigtermSentAt === null ? null : finishedAt - sigtermSentAt,
+            requiredSigkill: sigkillSentAt !== null
+          }
         });
       }
     });

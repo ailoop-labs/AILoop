@@ -24,10 +24,16 @@ describe("runProcess timeout handling", () => {
 
     expect(result.timedOut).toBe(true);
     expect(result.code).toBe(0);
+    expect(result.signal).toBeNull();
     expect(result.stdout).toContain("started");
     expect(result.stdout).toContain("final stdout");
     expect(result.stderr).toContain("waiting");
     expect(result.stderr).toContain("final stderr");
+    expect(result.timing?.timeoutMs).toBe(50);
+    expect(result.timing?.sigtermSentAfterMs).toBeGreaterThanOrEqual(50);
+    expect(result.timing?.sigkillSentAfterMs).toBeNull();
+    expect(result.timing?.shutdownAfterSigtermMs).not.toBeNull();
+    expect(result.timing?.requiredSigkill).toBe(false);
   });
 
   test("escalates to SIGKILL when a process ignores SIGTERM", async () => {
@@ -52,8 +58,13 @@ describe("runProcess timeout handling", () => {
 
     expect(result.timedOut).toBe(true);
     expect(result.code).toBe(1);
+    expect(result.signal).toBe("SIGKILL");
     expect(result.stdout).toContain("started");
     expect(result.stdout).toContain("ignoring sigterm");
     expect(elapsedMs).toBeGreaterThanOrEqual(PROCESS_TIMEOUT_GRACE_MS);
+    expect(result.timing?.timeoutMs).toBe(50);
+    expect(result.timing?.sigtermSentAfterMs).toBeGreaterThanOrEqual(50);
+    expect(result.timing?.sigkillSentAfterMs).toBeGreaterThanOrEqual(50 + PROCESS_TIMEOUT_GRACE_MS);
+    expect(result.timing?.requiredSigkill).toBe(true);
   });
 });
