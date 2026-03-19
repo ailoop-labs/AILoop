@@ -13,6 +13,10 @@ import type { AppConfig } from "../config/env";
 import { readRuntimeLoopConfig, runtimeLoopConfigToEnv } from "../config/runtime";
 import { readActiveRequirementSnapshot } from "../product/requirements";
 import { buildRoundArtifactPaths, listRunRecords, readLastLogTail } from "../reporting/summary";
+import {
+  evaluateExternalValidationPreflight,
+  type ExternalValidationPreflightResult
+} from "../environment/workspace";
 import type {
   ArtifactCompletenessStatus,
   BudgetDimension,
@@ -155,6 +159,12 @@ export interface ProjectRoleView {
   definition: string;
 }
 
+export interface ExternalValidationPreflightReport {
+  repoPath: string;
+  result: ExternalValidationPreflightResult;
+  report: string;
+}
+
 function roleTitle(role: ProjectRole): string {
   if (role === "planner") {
     return "Project Planner";
@@ -215,6 +225,44 @@ export async function listProjectRoles(config: AppConfig): Promise<ProjectRoleVi
   }
 
   return output;
+}
+
+export function renderExternalValidationPreflightReport(
+  repoPath: string,
+  result: ExternalValidationPreflightResult
+): string {
+  const lines = [
+    `External validation preflight: ${result.eligible ? "PASS" : "FAIL"}`,
+    `Repository: ${repoPath}`,
+    `Detected test command: ${result.detectedTestCommand ?? "none"}`,
+    `Direct dependencies: ${result.directDependencyCount}`
+  ];
+
+  if (result.failureReasons.length === 0) {
+    lines.push("Failure reasons: none");
+    return lines.join("\n");
+  }
+
+  lines.push("Failure reasons:");
+  for (const reason of result.failureReasons) {
+    lines.push(`- ${reason}`);
+  }
+
+  return lines.join("\n");
+}
+
+export async function runExternalValidationPreflight(
+  targetPath: string,
+  cwd: string = process.cwd()
+): Promise<ExternalValidationPreflightReport> {
+  const repoPath = path.resolve(cwd, targetPath);
+  const result = await evaluateExternalValidationPreflight(repoPath);
+
+  return {
+    repoPath,
+    result,
+    report: renderExternalValidationPreflightReport(repoPath, result)
+  };
 }
 
 export async function startBackgroundLoop(config: AppConfig): Promise<{ started: boolean; message: string }> {

@@ -71,6 +71,77 @@ function makeTestConfig(homeDir: string): AppConfig {
   };
 }
 
+function runCommand(command: string, cwd: string): void {
+  childProcess.execSync(command, {
+    cwd,
+    stdio: "pipe"
+  });
+}
+
+function runAiloopCli(args: string[], cwd: string): { exitCode: number; stdout: string; stderr: string } {
+  const processResult = Bun.spawnSync({
+    cmd: ["bun", "run", "/Users/yinjames/projects/AILoop/scripts/ailoop.ts", ...args],
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe"
+  });
+
+  return {
+    exitCode: processResult.exitCode,
+    stdout: new TextDecoder().decode(processResult.stdout).trim(),
+    stderr: new TextDecoder().decode(processResult.stderr).trim()
+  };
+}
+
+async function createExternalValidationCandidate(options?: {
+  initializeGit?: boolean;
+  includeTestInfrastructure?: boolean;
+  dependencyCount?: number;
+}): Promise<string> {
+  const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-control-external-validation-"));
+  const {
+    initializeGit = true,
+    includeTestInfrastructure = true,
+    dependencyCount = 1
+  } = options ?? {};
+
+  await fs.mkdir(path.join(repoDir, "src"), { recursive: true });
+  await fs.writeFile(path.join(repoDir, "src", "index.ts"), "export const value = 1;\n", "utf8");
+
+  if (includeTestInfrastructure) {
+    await fs.mkdir(path.join(repoDir, "test"), { recursive: true });
+    await fs.writeFile(
+      path.join(repoDir, "test", "index.test.ts"),
+      'import { expect, test } from "bun:test";\n\ntest("repo", () => {\n  expect(true).toBe(true);\n});\n',
+      "utf8"
+    );
+  }
+
+  const dependencies = Object.fromEntries(
+    Array.from({ length: dependencyCount }, (_, index) => [`dep-${index}`, "1.0.0"])
+  );
+  await fs.writeFile(
+    path.join(repoDir, "package.json"),
+    JSON.stringify(
+      {
+        name: "external-validation-candidate",
+        private: true,
+        scripts: includeTestInfrastructure ? { test: "bun test" } : {},
+        dependencies
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+  if (initializeGit) {
+    runCommand("git init", repoDir);
+  }
+
+  return repoDir;
+}
+
 // Compact contract payload reused to verify status, run-history, and artifact views stay aligned.
 const HOT_FILE_GOVERNANCE_PAYLOAD = {
   file_path: "src/loop/engine.ts",
@@ -2214,5 +2285,54 @@ describe("listProjectRoles", () => {
     expect(typeof roles[3]?.exists).toBe("boolean");
 
     await fs.rm(workspaceRoot, { recursive: true, force: true });
+  });
+});
+
+describe("external-validation preflight CLI", () => {
+  test("prints a passing eligibility summary for a valid candidate repository", async () => {
+    const repoDir = await createExternalValidationCandidate();
+
+    try {
+      const expectedRepoPath = path.join(await fs.realpath(path.dirname(repoDir)), path.basename(repoDir));
+      const result = runAiloopCli(
+        ["external-validation", "preflight", path.basename(repoDir)],
+        path.dirname(repoDir)
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toContain("External validation preflight: PASS");
+      expect(result.stdout).toContain(`Repository: ${expectedRepoPath}`);
+      expect(result.stdout).toContain("Detected test command: bun test");
+      expect(result.stdout).toContain("Direct dependencies: 1");
+      expect(result.stdout).toContain("Failure reasons: none");
+    } finally {
+      await fs.rm(repoDir, { recursive: true, force: true });
+    }
+  });
+
+  test("prints failure reasons and exits non-zero for an ineligible candidate repository", async () => {
+    const repoDir = await createExternalValidationCandidate({ includeTestInfrastructure: false });
+
+    try {
+      const expectedRepoPath = path.join(await fs.realpath(path.dirname(repoDir)), path.basename(repoDir));
+      const result = runAiloopCli(
+        ["external-validation", "preflight", path.basename(repoDir)],
+        path.dirname(repoDir)
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toContain("External validation preflight: FAIL");
+      expect(result.stdout).toContain(`Repository: ${expectedRepoPath}`);
+      expect(result.stdout).toContain("Detected test command: none");
+      expect(result.stdout).toContain("Direct dependencies: 1");
+      expect(result.stdout).toContain("Failure reasons:");
+      expect(result.stdout).toContain(
+        "- Repository must expose a local test entrypoint and matching test infrastructure."
+      );
+    } finally {
+      await fs.rm(repoDir, { recursive: true, force: true });
+    }
   });
 });

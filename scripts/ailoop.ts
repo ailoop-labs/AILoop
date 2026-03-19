@@ -9,26 +9,28 @@ import {
   pauseLoop,
   renderCliStatus,
   resumeLoop,
+  runExternalValidationPreflight,
   startBackgroundLoop,
   stopLoop,
   tailLatestLog
 } from "../src/loop/control";
 import { sleep } from "../src/utils/time";
 
-const config = loadConfig();
-
 async function runForeground(): Promise<void> {
+  const config = loadConfig();
   await ensureProjectRoles(config, { workspaceRoot: process.cwd(), autoRefresh: false });
   const engine = new LoopEngine(config);
   await engine.run();
 }
 
 async function printStatus(): Promise<void> {
+  const config = loadConfig();
   const status = await getCliStatus(config);
   console.log(renderCliStatus(status));
 }
 
 async function watchLogs(): Promise<void> {
+  const config = loadConfig();
   console.log("Watching latest loop logs. Press Ctrl+C to exit.");
   let lastPrinted = 0;
 
@@ -46,6 +48,7 @@ async function watchLogs(): Promise<void> {
 }
 
 async function printRecentRuns(): Promise<void> {
+  const config = loadConfig();
   const runs = await listRuns(config, 5);
   if (runs.length === 0) {
     console.log("No runs yet.");
@@ -70,21 +73,25 @@ async function main(): Promise<void> {
       break;
     }
     case "start": {
+      const config = loadConfig();
       const result = await startBackgroundLoop(config);
       console.log(result.message);
       break;
     }
     case "stop": {
+      const config = loadConfig();
       await stopLoop(config);
       console.log("Stop requested. Loop will stop at a safe checkpoint.");
       break;
     }
     case "pause": {
+      const config = loadConfig();
       await pauseLoop(config);
       console.log("Pause requested. Loop will pause before next round.");
       break;
     }
     case "resume": {
+      const config = loadConfig();
       await resumeLoop(config);
       console.log("Resume requested.");
       break;
@@ -104,6 +111,7 @@ async function main(): Promise<void> {
         process.exitCode = 1;
         return;
       }
+      const config = loadConfig();
       await instructLoop(config, message);
       console.log("Instruction queued for next round.");
       break;
@@ -120,8 +128,25 @@ async function main(): Promise<void> {
         return;
       }
       const regen = rest.includes("--regen");
+      const config = loadConfig();
       await ensureProjectRoles(config, { workspaceRoot: process.cwd(), regen });
       console.log(regen ? "Project role definitions regenerated." : "Project role definitions ensured.");
+      break;
+    }
+    case "external-validation": {
+      const subCommand = rest[0];
+      const repoPath = rest.slice(1).join(" ").trim();
+      if (subCommand !== "preflight" || !repoPath) {
+        console.error("Usage: bun run ailoop external-validation preflight <repo-path>");
+        process.exitCode = 1;
+        return;
+      }
+
+      const report = await runExternalValidationPreflight(repoPath);
+      console.log(report.report);
+      if (!report.result.eligible) {
+        process.exitCode = 1;
+      }
       break;
     }
     case undefined: {
@@ -138,7 +163,8 @@ async function main(): Promise<void> {
         "  watch",
         "  instruct <message>",
         "  history",
-        "  roles generate [--regen]"
+        "  roles generate [--regen]",
+        "  external-validation preflight <repo-path>"
       ].join("\n"));
       break;
     }
