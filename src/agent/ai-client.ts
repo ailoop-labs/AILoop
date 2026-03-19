@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import type { AIConfig, AISandboxMode } from "../config/env";
+import { isValidGitRepository } from "../environment/workspace";
 
 export type JsonSchema = Record<string, unknown>;
 
@@ -56,6 +57,8 @@ type SleepFn = (ms: number) => Promise<void>;
 
 const INTERFACE_ERROR_RETRY_DELAY_MS = 60_000;
 const INTERFACE_ERROR_MAX_RETRIES = 5;
+const UUID_LIKE_PATTERN =
+  /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/i;
 
 function parseJsonSafely<T>(payload: string): T | null {
   try {
@@ -260,6 +263,144 @@ function emitChunkSafely(handler: ((chunk: string) => void) | undefined, message
   }
 }
 
+interface CodexJsonlMetadata {
+  sessionId: string | null;
+  errorMessages: string[];
+  assistantMessages: string[];
+}
+
+interface CodexCliInvocationOptions {
+  resumeSessionId?: string | null;
+  skipGitRepoCheck?: boolean;
+}
+
+function maybePushString(target: string[], value: unknown): void {
+  if (typeof value !== "string") {
+    return;
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    return;
+  }
+  target.push(normalized);
+}
+
+function collectSessionId(value: unknown): string | null {
+  if (typeof value === "string") {
+    const match = value.match(UUID_LIKE_PATTERN);
+    return match ? match[0] : null;
+  }
+
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  for (const key of ["session_id", "sessionId", "conversation_id", "conversationId"]) {
+    const match = collectSessionId(value[key]);
+    if (match) {
+      return match;
+    }
+  }
+
+  for (const child of Object.values(value)) {
+    const match = collectSessionId(child);
+    if (match) {
+      return match;
+    }
+  }
+
+  return null;
+}
+
+function collectCodexMessages(value: unknown, errors: string[], assistantMessages: string[]): void {
+  if (typeof value === "string") {
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectCodexMessages(item, errors, assistantMessages);
+    }
+    return;
+  }
+
+  if (!isRecord(value)) {
+    return;
+  }
+
+  const typeValue = typeof value.type === "string" ? value.type.toLowerCase() : "";
+  const roleValue = typeof value.role === "string" ? value.role.toLowerCase() : "";
+
+  if (typeValue.includes("error") || typeValue.includes("failed")) {
+    maybePushString(errors, value.message);
+    if (isRecord(value.error)) {
+      maybePushString(errors, value.error.message);
+      maybePushString(errors, value.error.detail);
+    }
+  }
+
+  if (roleValue === "assistant" || typeValue.includes("message") || typeValue.includes("output")) {
+    maybePushString(assistantMessages, value.text);
+    maybePushString(assistantMessages, value.content);
+    maybePushString(assistantMessages, value.message);
+  }
+
+  for (const child of Object.values(value)) {
+    collectCodexMessages(child, errors, assistantMessages);
+  }
+}
+
+function parseCodexJsonlMetadata(payload: string): CodexJsonlMetadata {
+  const sessionCandidates: string[] = [];
+  const errorMessages: string[] = [];
+  const assistantMessages: string[] = [];
+
+  for (const line of payload.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    const parsed = parseJsonSafely<unknown>(trimmed);
+    if (!parsed) {
+      continue;
+    }
+
+    const sessionId = collectSessionId(parsed);
+    if (sessionId) {
+      sessionCandidates.push(sessionId);
+    }
+    collectCodexMessages(parsed, errorMessages, assistantMessages);
+  }
+
+  return {
+    sessionId: sessionCandidates.at(-1) ?? null,
+    errorMessages: Array.from(new Set(errorMessages)),
+    assistantMessages: Array.from(new Set(assistantMessages))
+  };
+}
+
+function shouldResumeCodexSession(lastFailure: AIJsonCallResult<unknown> | null): boolean {
+  if (!lastFailure?.error) {
+    return false;
+  }
+
+  const combined = `${lastFailure.error}\n${lastFailure.stderr}`.toLowerCase();
+  if (
+    combined.includes("timed out") ||
+    combined.includes("429") ||
+    combined.includes("rate_limit_error") ||
+    combined.includes("usage limit exceeded") ||
+    combined.includes("too many requests") ||
+    combined.includes("quota") ||
+    combined.includes("credits")
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 function detectAIProvider(bin: string): AIProvider {
   const basename = path.basename(bin).toLowerCase();
   if (basename === "gemini" || basename.includes("gemini")) {
@@ -341,7 +482,13 @@ function isTransientInterfaceFailure(errorMessage: string, stderr: string): bool
   return markers.some((marker) => combined.includes(marker));
 }
 
-function buildArgs(config: AIConfig, options: AIJsonCallOptions, schemaPath: string, outputPath: string): string[] {
+function buildArgs(
+  config: AIConfig,
+  options: AIJsonCallOptions,
+  schemaPath: string,
+  outputPath: string,
+  invocation: CodexCliInvocationOptions = {}
+): string[] {
   const provider = detectAIProvider(config.bin);
 
   if (provider === "gemini") {
@@ -391,27 +538,32 @@ function buildArgs(config: AIConfig, options: AIJsonCallOptions, schemaPath: str
   }
 
   // Codex (default)
-  const args = [
-    "exec",
-    "--ephemeral",
-    "--skip-git-repo-check",
-    "--sandbox",
-    options.sandbox,
-    "--output-schema",
-    schemaPath,
-    "-o",
-    outputPath
-  ];
+  const args = ["exec"];
+
+  if (invocation.resumeSessionId) {
+    args.push("resume", invocation.resumeSessionId);
+  }
+
+  args.push("--ephemeral");
+
+  if (!invocation.resumeSessionId) {
+    args.push("--sandbox", options.sandbox);
+    if (config.profile.trim()) {
+      args.push("--profile", config.profile.trim());
+    }
+  }
+
+  if (invocation.skipGitRepoCheck) {
+    args.push("--skip-git-repo-check");
+  }
+
+  args.push("--json", "--output-schema", schemaPath, "-o", outputPath);
 
   if (config.model.trim()) {
     args.push("--model", config.model.trim());
   }
 
-  if (config.profile.trim()) {
-    args.push("--profile", config.profile.trim());
-  }
-
-  args.push(options.prompt);
+  args.push("-");
   return args;
 }
 
@@ -561,6 +713,8 @@ export class AIClient {
       const processEnv = await buildProcessEnv(this.config, options.cwd);
       const invocationCwd = await prepareInvocationCwd(tempDir, options);
       const provider = detectAIProvider(this.config.bin);
+      const skipGitRepoCheck = provider === "codex" ? !(await isValidGitRepository(options.cwd)) : false;
+      let previousSessionId: string | null = null;
 
       for (let attempt = 0; ; attempt += 1) {
         const prompt =
@@ -577,17 +731,24 @@ export class AIClient {
           ...options,
           prompt: finalPrompt
         };
+        const resumeSessionId =
+          provider === "codex" && attempt > 0 && previousSessionId && shouldResumeCodexSession(lastFailure)
+            ? previousSessionId
+            : null;
 
         await fs.writeFile(outputPath, "", "utf8");
-        const args = buildArgs(this.config, attemptOptions, schemaPath, outputPath);
-        const stdin = provider === "claude" ? attemptOptions.prompt : undefined;
+        const args = buildArgs(this.config, attemptOptions, schemaPath, outputPath, {
+          resumeSessionId,
+          skipGitRepoCheck
+        });
+        const stdin = provider === "claude" || provider === "codex" ? attemptOptions.prompt : undefined;
         const runResult = await this.processRunner(
           this.config.bin,
           args,
           invocationCwd,
           timeoutMs,
           {
-            onStdoutChunk: attemptOptions.onStdoutChunk,
+            onStdoutChunk: provider === "codex" ? undefined : attemptOptions.onStdoutChunk,
             onStderrChunk: attemptOptions.onStderrChunk
           },
           processEnv,
@@ -604,6 +765,13 @@ export class AIClient {
           } catch {
             // fallback to raw stdout if parsing fails
           }
+        }
+        const codexJsonl = provider === "codex" ? parseCodexJsonlMetadata(runResult.stdout) : null;
+        if (codexJsonl?.sessionId) {
+          previousSessionId = codexJsonl.sessionId;
+        }
+        if (provider === "codex") {
+          effectiveStdout = codexJsonl?.assistantMessages.join("\n") ?? "";
         }
 
         const outputPayload = await fs.readFile(outputPath, "utf8").catch(() => "");
@@ -640,10 +808,13 @@ export class AIClient {
           };
         }
 
+        const codexErrorDetail = codexJsonl?.errorMessages.at(-1);
         const errorMessage = runResult.timedOut
           ? `AI CLI process timed out after ${timeoutMs}ms`
           : runResult.code !== 0
-            ? `AI CLI exited with code ${runResult.code}`
+            ? codexErrorDetail
+              ? `AI CLI exited with code ${runResult.code} | detail: ${codexErrorDetail}`
+              : `AI CLI exited with code ${runResult.code}`
             : "AI CLI response was not valid JSON";
         const failure: AIJsonCallResult<T> = {
           ok: false,

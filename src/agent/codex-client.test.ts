@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_LLM_EVALUATOR_DIMENSIONS, type CodexConfig } from "../config/env";
 import { AIClient, type ProcessRunner } from "./ai-client";
@@ -179,25 +180,167 @@ describe("AIClient.runJson", () => {
     }
   });
 
-  test("retries invalid JSON and succeeds on a later attempt", async () => {
+  test("runs Codex exec in JSON mode and passes the prompt via stdin", async () => {
+    let capturedArgs: string[] = [];
+    let capturedStdin = "";
+
+    const runner = (async function (_cmd, args) {
+      capturedArgs = [...args];
+      capturedStdin = (arguments[6] as string | undefined) ?? "";
+      await fs.writeFile(outputPathFromArgs(args), '{"status":"success"}', "utf8");
+      return {
+        code: 0,
+        stdout: "",
+        stderr: ""
+      };
+    }) as ProcessRunner;
+
+    const client = new AIClient(createCodexConfig(), runner);
+    const result = await client.runJson<{ status: string }>({
+      prompt: "Return JSON from stdin",
+      schema: { type: "object" },
+      cwd: process.cwd(),
+      sandbox: "read-only",
+      maxRetries: 0
+    });
+
+    expect(result.ok).toBe(true);
+    expect(capturedArgs).toContain("exec");
+    expect(capturedArgs).toContain("--json");
+    expect(capturedArgs.at(-1)).toBe("-");
+    expect(capturedStdin).toBe("Return JSON from stdin");
+    expect(capturedArgs).not.toContain("Return JSON from stdin");
+  });
+
+  test("omits skip-git-repo-check for valid git repositories", async () => {
+    const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-ai-client-git-repo-"));
+    execFileSync("git", ["init"], { cwd: repoDir, stdio: "ignore" });
+    let capturedArgs: string[] = [];
+
+    try {
+      const runner: ProcessRunner = async (_cmd, args) => {
+        capturedArgs = [...args];
+        await fs.writeFile(outputPathFromArgs(args), '{"status":"success"}', "utf8");
+        return {
+          code: 0,
+          stdout: "",
+          stderr: ""
+        };
+      };
+
+      const client = new AIClient(createCodexConfig(), runner);
+      const result = await client.runJson<{ status: string }>({
+        prompt: "Return JSON",
+        schema: { type: "object" },
+        cwd: repoDir,
+        sandbox: "read-only",
+        maxRetries: 0
+      });
+
+      expect(result.ok).toBe(true);
+      expect(capturedArgs).toContain("--json");
+      expect(capturedArgs).not.toContain("--skip-git-repo-check");
+    } finally {
+      await fs.rm(repoDir, { recursive: true, force: true });
+    }
+  });
+
+  test("uses resume with the prior session id on retryable Codex failures", async () => {
     const prompts: string[] = [];
+    const capturedArgv: string[][] = [];
     const attempts = [
-      { code: 0, output: "{bad json", stdout: "attempt1", stderr: "" },
-      { code: 0, output: '{"status":"success"}', stdout: "attempt2", stderr: "" }
+      {
+        code: 0,
+        stdout: '{"type":"session.started","session_id":"123e4567-e89b-12d3-a456-426614174000"}\n',
+        stderr: "",
+        output: "{bad json"
+      },
+      {
+        code: 0,
+        stdout: '{"type":"turn.completed"}\n',
+        stderr: "",
+        output: '{"status":"success"}'
+      }
     ];
-    const runner: ProcessRunner = async (_cmd, args) => {
+
+    const runner = (async function (_cmd, args) {
+      capturedArgv.push([...args]);
+      prompts.push((arguments[6] as string | undefined) ?? "");
       const step = attempts.shift();
       if (!step) {
         throw new Error("unexpected additional attempt");
       }
-      prompts.push(args.at(-1) ?? "");
       await fs.writeFile(outputPathFromArgs(args), step.output, "utf8");
       return {
         code: step.code,
         stdout: step.stdout,
         stderr: step.stderr
       };
+    }) as ProcessRunner;
+
+    const client = new AIClient(createCodexConfig(), runner);
+    const result = await client.runJson<{ status: string }>({
+      prompt: "Return JSON",
+      schema: { type: "object" },
+      cwd: process.cwd(),
+      sandbox: "read-only",
+      maxRetries: 1
+    });
+
+    expect(result.ok).toBe(true);
+    expect(capturedArgv).toHaveLength(2);
+    expect(capturedArgv[0]).toEqual(expect.arrayContaining(["exec", "--json"]));
+    expect(capturedArgv[1][0]).toBe("exec");
+    expect(capturedArgv[1][1]).toBe("resume");
+    expect(capturedArgv[1]).toContain("123e4567-e89b-12d3-a456-426614174000");
+    expect(capturedArgv[1].at(-1)).toBe("-");
+    expect(prompts[1]).toContain("Retry attempt 1");
+  });
+
+  test("extracts structured error details from Codex JSONL events", async () => {
+    const runner: ProcessRunner = async (_cmd, args) => {
+      await fs.writeFile(outputPathFromArgs(args), "", "utf8");
+      return {
+        code: 1,
+        stdout:
+          '{"type":"session.started","session_id":"123e4567-e89b-12d3-a456-426614174000"}\n' +
+          '{"type":"turn.failed","error":{"message":"usage limit exceeded (2056)"}}\n',
+        stderr: ""
+      };
     };
+
+    const client = new AIClient(createCodexConfig(), runner);
+    const result = await client.runJson({
+      prompt: "Return JSON",
+      schema: { type: "object" },
+      cwd: process.cwd(),
+      sandbox: "read-only",
+      maxRetries: 0
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("usage limit exceeded");
+  });
+
+  test("retries invalid JSON and succeeds on a later attempt", async () => {
+    const prompts: string[] = [];
+    const attempts = [
+      { code: 0, output: "{bad json", stdout: "attempt1", stderr: "" },
+      { code: 0, output: '{"status":"success"}', stdout: "attempt2", stderr: "" }
+    ];
+    const runner = (async function (_cmd, args) {
+      const step = attempts.shift();
+      if (!step) {
+        throw new Error("unexpected additional attempt");
+      }
+      prompts.push((arguments[6] as string | undefined) ?? "");
+      await fs.writeFile(outputPathFromArgs(args), step.output, "utf8");
+      return {
+        code: step.code,
+        stdout: step.stdout,
+        stderr: step.stderr
+      };
+    }) as ProcessRunner;
 
     const client = new AIClient(createCodexConfig(), runner);
     const result = await client.runJson<{ status: string }>({
@@ -345,8 +488,7 @@ describe("AIClient.runJson", () => {
   });
 
   test("falls back to parsing JSON from stdout when output payload is invalid", async () => {
-    const runner: ProcessRunner = async (_cmd, args) => {
-      await fs.writeFile(outputPathFromArgs(args), "", "utf8");
+    const runner: ProcessRunner = async () => {
       return {
         code: 0,
         stdout: `preface log\n{"status":"success","source":"stdout"}\nsuffix log`,
@@ -354,7 +496,7 @@ describe("AIClient.runJson", () => {
       };
     };
 
-    const client = new AIClient(createCodexConfig(), runner);
+    const client = new AIClient(createClaudeConfig(), runner);
     const result = await client.runJson<{ status: string; source: string }>({
       prompt: "Return JSON",
       schema: {
