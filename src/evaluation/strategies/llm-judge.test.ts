@@ -705,6 +705,157 @@ describe("LLMJudgeEvaluator", () => {
     expect(result.evidence.some((line) => line.includes("executor_summary: No code changes were required"))).toBe(true);
     expect(result.evidence.some((line) => line.includes("round_inconsistency_summary.direct_evidence"))).toBe(true);
   });
+
+  test("passes a true no-op round when no mutation is recorded", async () => {
+    const mockCodex = {
+      async runJson<T>(options?: { prompt?: string }) {
+        const prompt = options?.prompt ?? "";
+        const dimensionMatch = prompt.match(/dimension: ([a-z_]+)/i);
+        const dimension = (dimensionMatch?.[1] ?? "goal_alignment") as DimensionAssessment["dimension"];
+
+        return {
+          ok: true,
+          data: {
+            dimension,
+            decision: "pass",
+            score: 94,
+            confidence: 0.92,
+            justification: "Observed artifacts and summary are consistent for a validation-only round.",
+            evidence: ["No state change artifact entries were recorded."],
+            blocking_issues: [],
+            recommended_next_action: "continue"
+          } as T,
+          rawMessage: "{}",
+          stdout: "",
+          stderr: ""
+        };
+      }
+    };
+
+    const context = makeRoundContext();
+    context.toolResult.summary = "No code changes were required; validation confirmed the existing behavior.";
+    context.stateChange = "No state changes detected.";
+
+    const evaluator = new LLMJudgeEvaluator(
+      makeLlmConfig(["goal_alignment", "causal_validity", "constraint_compliance"]),
+      mockCodex as never
+    );
+    const result = await evaluator.evaluate(context);
+
+    expect(result.decision).toBe("pass");
+    expect(result.root_cause).toBe("none");
+    expect(result.justification).toContain("All evaluated dimensions passed");
+    expect(result.evidence.some((line) => line.includes("causal_validity: pass"))).toBe(true);
+  });
+
+  test("passes a truthful code-edit round when the executor summary accurately claims edits", async () => {
+    const mockCodex = {
+      async runJson<T>(options?: { prompt?: string }) {
+        const prompt = options?.prompt ?? "";
+        const dimensionMatch = prompt.match(/dimension: ([a-z_]+)/i);
+        const dimension = (dimensionMatch?.[1] ?? "goal_alignment") as DimensionAssessment["dimension"];
+
+        return {
+          ok: true,
+          data: {
+            dimension,
+            decision: "pass",
+            score: 95,
+            confidence: 0.91,
+            justification: "The executor summary and observed diff both show a bounded code edit.",
+            evidence: ["State change artifact aligns with the claimed llm-judge edit."],
+            blocking_issues: [],
+            recommended_next_action: "continue"
+          } as T,
+          rawMessage: "{}",
+          stdout: "",
+          stderr: ""
+        };
+      }
+    };
+
+    const context = makeRoundContext();
+    context.toolResult.summary = "Updated llm-judge contradiction handling tests and verification evidence.";
+    context.stateChange = [
+      "### Snapshot File Diffs",
+      "```diff",
+      "--- a/src/evaluation/strategies/llm-judge.test.ts",
+      "+++ b/src/evaluation/strategies/llm-judge.test.ts",
+      "@@ -701,0 +702,8 @@",
+      '+ expect(result.root_cause).toBe("artifact_summary_conflict:no_mutation_claim");',
+      "```"
+    ].join("\n");
+
+    const evaluator = new LLMJudgeEvaluator(
+      makeLlmConfig(["goal_alignment", "causal_validity", "constraint_compliance"]),
+      mockCodex as never
+    );
+    const result = await evaluator.evaluate(context);
+
+    expect(result.decision).toBe("pass");
+    expect(result.root_cause).toBe("none");
+    expect(result.justification).toContain("All evaluated dimensions passed");
+    expect(result.evidence.some((line) => line.includes("constraint_compliance: pass"))).toBe(true);
+  });
+
+  test("keeps the no-op contradiction failure even when unrelated telemetry or friction evidence is present", async () => {
+    const mockCodex = {
+      async runJson<T>(options?: { prompt?: string }) {
+        const prompt = options?.prompt ?? "";
+        const dimensionMatch = prompt.match(/dimension: ([a-z_]+)/i);
+        const dimension = (dimensionMatch?.[1] ?? "goal_alignment") as DimensionAssessment["dimension"];
+
+        return {
+          ok: true,
+          data: {
+            dimension,
+            decision: "pass",
+            score: 97,
+            confidence: 0.94,
+            justification: "Telemetry signals look healthy in isolation.",
+            evidence: ["Telemetry: hotFilePressureCount=1; frictionScore=0.12; healthStatus=green"],
+            blocking_issues: [],
+            recommended_next_action: "continue"
+          } as T,
+          rawMessage: "{}",
+          stdout: "",
+          stderr: ""
+        };
+      }
+    };
+
+    const context = makeRoundContext();
+    context.toolResult.summary = "No code changes were required; this was a no-op validation pass.";
+    context.toolResult.operational_evidence = [
+      "Telemetry: hotFilePressureCount=1; frictionScore=0.12; healthStatus=green",
+      "Friction metrics stayed within the expected band for this round."
+    ];
+    context.logLines = [
+      "[executor] Telemetry snapshot: hotFilePressureCount=1 healthStatus=green",
+      "[executor] frictionScore=0.12 observed during handoff"
+    ];
+    context.stateChange = [
+      "### Snapshot File Diffs",
+      "```diff",
+      "--- a/src/evaluation/strategies/llm-judge.ts",
+      "+++ b/src/evaluation/strategies/llm-judge.ts",
+      "@@ -1212,6 +1234,18 @@",
+      '+ recovery_path: "strategic_governance",',
+      "```"
+    ].join("\n");
+
+    const evaluator = new LLMJudgeEvaluator(
+      makeLlmConfig(["goal_alignment", "causal_validity", "constraint_compliance"]),
+      mockCodex as never
+    );
+    const result = await evaluator.evaluate(context);
+
+    expect(result.decision).toBe("fail");
+    expect(result.root_cause).toBe("artifact_summary_conflict:no_mutation_claim");
+    expect(result.justification).toContain("Observable contradiction failed causal_validity");
+    expect(result.evidence.some((line) => line.includes("round_inconsistency_summary.direct_evidence"))).toBe(true);
+    expect(result.recommended_next_action).toContain("review the recorded file edits");
+  });
 });
 
 describe("buildDimensionPrompt", () => {
