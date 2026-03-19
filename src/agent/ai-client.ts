@@ -76,6 +76,7 @@ type SleepFn = (ms: number) => Promise<void>;
 
 const INTERFACE_ERROR_RETRY_DELAY_MS = 60_000;
 const INTERFACE_ERROR_MAX_RETRIES = 5;
+export const PROCESS_TIMEOUT_GRACE_MS = 250;
 const UUID_LIKE_PATTERN =
   /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/i;
 
@@ -895,7 +896,7 @@ async function prepareInvocationCwd(tempDir: string, options: AIJsonCallOptions)
   return sessionDir;
 }
 
-async function runProcess(
+export async function runProcess(
   cmd: string,
   args: string[],
   cwd: string,
@@ -924,10 +925,17 @@ async function runProcess(
     let finished = false;
 
     let timedOut = false;
+    let killTimer: ReturnType<typeof setTimeout> | null = null;
     const timer = setTimeout(() => {
       if (!finished) {
         timedOut = true;
         child.kill("SIGTERM");
+        // Give cooperative CLIs a short window to flush final state before forcing exit.
+        killTimer = setTimeout(() => {
+          if (!finished) {
+            child.kill("SIGKILL");
+          }
+        }, PROCESS_TIMEOUT_GRACE_MS);
       }
     }, timeoutMs);
 
@@ -953,6 +961,9 @@ async function runProcess(
 
     child.on("error", (error) => {
       clearTimeout(timer);
+      if (killTimer) {
+        clearTimeout(killTimer);
+      }
       if (!finished) {
         finished = true;
         reject(error);
@@ -961,6 +972,9 @@ async function runProcess(
 
     child.on("close", (code) => {
       clearTimeout(timer);
+      if (killTimer) {
+        clearTimeout(killTimer);
+      }
       if (!finished) {
         finished = true;
         resolve({
