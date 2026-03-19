@@ -597,6 +597,168 @@ describe("LoopEngine auto rework", () => {
     await fs.rm(homeDir, { recursive: true, force: true });
   });
 
+  test("routes no-mutation summary contradictions to a strategic block while preserving handoff evidence", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-no-mutation-contradiction-test-"));
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-no-mutation-workspace-"));
+    const originalCwd = process.cwd();
+
+    try {
+      const hotFilePath = path.join(workspaceRoot, "src/evaluation/strategies/llm-judge.ts");
+      await fs.mkdir(path.dirname(hotFilePath), { recursive: true });
+      await fs.writeFile(hotFilePath, "export const recoveryPath = 'auto_rework';\n", "utf8");
+      process.chdir(workspaceRoot);
+
+      const config = loadConfig({
+        AILOOP_HOME: homeDir,
+        AILOOP_MAX_CYCLES: "1"
+      });
+      const engine = new LoopEngine(config);
+      const paths = (engine as unknown as { paths: LoopPaths }).paths;
+      await ensureLoopHome(paths);
+
+      const plan: SubTask = {
+        assignee: "executor",
+        rationale: "test rationale",
+        objective: "Keep the evaluator skeptical when a no-mutation executor summary contradicts the recorded diff.",
+        expected_outcome:
+          "runRound returns a strategic block and preserves the artifact evidence for the paused Leader handoff without tactical auto rework.",
+        impacted_files: ["src/evaluation/strategies/llm-judge.ts"],
+        recommended_tools: ["read_file", "write_file", "run_shell"]
+      };
+
+      let executeCall = 0;
+      let ccbCall = 0;
+      let evaluatedStateChangePath = "";
+      const mutable = engine as unknown as {
+        planner: { plan: () => Promise<SubTask> };
+        executor: {
+          execute: () => Promise<{
+            actions: ActionRecord[];
+            toolResult: ToolResult;
+          }>;
+        };
+        evaluator: {
+          evaluate: (input: {
+            toolResult: ToolResult;
+            stateChange: string;
+          }) => Promise<EvaluationResult>;
+        };
+        ccb: { run: () => Promise<never> };
+        collectOperationalEvidence: () => Promise<{
+          summaryNote: string;
+          lines: string[];
+          stateChangeNotes: string[];
+        }>;
+        runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+      };
+
+      mutable.planner = { plan: async () => plan };
+      mutable.executor = {
+        execute: async () => {
+          executeCall += 1;
+          await fs.writeFile(hotFilePath, 'export const recoveryPath = "strategic_governance";\n', "utf8");
+          return {
+            actions: [makeAction("write_file"), makeAction("run_shell")],
+            toolResult: {
+              ...makeToolResult(
+                "No code change was required; reran the targeted bun regression and confirmed it still passes."
+              ),
+              operational_evidence: [
+                "run_shell_command: Ran bun test src/evaluation/strategies/llm-judge.test.ts and observed 12 pass, 0 fail."
+              ]
+            }
+          };
+        }
+      };
+      mutable.evaluator = {
+        evaluate: async ({ toolResult, stateChange }) => {
+          evaluatedStateChangePath = toolResult.artifacts.state_change_path;
+          expect(toolResult.status).toBe("success");
+          expect(stateChange).toContain("src/evaluation/strategies/llm-judge.ts");
+          expect(stateChange).toContain('+export const recoveryPath = "strategic_governance";');
+          return {
+            decision: "fail",
+            justification: "Executor summary conflicts with recorded round artifacts.",
+            root_cause: "artifact_summary_conflict:no_mutation_claim",
+            evidence: [
+              "Executor summary claims no code change, but the state-change artifact records edits in src/evaluation/strategies/llm-judge.ts.",
+              'round_inconsistency_summary.direct_evidence: src/evaluation/strategies/llm-judge.ts | +export const recoveryPath = "strategic_governance";'
+            ],
+            recommended_next_action:
+              "pause and review the recorded file edits; do not trust the no-mutation summary until governance resolves the contradiction",
+            recovery_path: "tactical_rework",
+            dimensions: [
+              {
+                dimension: "goal_alignment",
+                decision: "fail",
+                score: 22,
+                confidence: 0.98,
+                justification:
+                  "Executor summary claims no code change, but the state-change artifact records edits in src/evaluation/strategies/llm-judge.ts.",
+                evidence: [
+                  'round_inconsistency_summary.direct_evidence: src/evaluation/strategies/llm-judge.ts | +export const recoveryPath = "strategic_governance";'
+                ],
+                blocking_issues: ["Do not trust the no-mutation summary until the contradiction is resolved."],
+                recommended_next_action: "Pause for governance review of the recorded diff."
+              }
+            ]
+          };
+        }
+      };
+      mutable.ccb = {
+        run: async () => {
+          ccbCall += 1;
+          throw new Error("CCB should not run during a strategic evaluator block handoff.");
+        }
+      };
+      mutable.collectOperationalEvidence = async () => ({
+        summaryNote: "",
+        lines: [],
+        stateChangeNotes: []
+      });
+
+      const outcome = await mutable.runRound(1);
+
+      expect(outcome.success).toBe(false);
+      expect(outcome.errorMessage).toContain("EvaluatorStrategicBlock:");
+      expect(outcome.errorMessage).toContain("summary conflicts with recorded round artifacts");
+      expect(executeCall).toBe(1);
+      expect(ccbCall).toBe(0);
+
+      const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+      const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
+      const metricsFile = runArtifacts.find((entry) => entry.endsWith(".round.metrics.json"));
+      expect(summaryFile).toBeDefined();
+      expect(metricsFile).toBeDefined();
+
+      const summaryText = await fs.readFile(path.join(homeDir, "runs", summaryFile as string), "utf8");
+      expect(summaryText).toContain("artifact_summary_conflict:no_mutation_claim");
+      expect(summaryText).toContain("## Auto Rework Attempts");
+      expect(summaryText).toContain("- No auto rework attempts were executed.");
+
+      const metrics = JSON.parse(await fs.readFile(path.join(homeDir, "runs", metricsFile as string), "utf8")) as {
+        retries: { auto_rework_attempts: number };
+      };
+      expect(metrics.retries.auto_rework_attempts).toBe(0);
+
+      const persistedState = await readLoopState(paths);
+      expect(persistedState.previous_tool_result?.summary).toContain("No code change was required");
+      expect(persistedState.previous_tool_result?.operational_evidence).toEqual([
+        "run_shell_command: Ran bun test src/evaluation/strategies/llm-judge.test.ts and observed 12 pass, 0 fail."
+      ]);
+      expect(persistedState.previous_tool_result?.artifacts.state_change_path).toBe(evaluatedStateChangePath);
+      expect(persistedState.previous_tool_result?.artifacts.log_path).toMatch(/\.round\.log$/);
+
+      const persistedStateChange = await fs.readFile(evaluatedStateChangePath, "utf8");
+      expect(persistedStateChange).toContain("+++ src/evaluation/strategies/llm-judge.ts");
+      expect(persistedStateChange).toContain('+export const recoveryPath = "strategic_governance";');
+    } finally {
+      process.chdir(originalCwd);
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+      await fs.rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
   test("passes prior executor evidence into Leader governance context before intervention", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-leader-context-test-"));
     const config = loadConfig({

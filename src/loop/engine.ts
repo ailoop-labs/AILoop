@@ -231,10 +231,6 @@ export function decideEvaluationFailureRecoveryPath(
     return "leader";
   }
 
-  if (evaluation.recovery_path === "tactical_rework") {
-    return "auto_rework";
-  }
-
   if (toolResult.status !== "success") {
     return "auto_rework";
   }
@@ -286,6 +282,10 @@ export function decideEvaluationFailureRecoveryPath(
 
   if (hasKeyUnknownDimension || looksLikeEvidenceHandoffFailure || looksLikeRoundArtifactContradiction) {
     return "leader";
+  }
+
+  if (evaluation.recovery_path === "tactical_rework") {
+    return "auto_rework";
   }
 
   return "auto_rework";
