@@ -23,6 +23,7 @@ import {
   upsertRequirementLifecycleStatus
 } from "../planning/requirement-completion";
 import { createEvaluator } from "../evaluation/evaluator";
+import { buildValidationHandoff } from "../evaluation/validation-handoff";
 import {
   buildRoundSubTaskIdentity,
   writeMetricsFile,
@@ -41,7 +42,16 @@ import {
   writeStateChangeFile,
   writeSummaryFile
 } from "../reporting/summary";
-import type { ActionRecord, EvaluationResult, LoopStateName, SubTask, ToolResult, LeaderDecision, CCBResult } from "../types/contracts";
+import type {
+  ActionRecord,
+  CCBResult,
+  EvaluationResult,
+  LeaderDecision,
+  LoopStateName,
+  RoundEvaluationContext,
+  SubTask,
+  ToolResult
+} from "../types/contracts";
 import type { ExecResult } from "../utils/exec";
 import { fileExists, readTextFile } from "../utils/fs";
 import { runShellCommand } from "../utils/exec";
@@ -95,6 +105,13 @@ interface OperationalEvidence {
 
 type CommandRunner = (command: string) => Promise<ExecResult>;
 type HealthChecker = () => Promise<HealthCheckResult>;
+
+function buildRoundEvaluationContext(input: Omit<RoundEvaluationContext, "validation_handoff">): RoundEvaluationContext {
+  return {
+    ...input,
+    validation_handoff: buildValidationHandoff(input)
+  };
+}
 
 function summarizeRequirementArtifact(markdown: string | null): string | null {
   if (!markdown?.trim()) {
@@ -1078,7 +1095,18 @@ export class LoopEngine {
       const evaluationStartedAt = Date.now();
       await enforceBudgetBeforeAction(`evaluator.evaluate`);
       await writeStateChangeFile(artifacts.stateChangePath, stateChange);
-      let evaluation = await activeEvaluator.evaluate({ subTask, toolResult: finalToolResult, stateChange, logLines, runTimestamp: runId, budgetLimits: guardrails.limitsSnapshot(), budgetUsage: guardrails.usage(), onLog: log });
+      let evaluation = await activeEvaluator.evaluate(
+        buildRoundEvaluationContext({
+          subTask,
+          toolResult: finalToolResult,
+          stateChange,
+          logLines,
+          runTimestamp: runId,
+          budgetLimits: guardrails.limitsSnapshot(),
+          budgetUsage: guardrails.usage(),
+          onLog: log
+        })
+      );
       phaseTimings.evaluation += Date.now() - evaluationStartedAt;
       let autoReworkAttempts = 0;
       const failureRecoveryPath = decideEvaluationFailureRecoveryPath(evaluation, finalToolResult);
@@ -1120,7 +1148,18 @@ export class LoopEngine {
           const reworkEvaluationStartedAt = Date.now();
           await enforceBudgetBeforeAction(`evaluator.evaluate auto-rework ${attempt}`);
           await writeStateChangeFile(artifacts.stateChangePath, stateChange);
-          evaluation = await activeEvaluator.evaluate({ subTask, toolResult: finalToolResult, stateChange, logLines, runTimestamp: runId, budgetLimits: guardrails.limitsSnapshot(), budgetUsage: guardrails.usage(), onLog: log });
+          evaluation = await activeEvaluator.evaluate(
+            buildRoundEvaluationContext({
+              subTask,
+              toolResult: finalToolResult,
+              stateChange,
+              logLines,
+              runTimestamp: runId,
+              budgetLimits: guardrails.limitsSnapshot(),
+              budgetUsage: guardrails.usage(),
+              onLog: log
+            })
+          );
           phaseTimings.evaluation += Date.now() - reworkEvaluationStartedAt;
           autoReworkNotes.push(
             `Attempt ${attempt}/${tacticalReworkLimit}: trigger='${priorJustification}' evaluation=${evaluation.decision}`

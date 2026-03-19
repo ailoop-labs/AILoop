@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import type { RoundEvaluationContext } from "../../types/contracts";
 import { DatabaseManager } from "../../utils/db";
+import { buildValidationHandoff } from "../validation-handoff";
 import { UIEvaluator } from "./ui-evaluator";
 
 const tempDirs = new Set<string>();
@@ -17,7 +18,7 @@ afterEach(async () => {
 });
 
 function makeEvaluationContext(): RoundEvaluationContext {
-  return {
+  const context: RoundEvaluationContext = {
     subTask: {
       rationale: "verify ui",
       assignee: "designer",
@@ -47,8 +48,12 @@ function makeEvaluationContext(): RoundEvaluationContext {
       elapsedMs: 0,
       actionsUsed: 0
     },
+    validation_handoff: {} as RoundEvaluationContext["validation_handoff"],
     onLog() {}
   };
+
+  context.validation_handoff = buildValidationHandoff(context);
+  return context;
 }
 
 describe("UIEvaluator", () => {

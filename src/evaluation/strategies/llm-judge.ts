@@ -5,7 +5,8 @@ import type {
   EvaluationRecoveryPath,
   EvaluationResult,
   HotFileGovernanceResult,
-  RoundEvaluationContext
+  RoundEvaluationContext,
+  ValidationRoundInconsistencySummary
 } from "../../types/contracts";
 import { AIClient, type JsonSchema } from "../../agent/ai-client";
 import { loadProjectRoleDefinition } from "../../agent/role-definitions";
@@ -652,19 +653,8 @@ const ROUND_ARTIFACT_CONTRADICTION_PATTERNS: RegExp[] = [
   /do not trust the no(?:-|\s)mutation summary/i
 ];
 
-type RoundInconsistencySummary = {
-  status: "none" | "present";
-  summary: string;
-  conflicting_signals: string[];
-  direct_evidence: Array<{
-    file_path: string;
-    artifact_path: string;
-    excerpt: string;
-  }>;
-};
-
 type AggregationSignals = {
-  roundInconsistencySummary?: RoundInconsistencySummary;
+  roundInconsistencySummary?: ValidationRoundInconsistencySummary;
 };
 
 function normalizePromptText(value: string): string {
@@ -759,7 +749,7 @@ function buildRoundInconsistencySummary(
   context: RoundEvaluationContext,
   stateChangeSummary: ReturnType<typeof summarizeStateChangeForEvaluation>,
   artifactManifest: Record<string, string>
-): RoundInconsistencySummary {
+): ValidationRoundInconsistencySummary {
   const noMutationClaim = summarizeNoMutationClaim(context.toolResult.summary);
   if (!noMutationClaim || stateChangeSummary.changed_files.length === 0) {
     return {
@@ -925,7 +915,7 @@ function buildTargetedExcerpts(
   context: RoundEvaluationContext,
   stateChangeSummary: ReturnType<typeof summarizeStateChangeForEvaluation>,
   artifactManifest: Record<string, string>,
-  roundInconsistencySummary: RoundInconsistencySummary
+  roundInconsistencySummary: ValidationRoundInconsistencySummary
 ): Array<Record<string, string>> {
   const targeted: Array<Record<string, string>> = [];
   const seen = new Set<string>();
@@ -1013,37 +1003,7 @@ function buildTargetedExcerpts(
 }
 
 function buildCompactEvaluationContext(context: RoundEvaluationContext): Record<string, unknown> {
-  const artifactManifest = buildArtifactManifest(context);
-  const stateChangeSummary = summarizeStateChangeForEvaluation(context.stateChange);
-  const roundInconsistencySummary = buildRoundInconsistencySummary(context, stateChangeSummary, artifactManifest);
-
-  return {
-    objective: context.subTask.objective,
-    expected_outcome: context.subTask.expected_outcome,
-    executor_summary: {
-      status: context.toolResult.status,
-      summary: redactSecretLikeText(context.toolResult.summary),
-      next_state_hint: context.toolResult.next_state_hint ?? "continue",
-      error: context.toolResult.error
-        ? {
-            type: redactSecretLikeText(context.toolResult.error.type),
-            message: redactSecretLikeText(context.toolResult.error.message)
-          }
-        : null
-    },
-    validation_summary: buildValidationSummary(context, stateChangeSummary, artifactManifest),
-    artifact_manifest: artifactManifest,
-    budget_limits: context.budgetLimits,
-    budget_usage: context.budgetUsage,
-    state_change_summary: stateChangeSummary,
-    round_inconsistency_summary: roundInconsistencySummary,
-    targeted_excerpts: buildTargetedExcerpts(
-      context,
-      stateChangeSummary,
-      artifactManifest,
-      roundInconsistencySummary
-    )
-  };
+  return context.validation_handoff;
 }
 
 function softenScopeOnlyHardGateFailure(assessment: DimensionAssessment): DimensionAssessment {
@@ -1454,9 +1414,7 @@ export class LLMJudgeEvaluator implements Evaluator {
   async evaluate(context: RoundEvaluationContext): Promise<EvaluationResult> {
     const assessments: DimensionAssessment[] = [];
     const evaluatorRoleDefinition = await loadProjectRoleDefinition(this.homeDir, "evaluator");
-    const artifactManifest = buildArtifactManifest(context);
-    const stateChangeSummary = summarizeStateChangeForEvaluation(context.stateChange);
-    const roundInconsistencySummary = buildRoundInconsistencySummary(context, stateChangeSummary, artifactManifest);
+    const roundInconsistencySummary = context.validation_handoff.round_inconsistency_summary;
     emitEvaluationLog(context, "Evaluator started LLM dimension checks.");
     const heartbeatStartedAt = Date.now();
     const heartbeat = setInterval(() => {

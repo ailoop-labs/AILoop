@@ -11,6 +11,7 @@ import type {
   LeaderContext,
   LeaderDecision,
   ProductManagerContext,
+  RoundEvaluationContext,
   SubTask,
   ToolResult
 } from "../types/contracts";
@@ -629,6 +630,7 @@ describe("LoopEngine auto rework", () => {
       let executeCall = 0;
       let ccbCall = 0;
       let evaluatedStateChangePath = "";
+      let evaluatedValidationHandoff: RoundEvaluationContext["validation_handoff"] | null = null;
       const mutable = engine as unknown as {
         planner: { plan: () => Promise<SubTask> };
         executor: {
@@ -641,6 +643,7 @@ describe("LoopEngine auto rework", () => {
           evaluate: (input: {
             toolResult: ToolResult;
             stateChange: string;
+            validation_handoff: RoundEvaluationContext["validation_handoff"];
           }) => Promise<EvaluationResult>;
         };
         ccb: { run: () => Promise<never> };
@@ -671,11 +674,27 @@ describe("LoopEngine auto rework", () => {
         }
       };
       mutable.evaluator = {
-        evaluate: async ({ toolResult, stateChange }) => {
+        evaluate: async ({ toolResult, stateChange, validation_handoff }) => {
           evaluatedStateChangePath = toolResult.artifacts.state_change_path;
+          evaluatedValidationHandoff = validation_handoff;
           expect(toolResult.status).toBe("success");
           expect(stateChange).toContain("src/evaluation/strategies/llm-judge.ts");
           expect(stateChange).toContain('+export const recoveryPath = "strategic_governance";');
+          expect(validation_handoff.executor_summary.summary).toContain("No code change was required");
+          expect(validation_handoff.artifact_manifest.state_change_path).toBe(toolResult.artifacts.state_change_path);
+          expect(validation_handoff.state_change_summary.changed_files).toEqual([
+            "src/evaluation/strategies/llm-judge.ts"
+          ]);
+          expect(validation_handoff.validation_summary.highlighted_signals).toContain(
+            "run_shell_command: Ran bun test src/evaluation/strategies/llm-judge.test.ts and observed 12 pass, 0 fail."
+          );
+          expect(validation_handoff.targeted_excerpts.some((excerpt) => excerpt.excerpt.includes("12 pass, 0 fail"))).toBe(
+            true
+          );
+          expect(validation_handoff.round_inconsistency_summary.status).toBe("present");
+          expect(validation_handoff.round_inconsistency_summary.direct_evidence[0]?.excerpt).toContain(
+            '+export const recoveryPath = "strategic_governance";'
+          );
           return {
             decision: "fail",
             justification: "Executor summary conflicts with recorded round artifacts.",
@@ -748,6 +767,9 @@ describe("LoopEngine auto rework", () => {
       ]);
       expect(persistedState.previous_tool_result?.artifacts.state_change_path).toBe(evaluatedStateChangePath);
       expect(persistedState.previous_tool_result?.artifacts.log_path).toMatch(/\.round\.log$/);
+      expect(evaluatedValidationHandoff?.round_inconsistency_summary.conflicting_signals[0]).toContain(
+        "No code change was required"
+      );
 
       const persistedStateChange = await fs.readFile(evaluatedStateChangePath, "utf8");
       expect(persistedStateChange).toContain("+++ src/evaluation/strategies/llm-judge.ts");
@@ -1459,17 +1481,21 @@ describe("LoopEngine auto rework", () => {
     };
 
     let evaluatedToolResult: ToolResult | null = null;
+    let evaluatedValidationHandoff: RoundEvaluationContext["validation_handoff"] | null = null;
     let stateChangeArtifactExistedDuringEvaluation = false;
     const execute = async () => ({
       actions: [makeAction("read_file")],
       toolResult: makeToolResult("Created artifact references")
     });
     const evaluate = async ({
-      toolResult
+      toolResult,
+      validation_handoff
     }: {
       toolResult: ToolResult;
+      validation_handoff: RoundEvaluationContext["validation_handoff"];
     }): Promise<EvaluationResult> => {
       evaluatedToolResult = toolResult;
+      evaluatedValidationHandoff = validation_handoff;
       await fs.access(toolResult.artifacts.state_change_path);
       stateChangeArtifactExistedDuringEvaluation = true;
       return makeEvaluation("pass", "Artifact contract satisfied.");
@@ -1500,6 +1526,13 @@ describe("LoopEngine auto rework", () => {
     expect(outcome.success).toBe(true);
     expect((evaluatedToolResult as ToolResult | null)?.artifacts.log_path).toMatch(/\.round\.log$/);
     expect((evaluatedToolResult as ToolResult | null)?.artifacts.state_change_path).toMatch(/\.round\.state_change\.txt$/);
+    expect(evaluatedValidationHandoff?.executor_summary.summary).toBe("Created artifact references");
+    expect(evaluatedValidationHandoff?.artifact_manifest.round_log_path).toBe(
+      (evaluatedToolResult as ToolResult | null)?.artifacts.log_path
+    );
+    expect(evaluatedValidationHandoff?.artifact_manifest.state_change_path).toBe(
+      (evaluatedToolResult as ToolResult | null)?.artifacts.state_change_path
+    );
     expect(stateChangeArtifactExistedDuringEvaluation).toBe(true);
 
     const persistedState = await readLoopState(paths);

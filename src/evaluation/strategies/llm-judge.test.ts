@@ -4,7 +4,13 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import type { AppConfig } from "../../config/env";
 import type { DimensionAssessment, RoundEvaluationContext } from "../../types/contracts";
+import { buildValidationHandoff } from "../validation-handoff";
 import { LLMJudgeEvaluator, aggregateDimensionAssessments, buildDimensionPrompt } from "./llm-judge";
+
+function attachValidationHandoff<T extends RoundEvaluationContext>(context: T): T {
+  context.validation_handoff = buildValidationHandoff(context);
+  return context;
+}
 
 function makeAssessment(partial: Partial<DimensionAssessment> & Pick<DimensionAssessment, "dimension">): DimensionAssessment {
   return {
@@ -20,7 +26,7 @@ function makeAssessment(partial: Partial<DimensionAssessment> & Pick<DimensionAs
 }
 
 function makeRoundContext(): RoundEvaluationContext {
-  return {
+  return attachValidationHandoff({
     subTask: {
       assignee: "executor",
       rationale: "test rationale",
@@ -53,7 +59,7 @@ function makeRoundContext(): RoundEvaluationContext {
       elapsedMs: 5000
     },
     onLog: async () => {}
-  };
+  });
 }
 
 function makeLlmConfig(dimensions: AppConfig["codex"]["llmEvaluatorDimensions"] = ["goal_alignment"]): AppConfig {
@@ -690,6 +696,7 @@ describe("LLMJudgeEvaluator", () => {
       '+ recovery_path: "strategic_governance",',
       "```"
     ].join("\n");
+    attachValidationHandoff(context);
 
     const evaluator = new LLMJudgeEvaluator(
       makeLlmConfig(["goal_alignment", "causal_validity", "constraint_compliance"]),
@@ -735,6 +742,7 @@ describe("LLMJudgeEvaluator", () => {
     const context = makeRoundContext();
     context.toolResult.summary = "No code changes were required; validation confirmed the existing behavior.";
     context.stateChange = "No state changes detected.";
+    attachValidationHandoff(context);
 
     const evaluator = new LLMJudgeEvaluator(
       makeLlmConfig(["goal_alignment", "causal_validity", "constraint_compliance"]),
@@ -785,6 +793,7 @@ describe("LLMJudgeEvaluator", () => {
       '+ expect(result.root_cause).toBe("artifact_summary_conflict:no_mutation_claim");',
       "```"
     ].join("\n");
+    attachValidationHandoff(context);
 
     const evaluator = new LLMJudgeEvaluator(
       makeLlmConfig(["goal_alignment", "causal_validity", "constraint_compliance"]),
@@ -843,6 +852,7 @@ describe("LLMJudgeEvaluator", () => {
       '+ recovery_path: "strategic_governance",',
       "```"
     ].join("\n");
+    attachValidationHandoff(context);
 
     const evaluator = new LLMJudgeEvaluator(
       makeLlmConfig(["goal_alignment", "causal_validity", "constraint_compliance"]),
@@ -905,6 +915,7 @@ describe("buildDimensionPrompt", () => {
       "```"
     ].join("\n");
     context.logLines = Array.from({ length: 60 }, (_, index) => `log line ${index + 1}`);
+    attachValidationHandoff(context);
 
     const prompt = buildDimensionPrompt("goal_alignment", context);
     const roundContext = extractPromptRoundContext(prompt);
@@ -940,6 +951,7 @@ describe("buildDimensionPrompt", () => {
       "validation: targeted prompt excerpt selected from log",
       "executor finished"
     ];
+    attachValidationHandoff(context);
 
     const roundContext = extractPromptRoundContext(buildDimensionPrompt("goal_alignment", context));
     const validationSummary = roundContext.validation_summary as Record<string, unknown>;
@@ -975,6 +987,7 @@ describe("buildDimensionPrompt", () => {
       "+            stderr: round76ResumeFailure",
       "```"
     ].join("\n");
+    attachValidationHandoff(context);
 
     const roundContext = extractPromptRoundContext(buildDimensionPrompt("causal_validity", context));
     const inconsistencySummary = roundContext.round_inconsistency_summary as Record<string, unknown>;
@@ -1023,6 +1036,7 @@ describe("buildDimensionPrompt", () => {
       "[executor] +      hotFilePressureCount: hotFilePressure?.count || 0,",
       "[executor] +          <p className=\"text-[10px] uppercase tracking-widest text-mist/50\">Hot-File Pressure</p>"
     ];
+    attachValidationHandoff(context);
 
     const roundContext = extractPromptRoundContext(buildDimensionPrompt("goal_alignment", context));
     const validationSummary = roundContext.validation_summary as Record<string, unknown>;
@@ -1060,6 +1074,7 @@ describe("buildDimensionPrompt", () => {
       '[04:49:31][evaluator] "[04:45:38][evaluator] \\"[04:45:28][executor] {\\\\\\"actions\\\\\\":[\\\\\\"read_file\\\\\\"]}\\""',
       "[executor] run_shell_command: Ran `bun test web/src/App.test.tsx` and confirmed `20 pass, 0 fail`."
     ];
+    attachValidationHandoff(context);
 
     const roundContext = extractPromptRoundContext(buildDimensionPrompt("goal_alignment", context));
     const validationSummary = roundContext.validation_summary as Record<string, unknown>;

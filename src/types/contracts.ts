@@ -298,6 +298,70 @@ export type AgentRole = "planner" | "product_manager" | "executor" | "evaluator"
 
 export type EvaluationDimension = string;
 
+export interface ValidationArtifactManifest {
+  round_log_path: string;
+  state_change_path: string;
+  bundle_path: string;
+}
+
+export interface ValidationStateChangeSummary {
+  changed_files: string[];
+  added_lines: number;
+  removed_lines: number;
+  notes: string[];
+}
+
+export interface ValidationSummary {
+  status: "recorded" | "error_only" | "derived" | "missing";
+  summary: string;
+  primary_sources: string[];
+  highlighted_signals: string[];
+  full_detail_artifacts: string[];
+}
+
+export interface ValidationTargetedExcerpt {
+  source: string;
+  artifact_path: string;
+  selection_reason: string;
+  excerpt: string;
+}
+
+export interface ValidationRoundInconsistencyEvidence {
+  file_path: string;
+  artifact_path: string;
+  excerpt: string;
+}
+
+export interface ValidationRoundInconsistencySummary {
+  status: "none" | "present";
+  summary: string;
+  conflicting_signals: string[];
+  direct_evidence: ValidationRoundInconsistencyEvidence[];
+}
+
+export interface ValidationExecutorSummary {
+  status: ToolResult["status"];
+  summary: string;
+  next_state_hint: NonNullable<ToolResult["next_state_hint"]> | "continue";
+  error: {
+    type: string;
+    message: string;
+  } | null;
+}
+
+export interface ValidationHandoff {
+  objective: string;
+  expected_outcome: string;
+  executor_summary: ValidationExecutorSummary;
+  validation_summary: ValidationSummary;
+  artifact_manifest: ValidationArtifactManifest;
+  budget_limits: BudgetLimits;
+  budget_usage: BudgetUsage;
+  state_change_summary: ValidationStateChangeSummary;
+  round_inconsistency_summary: ValidationRoundInconsistencySummary;
+  targeted_excerpts: ValidationTargetedExcerpt[];
+}
+
 export interface RoundEvaluationContext {
   subTask: SubTask;
   toolResult: ToolResult;
@@ -306,6 +370,7 @@ export interface RoundEvaluationContext {
   runTimestamp: string;
   budgetLimits: BudgetLimits;
   budgetUsage: BudgetUsage;
+  validation_handoff: ValidationHandoff;
   onLog: (message: string) => void | Promise<void>;
 }
 
