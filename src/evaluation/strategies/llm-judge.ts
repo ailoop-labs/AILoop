@@ -663,6 +663,10 @@ type RoundInconsistencySummary = {
   }>;
 };
 
+type AggregationSignals = {
+  roundInconsistencySummary?: RoundInconsistencySummary;
+};
+
 function normalizePromptText(value: string): string {
   return redactSecretLikeText(value.replace(/\s+/g, " ").trim());
 }
@@ -1194,9 +1198,41 @@ function detectRoundArtifactContradiction(
   };
 }
 
+function detectObservableCausalValidityContradiction(
+  signals: AggregationSignals | undefined
+):
+  | {
+      justification: string;
+      rootCause: string;
+      evidence: string[];
+      recommendedNextAction: string;
+    }
+  | undefined {
+  const roundInconsistencySummary = signals?.roundInconsistencySummary;
+  if (!roundInconsistencySummary || roundInconsistencySummary.status !== "present") {
+    return undefined;
+  }
+
+  const evidence = [
+    ...roundInconsistencySummary.conflicting_signals,
+    ...roundInconsistencySummary.direct_evidence.map(
+      (item) => `round_inconsistency_summary.direct_evidence: ${item.excerpt}`
+    )
+  ];
+
+  return {
+    justification: `Observable contradiction failed causal_validity. ${roundInconsistencySummary.summary}`,
+    rootCause: "artifact_summary_conflict:no_mutation_claim",
+    evidence,
+    recommendedNextAction:
+      "pause and review the recorded file edits; do not trust the no-mutation summary until governance resolves the contradiction"
+  };
+}
+
 export function aggregateDimensionAssessments(
   assessments: DimensionAssessment[],
-  minPassScore: number
+  minPassScore: number,
+  signals?: AggregationSignals
 ): {
   decision: EvaluationResult["decision"];
   justification: string;
@@ -1245,6 +1281,22 @@ export function aggregateDimensionAssessments(
       root_cause: infrastructureFailure.rootCause,
       evidence: withDetailedEvidence(evidence, infrastructureFailure.matchedAssessments),
       recommended_next_action: infrastructureFailure.recommendedNextAction,
+      recovery_path: "strategic_governance",
+      aggregateScore: score
+    };
+  }
+
+  const observableCausalValidityContradiction = detectObservableCausalValidityContradiction(signals);
+  if (observableCausalValidityContradiction) {
+    return {
+      decision: "fail",
+      justification: observableCausalValidityContradiction.justification,
+      root_cause: observableCausalValidityContradiction.rootCause,
+      evidence: withDetailedEvidence(
+        [...evidence, ...observableCausalValidityContradiction.evidence],
+        adjusted.filter((assessment) => assessment.dimension === "causal_validity")
+      ),
+      recommended_next_action: observableCausalValidityContradiction.recommendedNextAction,
       recovery_path: "strategic_governance",
       aggregateScore: score
     };
@@ -1402,6 +1454,9 @@ export class LLMJudgeEvaluator implements Evaluator {
   async evaluate(context: RoundEvaluationContext): Promise<EvaluationResult> {
     const assessments: DimensionAssessment[] = [];
     const evaluatorRoleDefinition = await loadProjectRoleDefinition(this.homeDir, "evaluator");
+    const artifactManifest = buildArtifactManifest(context);
+    const stateChangeSummary = summarizeStateChangeForEvaluation(context.stateChange);
+    const roundInconsistencySummary = buildRoundInconsistencySummary(context, stateChangeSummary, artifactManifest);
     emitEvaluationLog(context, "Evaluator started LLM dimension checks.");
     const heartbeatStartedAt = Date.now();
     const heartbeat = setInterval(() => {
@@ -1476,7 +1531,9 @@ export class LLMJudgeEvaluator implements Evaluator {
       clearInterval(heartbeat);
     }
 
-    const aggregate = aggregateDimensionAssessments(assessments, this.minPassScore);
+    const aggregate = aggregateDimensionAssessments(assessments, this.minPassScore, {
+      roundInconsistencySummary
+    });
     emitEvaluationLog(context, `Evaluator completed LLM dimension checks (decision=${aggregate.decision}).`);
     const hotFileGovernance = detectHotFileGovernance(assessments, aggregate);
     const recoveryPath = hotFileGovernance ? "strategic_governance" : aggregate.recovery_path;

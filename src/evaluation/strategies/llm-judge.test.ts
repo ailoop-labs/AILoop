@@ -365,26 +365,38 @@ describe("aggregateDimensionAssessments", () => {
       [
         makeAssessment({
           dimension: "goal_alignment",
-          decision: "fail",
-          score: 24,
-          justification:
-            "Executor summary claims no code change, but the state-change artifact records edits in src/evaluation/strategies/llm-judge.ts.",
-          evidence: [
-            "round_inconsistency_summary.direct_evidence: src/evaluation/strategies/llm-judge.ts | @@ -1212,6 +1234,18 @@ | +      recovery_path: \"strategic_governance\","
-          ],
-          blocking_issues: ["Do not trust the no-mutation summary until the contradiction is resolved."],
-          recommended_next_action: "pause and review the recorded file edits before retrying"
+          score: 90
         }),
-        makeAssessment({ dimension: "causal_validity", score: 81 }),
+        makeAssessment({ dimension: "causal_validity", score: 88 }),
         makeAssessment({ dimension: "constraint_compliance", score: 92 })
       ],
-      75
+      75,
+      {
+        roundInconsistencySummary: {
+          status: "present",
+          summary:
+            "Executor summary claims no code change, but the state-change artifact records edits in 1 file(s): src/evaluation/strategies/llm-judge.ts.",
+          conflicting_signals: [
+            "executor_summary: no code changes were required",
+            'state_change_summary: changed_files=["src/evaluation/strategies/llm-judge.ts"], added_lines=12, removed_lines=0'
+          ],
+          direct_evidence: [
+            {
+              file_path: "src/evaluation/strategies/llm-judge.ts",
+              artifact_path: ".ailoop/runs/example.round.state_change.txt",
+              excerpt:
+                'src/evaluation/strategies/llm-judge.ts | @@ -1212,6 +1234,18 @@ | + recovery_path: "strategic_governance"'
+            }
+          ]
+        }
+      }
     );
 
     expect(result.decision).toBe("fail");
-    expect(result.justification).toContain("summary conflicts with recorded round artifacts");
+    expect(result.justification).toContain("Observable contradiction failed causal_validity");
+    expect(result.justification).toContain("summary claims no code change");
     expect(result.root_cause).toBe("artifact_summary_conflict:no_mutation_claim");
-    expect(result.evidence.some((line) => line.includes("claims no code change"))).toBe(true);
+    expect(result.evidence.some((line) => line.includes("executor_summary: no code changes were required"))).toBe(true);
     expect(result.evidence.some((line) => line.includes("round_inconsistency_summary.direct_evidence"))).toBe(true);
     expect(result.recommended_next_action).toContain("review the recorded file edits");
     expect(result.recovery_path).toBe("strategic_governance");
@@ -639,6 +651,59 @@ describe("LLMJudgeEvaluator", () => {
 
     expect(result.decision).toBe("fail");
     expect(result.hot_file_governance).toBeNull();
+  });
+
+  test("fails deterministically when observable artifacts contradict a no-op executor claim", async () => {
+    const mockCodex = {
+      async runJson<T>(options?: { prompt?: string }) {
+        const prompt = options?.prompt ?? "";
+        const dimensionMatch = prompt.match(/dimension: ([a-z_]+)/i);
+        const dimension = (dimensionMatch?.[1] ?? "goal_alignment") as DimensionAssessment["dimension"];
+
+        return {
+          ok: true,
+          data: {
+            dimension,
+            decision: "pass",
+            score: 96,
+            confidence: 0.93,
+            justification: "Model-only scoring says the round looks fine.",
+            evidence: ["No contradiction detected from model scoring alone."],
+            blocking_issues: [],
+            recommended_next_action: "continue"
+          } as T,
+          rawMessage: "{}",
+          stdout: "",
+          stderr: ""
+        };
+      }
+    };
+
+    const context = makeRoundContext();
+    context.toolResult.summary = "No code changes were required; this was a no-op validation pass.";
+    context.stateChange = [
+      "### Snapshot File Diffs",
+      "```diff",
+      "--- a/src/evaluation/strategies/llm-judge.ts",
+      "+++ b/src/evaluation/strategies/llm-judge.ts",
+      "@@ -1212,6 +1234,18 @@",
+      '+ recovery_path: "strategic_governance",',
+      "```"
+    ].join("\n");
+
+    const evaluator = new LLMJudgeEvaluator(
+      makeLlmConfig(["goal_alignment", "causal_validity", "constraint_compliance"]),
+      mockCodex as never
+    );
+    const result = await evaluator.evaluate(context);
+
+    expect(result.decision).toBe("fail");
+    expect(result.justification).toContain("Observable contradiction failed causal_validity");
+    expect(result.root_cause).toBe("artifact_summary_conflict:no_mutation_claim");
+    expect(result.recovery_path).toBe("strategic_governance");
+    expect(result.aggregate_score).toBeGreaterThanOrEqual(90);
+    expect(result.evidence.some((line) => line.includes("executor_summary: No code changes were required"))).toBe(true);
+    expect(result.evidence.some((line) => line.includes("round_inconsistency_summary.direct_evidence"))).toBe(true);
   });
 });
 
