@@ -18,8 +18,43 @@ export interface WorkspaceSnapshot {
   untrackedBaseline: string;
 }
 
+export const EXTERNAL_VALIDATION_MAX_SOURCE_LINES = 5000;
+export const EXTERNAL_VALIDATION_MAX_DIRECT_DEPENDENCIES = 49;
+
+const EXTERNAL_VALIDATION_SOURCE_EXTENSIONS = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]);
+const EXTERNAL_VALIDATION_IGNORED_DIRECTORIES = new Set([".git", "node_modules", "dist", "build", "coverage"]);
+const EXTERNAL_VALIDATION_TEST_FILE_PATTERN =
+  /(?:^|\/)(?:__tests__\/.*|.*\.(?:test|spec)\.[cm]?[jt]sx?)$/i;
+const EXTERNAL_VALIDATION_TEST_COMMAND_PATTERN =
+  /\b(?:bun\s+test|node\s+--test|jest|vitest|mocha|ava|tap)\b/i;
+const DEFAULT_NPM_TEST_SCRIPT_PATTERN = /\bno test specified\b/i;
+
 interface SnapshotTarget {
   path: string;
+}
+
+interface PackageManifest {
+  scripts?: Record<string, string>;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
+}
+
+interface ExternalValidationChecks {
+  gitRepository: boolean;
+  javascriptOrTypescript: boolean;
+  projectSizeWithinLimit: boolean;
+  testInfrastructure: boolean;
+  dependencyCountWithinLimit: boolean;
+}
+
+export interface ExternalValidationPreflightResult {
+  eligible: boolean;
+  detectedTestCommand: string | null;
+  directDependencyCount: number;
+  checks: ExternalValidationChecks;
+  failureReasons: string[];
 }
 
 function splitLines(input: string): string[] {
@@ -100,6 +135,143 @@ export async function isValidGitRepository(targetPath: string): Promise<boolean>
   } catch {
     return false;
   }
+}
+
+async function readExternalValidationManifest(repoPath: string): Promise<PackageManifest | null> {
+  const packageJson = await readTextFile(path.join(repoPath, "package.json"), "");
+  if (packageJson.trim() === "") {
+    return null;
+  }
+
+  try {
+    return JSON.parse(packageJson) as PackageManifest;
+  } catch {
+    return null;
+  }
+}
+
+function countDirectDependencies(manifest: PackageManifest | null): number {
+  if (!manifest) {
+    return 0;
+  }
+
+  const packageNames = new Set<string>();
+  for (const section of [
+    manifest.dependencies,
+    manifest.devDependencies,
+    manifest.peerDependencies,
+    manifest.optionalDependencies
+  ]) {
+    for (const packageName of Object.keys(section ?? {})) {
+      packageNames.add(packageName);
+    }
+  }
+
+  return packageNames.size;
+}
+
+async function inspectExternalValidationRepo(
+  repoPath: string
+): Promise<{ hasSourceFile: boolean; sourceLineCount: number; hasTestFile: boolean }> {
+  let hasSourceFile = false;
+  let sourceLineCount = 0;
+  let hasTestFile = false;
+  const pending = [repoPath];
+
+  while (pending.length > 0) {
+    const currentDir = pending.pop();
+    if (!currentDir) {
+      continue;
+    }
+
+    const entries = await fs.readdir(currentDir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      const entryPath = path.join(currentDir, entry.name);
+      if (entry.isSymbolicLink()) {
+        continue;
+      }
+      if (entry.isDirectory()) {
+        if (EXTERNAL_VALIDATION_IGNORED_DIRECTORIES.has(entry.name)) {
+          continue;
+        }
+        pending.push(entryPath);
+        continue;
+      }
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      const extension = path.extname(entry.name).toLowerCase();
+      if (!EXTERNAL_VALIDATION_SOURCE_EXTENSIONS.has(extension)) {
+        continue;
+      }
+
+      hasSourceFile = true;
+      sourceLineCount += (await readTextFile(entryPath, "")).split("\n").length;
+
+      const normalizedRelativePath = path
+        .relative(repoPath, entryPath)
+        .split(path.sep)
+        .join("/");
+      if (EXTERNAL_VALIDATION_TEST_FILE_PATTERN.test(normalizedRelativePath)) {
+        hasTestFile = true;
+      }
+    }
+  }
+
+  return {
+    hasSourceFile,
+    sourceLineCount,
+    hasTestFile
+  };
+}
+
+export async function evaluateExternalValidationPreflight(targetPath: string): Promise<ExternalValidationPreflightResult> {
+  const repoPath = path.resolve(targetPath);
+  const [gitRepository, manifest, repoMetrics] = await Promise.all([
+    isValidGitRepository(repoPath),
+    readExternalValidationManifest(repoPath),
+    inspectExternalValidationRepo(repoPath)
+  ]);
+  const directDependencyCount = countDirectDependencies(manifest);
+  const detectedTestCommand = manifest?.scripts?.test?.trim() || null;
+  const hasTestCommand =
+    detectedTestCommand !== null && !DEFAULT_NPM_TEST_SCRIPT_PATTERN.test(detectedTestCommand);
+  const testInfrastructure = Boolean(
+    hasTestCommand && (repoMetrics.hasTestFile || EXTERNAL_VALIDATION_TEST_COMMAND_PATTERN.test(detectedTestCommand))
+  );
+  const checks: ExternalValidationChecks = {
+    gitRepository,
+    javascriptOrTypescript: repoMetrics.hasSourceFile,
+    projectSizeWithinLimit: repoMetrics.sourceLineCount < EXTERNAL_VALIDATION_MAX_SOURCE_LINES,
+    testInfrastructure,
+    dependencyCountWithinLimit: directDependencyCount <= EXTERNAL_VALIDATION_MAX_DIRECT_DEPENDENCIES
+  };
+
+  const failureReasons: string[] = [];
+  if (!checks.gitRepository) {
+    failureReasons.push("Repository must be git-based for safe external validation.");
+  }
+  if (!checks.javascriptOrTypescript) {
+    failureReasons.push("Repository must contain JavaScript or TypeScript source files.");
+  }
+  if (!checks.projectSizeWithinLimit) {
+    failureReasons.push(`Repository exceeds the Phase 3 size limit of ${EXTERNAL_VALIDATION_MAX_SOURCE_LINES - 1} source lines.`);
+  }
+  if (!checks.testInfrastructure) {
+    failureReasons.push("Repository must expose a local test entrypoint and matching test infrastructure.");
+  }
+  if (!checks.dependencyCountWithinLimit) {
+    failureReasons.push(`Repository exceeds the Phase 3 dependency limit of ${EXTERNAL_VALIDATION_MAX_DIRECT_DEPENDENCIES} direct dependencies.`);
+  }
+
+  return {
+    eligible: failureReasons.length === 0,
+    detectedTestCommand,
+    directDependencyCount,
+    checks,
+    failureReasons
+  };
 }
 
 function normalizeSnapshotTargets(

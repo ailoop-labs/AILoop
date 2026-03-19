@@ -4,7 +4,7 @@ import path from "node:path";
 import { execSync } from "node:child_process";
 import { describe, expect, test } from "bun:test";
 import type { LoopPaths } from "../types/contracts";
-import { WorkspaceManager, isValidGitRepository } from "./workspace";
+import { EXTERNAL_VALIDATION_MAX_DIRECT_DEPENDENCIES, WorkspaceManager, evaluateExternalValidationPreflight, isValidGitRepository } from "./workspace";
 
 function run(cmd: string, cwd: string): void {
   execSync(cmd, {
@@ -38,6 +38,51 @@ function createLoopPaths(homeDir: string): LoopPaths {
   };
 }
 
+async function createExternalValidationCandidate(options?: { initializeGit?: boolean; includeTestInfrastructure?: boolean; dependencyCount?: number }): Promise<string> {
+  const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-external-validation-"));
+  const {
+    initializeGit = true,
+    includeTestInfrastructure = true,
+    dependencyCount = 1
+  } = options ?? {};
+
+  await fs.mkdir(path.join(repoDir, "src"), { recursive: true });
+  await fs.writeFile(path.join(repoDir, "src", "index.ts"), "export const value = 1;\n", "utf8");
+
+  if (includeTestInfrastructure) {
+    await fs.mkdir(path.join(repoDir, "test"), { recursive: true });
+    await fs.writeFile(
+      path.join(repoDir, "test", "index.test.ts"),
+      'import { expect, test } from "bun:test";\n\ntest("repo", () => {\n  expect(true).toBe(true);\n});\n',
+      "utf8"
+    );
+  }
+
+  const dependencies = Object.fromEntries(
+    Array.from({ length: dependencyCount }, (_, index) => [`dep-${index}`, "1.0.0"])
+  );
+  await fs.writeFile(
+    path.join(repoDir, "package.json"),
+    JSON.stringify(
+      {
+        name: "external-validation-candidate",
+        private: true,
+        scripts: includeTestInfrastructure ? { test: "bun test" } : {},
+        dependencies
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+  if (initializeGit) {
+    run("git init", repoDir);
+  }
+
+  return repoDir;
+}
+
 describe("isValidGitRepository", () => {
   test("returns true for valid git repository", async () => {
     const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-valid-repo-"));
@@ -57,6 +102,69 @@ describe("isValidGitRepository", () => {
   test("returns false for nonexistent path", async () => {
     const result = await isValidGitRepository("/nonexistent/path/that/does/not/exist");
     expect(result).toBe(false);
+  });
+});
+
+describe("evaluateExternalValidationPreflight", () => {
+  test("accepts a small JS/TS git repo with a local test entrypoint", async () => {
+    const repoDir = await createExternalValidationCandidate();
+
+    try {
+      const result = await evaluateExternalValidationPreflight(repoDir);
+
+      expect(result.eligible).toBe(true);
+      expect(result.detectedTestCommand).toBe("bun test");
+      expect(result.checks).toEqual({ gitRepository: true, javascriptOrTypescript: true, projectSizeWithinLimit: true, testInfrastructure: true, dependencyCountWithinLimit: true });
+      expect(result.failureReasons).toHaveLength(0);
+    } finally {
+      await fs.rm(repoDir, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects repositories that are not git-based", async () => {
+    const repoDir = await createExternalValidationCandidate({ initializeGit: false });
+
+    try {
+      const result = await evaluateExternalValidationPreflight(repoDir);
+
+      expect(result.eligible).toBe(false);
+      expect(result.checks.gitRepository).toBe(false);
+      expect(result.failureReasons).toContain(
+        "Repository must be git-based for safe external validation."
+      );
+    } finally {
+      await fs.rm(repoDir, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects repositories that lack test infrastructure", async () => {
+    const repoDir = await createExternalValidationCandidate({ includeTestInfrastructure: false });
+
+    try {
+      const result = await evaluateExternalValidationPreflight(repoDir);
+
+      expect(result.eligible).toBe(false);
+      expect(result.detectedTestCommand).toBeNull();
+      expect(result.checks.testInfrastructure).toBe(false);
+      expect(result.failureReasons).toContain("Repository must expose a local test entrypoint and matching test infrastructure.");
+    } finally {
+      await fs.rm(repoDir, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects repositories above the direct dependency threshold", async () => {
+    const repoDir = await createExternalValidationCandidate({ dependencyCount: EXTERNAL_VALIDATION_MAX_DIRECT_DEPENDENCIES + 1 });
+
+    try {
+      const result = await evaluateExternalValidationPreflight(repoDir);
+
+      expect(result.eligible).toBe(false);
+      expect(result.directDependencyCount).toBe(EXTERNAL_VALIDATION_MAX_DIRECT_DEPENDENCIES + 1);
+      expect(result.checks.dependencyCountWithinLimit).toBe(false);
+      expect(result.failureReasons).toContain(`Repository exceeds the Phase 3 dependency limit of ${EXTERNAL_VALIDATION_MAX_DIRECT_DEPENDENCIES} direct dependencies.`);
+    } finally {
+      await fs.rm(repoDir, { recursive: true, force: true });
+    }
   });
 });
 
