@@ -231,6 +231,56 @@ function killIfAlive(pid: number | null) {
   }
 }
 
+async function createExternalValidationCandidate(options?: {
+  initializeGit?: boolean;
+  includeTestInfrastructure?: boolean;
+  dependencyCount?: number;
+}): Promise<string> {
+  const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-server-external-validation-"));
+  tempDirs.add(repoDir);
+  const {
+    initializeGit = true,
+    includeTestInfrastructure = true,
+    dependencyCount = 1
+  } = options ?? {};
+
+  await fs.mkdir(path.join(repoDir, "src"), { recursive: true });
+  await fs.writeFile(path.join(repoDir, "src", "index.ts"), "export const value = 1;\n", "utf8");
+
+  if (includeTestInfrastructure) {
+    await fs.mkdir(path.join(repoDir, "test"), { recursive: true });
+    await fs.writeFile(
+      path.join(repoDir, "test", "index.test.ts"),
+      'import { expect, test } from "bun:test";\n\ntest("repo", () => {\n  expect(true).toBe(true);\n});\n',
+      "utf8"
+    );
+  }
+
+  const dependencies = Object.fromEntries(
+    Array.from({ length: dependencyCount }, (_, index) => [`dep-${index}`, "1.0.0"])
+  );
+  await fs.writeFile(
+    path.join(repoDir, "package.json"),
+    JSON.stringify(
+      {
+        name: "external-validation-candidate",
+        private: true,
+        scripts: includeTestInfrastructure ? { test: "bun test" } : {},
+        dependencies
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+  if (initializeGit) {
+    await Bun.$`git init`.cwd(repoDir).quiet();
+  }
+
+  return repoDir;
+}
+
 async function writeRunArtifacts(
   runsDir: string,
   timestamp: string,
@@ -836,6 +886,80 @@ describe("console server API contract", () => {
           successful: false
         })
       ]
+    });
+  });
+
+  test("returns an authenticated Phase 3 preflight result for an eligible candidate repository", async () => {
+    const token = "test-token";
+    const { fetchHandler } = await createFixture({
+      consoleAdminToken: token
+    });
+    const repoDir = await createExternalValidationCandidate();
+
+    const response = await fetchHandler(
+      createAuthorizedRequest("http://console.test/api/external-validation/preflight", token, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ repoPath: repoDir })
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      repoPath: repoDir,
+      result: {
+        eligible: true,
+        detectedTestCommand: "bun test",
+        directDependencyCount: 1,
+        checks: {
+          gitRepository: true,
+          javascriptOrTypescript: true,
+          projectSizeWithinLimit: true,
+          testInfrastructure: true,
+          dependencyCountWithinLimit: true
+        },
+        failureReasons: []
+      },
+      report: expect.stringContaining("External validation preflight: PASS")
+    });
+  });
+
+  test("returns expected Phase 3 failure reasons for an ineligible candidate repository", async () => {
+    const token = "test-token";
+    const { fetchHandler } = await createFixture({
+      consoleAdminToken: token
+    });
+    const repoDir = await createExternalValidationCandidate({ includeTestInfrastructure: false });
+
+    const response = await fetchHandler(
+      createAuthorizedRequest("http://console.test/api/external-validation/preflight", token, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ repoPath: repoDir })
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      repoPath: repoDir,
+      result: {
+        eligible: false,
+        detectedTestCommand: null,
+        directDependencyCount: 1,
+        checks: {
+          gitRepository: true,
+          javascriptOrTypescript: true,
+          projectSizeWithinLimit: true,
+          testInfrastructure: false,
+          dependencyCountWithinLimit: true
+        },
+        failureReasons: ["Repository must expose a local test entrypoint and matching test infrastructure."]
+      },
+      report: expect.stringContaining("External validation preflight: FAIL")
     });
   });
 

@@ -16,6 +16,7 @@ import {
   readGoal,
   resolveWebDistPath,
   resumeLoop,
+  runExternalValidationPreflight,
   runExternalValidationMetricsReport,
   startBackgroundLoop,
   stopLoop,
@@ -208,6 +209,16 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
 
       if (url.pathname === "/api/metrics/external-validation" && request.method === "GET") {
         return json((await runExternalValidationMetricsReport(config)).metrics);
+      }
+
+      if (url.pathname === "/api/external-validation/preflight" && request.method === "POST") {
+        const body = await parseBody(request);
+        const repoPath = typeof body.repoPath === "string" ? body.repoPath.trim() : "";
+        if (!repoPath) {
+          return jsonError("Repository path is required.", 400);
+        }
+
+        return json(await runExternalValidationPreflight(repoPath));
       }
 
       if (url.pathname === "/api/config" && request.method === "GET") {

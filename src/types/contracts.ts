@@ -223,6 +223,28 @@ export interface ExternalValidationMetricsReport {
   tasks: ExternalValidationTaskMetrics[];
 }
 
+export interface ExternalValidationPreflightChecks {
+  gitRepository: boolean;
+  javascriptOrTypescript: boolean;
+  projectSizeWithinLimit: boolean;
+  testInfrastructure: boolean;
+  dependencyCountWithinLimit: boolean;
+}
+
+export interface ExternalValidationPreflightResult {
+  eligible: boolean;
+  detectedTestCommand: string | null;
+  directDependencyCount: number;
+  checks: ExternalValidationPreflightChecks;
+  failureReasons: string[];
+}
+
+export interface ExternalValidationPreflightReport {
+  repoPath: string;
+  result: ExternalValidationPreflightResult;
+  report: string;
+}
+
 export interface RequirementArtifactSnapshot {
   path: string;
   exists: boolean;

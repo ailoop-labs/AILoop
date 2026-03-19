@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import type { Stats } from "node:fs";
 import path from "node:path";
-import type { LoopPaths } from "../types/contracts";
+import type { ExternalValidationPreflightChecks, ExternalValidationPreflightResult, LoopPaths } from "../types/contracts";
 import { runShellCommand } from "../utils/exec";
 import { fileExists, readTextFile, writeTextFile } from "../utils/fs";
 
@@ -39,22 +39,6 @@ interface PackageManifest {
   devDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   optionalDependencies?: Record<string, string>;
-}
-
-interface ExternalValidationChecks {
-  gitRepository: boolean;
-  javascriptOrTypescript: boolean;
-  projectSizeWithinLimit: boolean;
-  testInfrastructure: boolean;
-  dependencyCountWithinLimit: boolean;
-}
-
-export interface ExternalValidationPreflightResult {
-  eligible: boolean;
-  detectedTestCommand: string | null;
-  directDependencyCount: number;
-  checks: ExternalValidationChecks;
-  failureReasons: string[];
 }
 
 function splitLines(input: string): string[] {
@@ -240,7 +224,7 @@ export async function evaluateExternalValidationPreflight(targetPath: string): P
   const testInfrastructure = Boolean(
     hasTestCommand && (repoMetrics.hasTestFile || EXTERNAL_VALIDATION_TEST_COMMAND_PATTERN.test(detectedTestCommand))
   );
-  const checks: ExternalValidationChecks = {
+  const checks: ExternalValidationPreflightChecks = {
     gitRepository,
     javascriptOrTypescript: repoMetrics.hasSourceFile,
     projectSizeWithinLimit: repoMetrics.sourceLineCount < EXTERNAL_VALIDATION_MAX_SOURCE_LINES,

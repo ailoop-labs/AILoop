@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   AiRuntimePanel,
@@ -7,6 +7,7 @@ import {
   ControlErrorPanel,
   CrashRecoveryPanel,
   ExternalValidationChecklistCard,
+  Phase3CandidatePreflightCard,
   FailureDiagnosticsPanel,
   HotFileGovernancePanel,
   LifecycleStatusGrid,
@@ -20,12 +21,20 @@ import {
   deriveControlAvailability,
   getCliModelOptions,
   parseFailureDiagnostics,
+  requestExternalValidationPreflight,
   resolveCliModel,
   postControlAndRefresh,
   summarizeStateChangeArtifact,
   summarizeApiError
 } from "./App";
 import type { RoundReport, RunHistoryItem } from "./run-history";
+
+let fetchSpy: ReturnType<typeof spyOn<typeof globalThis, "fetch">> | null = null;
+
+afterEach(() => {
+  fetchSpy?.mockRestore();
+  fetchSpy = null;
+});
 
 function makeReport(overrides: Partial<RoundReport> = {}): RoundReport {
   return {
@@ -700,6 +709,138 @@ describe("ExternalValidationChecklistCard", () => {
     expect(html).toContain("waiting for pilot data");
     expect(html).toContain("No qualifying Phase 3 pilot data yet");
     expect(html).toContain("did not find persisted round metrics with external-validation task identities");
+  });
+});
+
+describe("Phase3CandidatePreflightCard", () => {
+  test("renders a pass-first repository eligibility snapshot with the detected command and green checks", () => {
+    const html = renderToStaticMarkup(
+      <Phase3CandidatePreflightCard
+        repoPath="/tmp/eligible-repo"
+        submitting={false}
+        error={null}
+        result={{
+          repoPath: "/tmp/eligible-repo",
+          result: {
+            eligible: true,
+            detectedTestCommand: "bun test",
+            directDependencyCount: 3,
+            checks: {
+              gitRepository: true,
+              javascriptOrTypescript: true,
+              projectSizeWithinLimit: true,
+              testInfrastructure: true,
+              dependencyCountWithinLimit: true
+            },
+            failureReasons: []
+          },
+          report: "External validation preflight: PASS"
+        }}
+        onRepoPathChange={() => {}}
+        onSubmit={() => {}}
+      />
+    );
+
+    expect(html).toContain("Candidate Repository Preflight");
+    expect(html).toContain("repo eligible");
+    expect(html).toContain("PASS");
+    expect(html).toContain("/tmp/eligible-repo");
+    expect(html).toContain("bun test");
+    expect(html).toContain(">3<");
+    expect(html).toContain("Git-backed");
+    expect(html).toContain("JS / TS");
+    expect(html).toContain("Bounded size");
+    expect(html).toContain("Test entrypoint");
+    expect(html).toContain("Dependency budget");
+    expect(html).toContain("No blocking reasons detected for this repository.");
+  });
+
+  test("renders blocking failure reasons and a fail badge for ineligible repositories", () => {
+    const html = renderToStaticMarkup(
+      <Phase3CandidatePreflightCard
+        repoPath="/tmp/ineligible-repo"
+        submitting={false}
+        error={null}
+        result={{
+          repoPath: "/tmp/ineligible-repo",
+          result: {
+            eligible: false,
+            detectedTestCommand: null,
+            directDependencyCount: 51,
+            checks: {
+              gitRepository: true,
+              javascriptOrTypescript: true,
+              projectSizeWithinLimit: true,
+              testInfrastructure: false,
+              dependencyCountWithinLimit: false
+            },
+            failureReasons: [
+              "Repository must expose a local test entrypoint and matching test infrastructure.",
+              "Repository exceeds the Phase 3 dependency limit of 49 direct dependencies."
+            ]
+          },
+          report: "External validation preflight: FAIL"
+        }}
+        onRepoPathChange={() => {}}
+        onSubmit={() => {}}
+      />
+    );
+
+    expect(html).toContain("repo blocked");
+    expect(html).toContain("FAIL");
+    expect(html).toContain("none detected");
+    expect(html).toContain("51");
+    expect(html).toContain("Blocking reasons");
+    expect(html).toContain("Repository must expose a local test entrypoint and matching test infrastructure.");
+    expect(html).toContain("Repository exceeds the Phase 3 dependency limit of 49 direct dependencies.");
+  });
+});
+
+describe("requestExternalValidationPreflight", () => {
+  test("posts the candidate repo path to the authenticated server endpoint", async () => {
+    fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          repoPath: "/tmp/repo",
+          result: {
+            eligible: true,
+            detectedTestCommand: "bun test",
+            directDependencyCount: 1,
+            checks: {
+              gitRepository: true,
+              javascriptOrTypescript: true,
+              projectSizeWithinLimit: true,
+              testInfrastructure: true,
+              dependencyCountWithinLimit: true
+            },
+            failureReasons: []
+          },
+          report: "External validation preflight: PASS"
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      )
+    );
+
+    const result = await requestExternalValidationPreflight("/tmp/repo", "admin-token");
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/external-validation/preflight",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.any(Headers),
+        body: JSON.stringify({ repoPath: "/tmp/repo" })
+      })
+    );
+    const headers = (fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined)?.headers as Headers;
+    expect(headers.get("authorization")).toBe("Bearer admin-token");
+    expect(headers.get("content-type")).toBe("application/json");
+    expect(result.result.eligible).toBe(true);
   });
 });
 

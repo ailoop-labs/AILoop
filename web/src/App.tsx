@@ -211,6 +211,28 @@ interface ExternalValidationMetricsReport {
   }>;
 }
 
+interface ExternalValidationPreflightChecks {
+  gitRepository: boolean;
+  javascriptOrTypescript: boolean;
+  projectSizeWithinLimit: boolean;
+  testInfrastructure: boolean;
+  dependencyCountWithinLimit: boolean;
+}
+
+interface ExternalValidationPreflightResult {
+  eligible: boolean;
+  detectedTestCommand: string | null;
+  directDependencyCount: number;
+  checks: ExternalValidationPreflightChecks;
+  failureReasons: string[];
+}
+
+interface ExternalValidationPreflightReport {
+  repoPath: string;
+  result: ExternalValidationPreflightResult;
+  report: string;
+}
+
 const stateTone: Record<LoopStateName, string> = {
   idle: "bg-slate text-mist",
   starting: "bg-sky-300/20 text-sky-100",
@@ -289,6 +311,11 @@ const checklistSignalTone: Record<ChecklistSignalTone, string> = {
   warning: "border-warning/40 bg-warning/10 text-warning",
   critical: "border-ember/40 bg-ember/10 text-ember"
 };
+
+const preflightStatusTone = {
+  eligible: "border-accent/30 bg-accent/10 text-accent",
+  blocked: "border-ember/40 bg-ember/10 text-ember"
+} as const;
 
 const failureDiagnosticsTone: Record<FailureDiagnosticsTone, string> = {
   neutral: "border-white/10 bg-ink/60 text-mist/80",
@@ -450,6 +477,23 @@ async function api<T>(url: string, init?: RequestInit, token?: string): Promise<
     throw new Error(summarizeApiError(response.status, text, response.headers.get("content-type")));
   }
   return (await response.json()) as T;
+}
+
+export async function requestExternalValidationPreflight(
+  repoPath: string,
+  token?: string
+): Promise<ExternalValidationPreflightReport> {
+  return api<ExternalValidationPreflightReport>(
+    "/api/external-validation/preflight",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ repoPath })
+    },
+    token
+  );
 }
 
 function isUnauthorizedError(message: string): boolean {
@@ -1531,6 +1575,162 @@ export function SystemHealthPanel({ frictionIndex }: { frictionIndex: FrictionIn
   );
 }
 
+function buildPreflightCheckCards(checks: ExternalValidationPreflightChecks) {
+  return [
+    { label: "Git-backed", passed: checks.gitRepository },
+    { label: "JS / TS", passed: checks.javascriptOrTypescript },
+    { label: "Bounded size", passed: checks.projectSizeWithinLimit },
+    { label: "Test entrypoint", passed: checks.testInfrastructure },
+    { label: "Dependency budget", passed: checks.dependencyCountWithinLimit }
+  ];
+}
+
+export function Phase3CandidatePreflightCard({
+  repoPath,
+  submitting,
+  error,
+  result,
+  onRepoPathChange,
+  onSubmit
+}: {
+  repoPath: string;
+  submitting: boolean;
+  error: string | null;
+  result: ExternalValidationPreflightReport | null;
+  onRepoPathChange: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  const trimmedRepoPath = repoPath.trim();
+  const checkCards = result ? buildPreflightCheckCards(result.result.checks) : [];
+  const summaryTone = result?.result.eligible ? preflightStatusTone.eligible : preflightStatusTone.blocked;
+
+  return (
+    <section className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-ink/60 shadow-[0_0_0_1px_rgba(255,255,255,0.04)]">
+      <div className="border-b border-white/10 bg-[linear-gradient(135deg,rgba(102,255,187,0.12),rgba(8,11,20,0.82)_55%,rgba(255,168,76,0.12))] p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-mist/70">Phase 3 Candidate Gate</p>
+            <h2 className="mt-1 text-xl font-semibold text-mist">Candidate Repository Preflight</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-mist/70">
+              Vet a repository before the pilot starts. The server reuses the existing bounded-risk preflight and
+              returns a pass or fail snapshot with the reasons surfaced inline.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-panel/60 px-4 py-3 text-right">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-mist/55">Decision surface</p>
+            <p className="mt-2 text-lg font-semibold text-mist">{result ? "server-backed" : "awaiting repo path"}</p>
+            <p className="mt-1 text-xs text-mist/60">Use an absolute or workspace-relative path.</p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
+          <label className="block">
+            <span className="text-[11px] uppercase tracking-[0.18em] text-mist/55">Repository path</span>
+            <input
+              aria-label="Candidate repository path"
+              value={repoPath}
+              onChange={(event) => onRepoPathChange(event.target.value)}
+              placeholder="/absolute/path/to/repository"
+              className="mt-2 w-full rounded-2xl border border-white/10 bg-panel/70 px-4 py-3 text-sm text-mist outline-none ring-accent/40 transition focus:border-accent/40 focus:ring"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={submitting || trimmedRepoPath.length === 0}
+            className="rounded-2xl bg-accent px-5 py-3 text-sm font-semibold text-ink transition hover:bg-accent/85 disabled:cursor-not-allowed disabled:bg-accent/35"
+          >
+            {submitting ? "Checking..." : "Run preflight"}
+          </button>
+        </div>
+
+        {error ? <p className="mt-3 rounded-xl border border-ember/30 bg-ember/10 px-4 py-3 text-sm text-ember">{error}</p> : null}
+      </div>
+
+      {result ? (
+        <div className="p-4">
+          <div className="grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+            <div className="rounded-2xl border border-white/10 bg-panel/50 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.18em] text-mist/55">Eligibility verdict</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${summaryTone}`}>
+                      {result.result.eligible ? "repo eligible" : "repo blocked"}
+                    </span>
+                    <p className="text-3xl font-semibold text-mist">{result.result.eligible ? "PASS" : "FAIL"}</p>
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-ink/70 px-4 py-3">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-mist/50">Direct dependencies</p>
+                  <p className="mt-2 text-3xl font-semibold text-mist">{result.result.directDependencyCount}</p>
+                </div>
+              </div>
+              <dl className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="rounded-2xl border border-white/10 bg-ink/60 p-4">
+                  <dt className="text-[11px] uppercase tracking-[0.18em] text-mist/50">Repository</dt>
+                  <dd className="mt-2 break-all text-sm leading-6 text-mist">{result.repoPath}</dd>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-ink/60 p-4">
+                  <dt className="text-[11px] uppercase tracking-[0.18em] text-mist/50">Detected test command</dt>
+                  <dd className="mt-2 text-sm font-medium text-mist">
+                    {result.result.detectedTestCommand ?? "none detected"}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-panel/50 p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-mist/55">Risk gates</p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                {checkCards.map((check) => (
+                  <div
+                    key={check.label}
+                    className={`rounded-2xl border p-4 ${
+                      check.passed ? checklistSignalTone.good : checklistSignalTone.critical
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-current/80">{check.label}</p>
+                      <span className="h-2.5 w-2.5 rounded-full bg-current shadow-[0_0_10px_currentColor]" />
+                    </div>
+                    <p className="mt-3 text-lg font-semibold text-mist">{check.passed ? "Pass" : "Blocked"}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-white/10 bg-panel/40 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.18em] text-mist/55">Blocking reasons</p>
+                <p className="mt-1 text-sm text-mist/65">Explicit failure reasons stay visible so operators can decide whether a repository is pilot-safe.</p>
+              </div>
+              <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${summaryTone}`}>
+                {result.result.failureReasons.length === 0 ? "0 blockers" : `${result.result.failureReasons.length} blockers`}
+              </span>
+            </div>
+            {result.result.failureReasons.length === 0 ? (
+              <p className="mt-3 rounded-2xl border border-accent/20 bg-accent/10 px-4 py-3 text-sm text-accent">
+                No blocking reasons detected for this repository.
+              </p>
+            ) : (
+              <ul className="mt-3 grid gap-3">
+                {result.result.failureReasons.map((reason) => (
+                  <li key={reason} className="rounded-2xl border border-ember/25 bg-ember/10 px-4 py-3 text-sm leading-6 text-ember">
+                    {reason}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export function ExternalValidationChecklistCard({
   report
 }: {
@@ -1767,6 +1967,10 @@ export default function App() {
   const [status, setStatus] = useState<LoopStatus | null>(null);
   const [frictionIndex, setFrictionIndex] = useState<FrictionIndex | null>(null);
   const [externalValidation, setExternalValidation] = useState<ExternalValidationMetricsReport | null>(null);
+  const [preflightRepoPath, setPreflightRepoPath] = useState("");
+  const [preflightResult, setPreflightResult] = useState<ExternalValidationPreflightReport | null>(null);
+  const [preflightBusy, setPreflightBusy] = useState(false);
+  const [preflightError, setPreflightError] = useState<string | null>(null);
   const [goal, setGoal] = useState("");
   const [roles, setRoles] = useState<ProjectRoleItem[]>([]);
   const [runs, setRuns] = useState<RunHistoryItem[]>([]);
@@ -1830,6 +2034,8 @@ export default function App() {
       setAuthError(unauthorizedMessage);
       setRoles([]);
       setExternalValidation(null);
+      setPreflightResult(null);
+      setPreflightError(null);
       setSelectedRole(null);
       setError(null);
       return;
@@ -1890,6 +2096,8 @@ export default function App() {
         setRuns([]);
         setLogs([]);
         setExternalValidation(null);
+        setPreflightResult(null);
+        setPreflightError(null);
         setRuntimeConfig(null);
         return;
       }
@@ -2020,6 +2228,8 @@ export default function App() {
     setRuns([]);
     setLogs([]);
     setExternalValidation(null);
+    setPreflightResult(null);
+    setPreflightError(null);
     setSelectedRole(null);
     setSelectedRequirement(null);
     setRuntimeConfig(null);
@@ -2048,6 +2258,32 @@ export default function App() {
       handleRequestError(requestError, "控制操作失败：请先重新登录。");
     } finally {
       setBusy(null);
+    }
+  };
+
+  const submitExternalValidationPreflight = async (): Promise<void> => {
+    const trimmedRepoPath = preflightRepoPath.trim();
+    if (!trimmedRepoPath) {
+      setPreflightError("Repository path is required.");
+      return;
+    }
+
+    try {
+      setPreflightBusy(true);
+      setPreflightError(null);
+      const nextResult = await requestExternalValidationPreflight(trimmedRepoPath, authToken);
+      setPreflightResult(nextResult);
+      setPreflightRepoPath(nextResult.repoPath);
+      setError(null);
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : String(requestError);
+      if (isUnauthorizedError(message)) {
+        handleRequestError(requestError, "Preflight failed: please log in again.");
+      } else {
+        setPreflightError(message);
+      }
+    } finally {
+      setPreflightBusy(false);
     }
   };
 
@@ -2248,6 +2484,18 @@ export default function App() {
         <CrashRecoveryPanel crashRecovery={status?.crash_recovery ?? null} />
 
         <SystemHealthPanel frictionIndex={frictionIndex} />
+        <Phase3CandidatePreflightCard
+          repoPath={preflightRepoPath}
+          submitting={preflightBusy}
+          error={preflightError}
+          result={preflightResult}
+          onRepoPathChange={(value) => {
+            setPreflightRepoPath(value);
+            setPreflightResult(null);
+            setPreflightError(null);
+          }}
+          onSubmit={() => void submitExternalValidationPreflight()}
+        />
         <ExternalValidationChecklistCard report={externalValidation} />
 
         <div className="mt-4 rounded-xl border border-white/10 bg-ink/60 p-4">

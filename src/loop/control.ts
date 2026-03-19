@@ -12,15 +12,9 @@ import {
 import type { AppConfig } from "../config/env";
 import { readRuntimeLoopConfig, runtimeLoopConfigToEnv } from "../config/runtime";
 import { readActiveRequirementSnapshot } from "../product/requirements";
-import {
-  buildExternalValidationMetricsReport,
-  type ExternalValidationMetricsReport
-} from "../reporting/metrics";
+import { buildExternalValidationMetricsReport, type ExternalValidationMetricsReport } from "../reporting/metrics";
 import { buildRoundArtifactPaths, listRunRecords, readLastLogTail } from "../reporting/summary";
-import {
-  evaluateExternalValidationPreflight,
-  type ExternalValidationPreflightResult
-} from "../environment/workspace";
+import { evaluateExternalValidationPreflight } from "../environment/workspace";
 import type {
   ArtifactCompletenessStatus,
   BudgetDimension,
@@ -29,6 +23,7 @@ import type {
   BudgetLimits,
   CrashRecoveryStatus,
   EvaluationResult,
+  ExternalValidationPreflightReport,
   HotFileGovernanceResult,
   LoopStateData,
   OperatorStatusReason,
@@ -163,12 +158,6 @@ export interface ProjectRoleView {
   definition: string;
 }
 
-export interface ExternalValidationPreflightReport {
-  repoPath: string;
-  result: ExternalValidationPreflightResult;
-  report: string;
-}
-
 export interface ExternalValidationMetricsCliReport {
   metrics: ExternalValidationMetricsReport;
   report: string;
@@ -246,7 +235,7 @@ export async function listProjectRoles(config: AppConfig): Promise<ProjectRoleVi
 
 export function renderExternalValidationPreflightReport(
   repoPath: string,
-  result: ExternalValidationPreflightResult
+  result: ExternalValidationPreflightReport["result"]
 ): string {
   const lines = [
     `External validation preflight: ${result.eligible ? "PASS" : "FAIL"}`,
