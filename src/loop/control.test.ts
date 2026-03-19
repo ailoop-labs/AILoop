@@ -2624,6 +2624,12 @@ describe("external-validation report CLI", () => {
 
       expect(result.exitCode).toBe(0);
       expect(result.stderr).toBe("");
+      expect(result.stdout).toContain("Verification checklist summary:");
+      expect(result.stdout).toContain("- Rounds per successful task: 1.50 (target < 5)");
+      expect(result.stdout).toContain("- Human interventions per task: 0.00 (target < 2)");
+      expect(result.stdout).toContain("- Average cost per round (USD): 0.3667");
+      expect(result.stdout).toContain("- Evaluator infrastructure failures: 0 (target 0)");
+      expect(result.stdout).toContain("- Hot-file growth lines: 2 (target 0)");
       expect(result.stdout).toContain("Cost per task (USD):");
       expect(result.stdout).toContain(
         `- Track pilot cost by task identity | stable_id=${costTrackedTask.stable_id} | total_usd=0.3000 | avg_usd_per_round=0.1500`

@@ -186,11 +186,112 @@ describe("buildExternalValidationMetricsReport", () => {
       expect(primaryTask?.rounds).toBe(2);
       expect(primaryTask?.total_cost_usd).toBe(0.3);
       expect(primaryTask?.average_cost_usd_per_round).toBe(0.15);
+      expect(report.checklist.rounds_per_successful_task).toBe(1.5);
+      expect(report.checklist.human_interventions_per_task).toBe(0);
+      expect(report.checklist.average_cost_usd_per_round).toBe(0.366667);
+      expect(report.checklist.evaluator_infrastructure_failures).toBe(0);
+      expect(report.checklist.hot_file_growth_lines).toBe(0);
 
       expect(siblingTask).toBeDefined();
       expect(siblingTask?.rounds).toBe(1);
       expect(siblingTask?.total_cost_usd).toBe(0.8);
       expect(siblingTask?.average_cost_usd_per_round).toBe(0.8);
+    } finally {
+      await fs.rm(runsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("builds aggregate checklist metrics from persisted round artifacts", async () => {
+    const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-metrics-checklist-test-"));
+    const successfulTask = makeSubTask(
+      "Summarize successful external-validation checklist metrics.",
+      "The checklist report shows aggregate rounds, interventions, cost, infra failures, and hot-file growth."
+    );
+    const unsuccessfulTask = makeSubTask(
+      "Keep unsuccessful rounds out of successful-task averages.",
+      "Failed-only tasks do not affect rounds per successful task."
+    );
+
+    try {
+      const firstSuccessArtifacts = buildRoundArtifactPaths(runsDir, "2026-03-15T00-00-00-000Z");
+      const firstSuccessMetrics = makeMetrics(1, "2026-03-15T00:00:00.000Z", successfulTask, 0.12);
+      firstSuccessMetrics.evaluator_decision = "fail";
+      firstSuccessMetrics.human_interventions = 1;
+      firstSuccessMetrics.hot_file_growth_lines = 2;
+
+      const secondSuccessArtifacts = buildRoundArtifactPaths(runsDir, "2026-03-16T00-00-00-000Z");
+      const secondSuccessMetrics = makeMetrics(2, "2026-03-16T00:00:00.000Z", successfulTask, 0.18);
+      secondSuccessMetrics.evaluator_decision = "pass";
+      secondSuccessMetrics.human_interventions = 2;
+      secondSuccessMetrics.hot_file_growth_lines = 3;
+
+      const unsuccessfulArtifacts = buildRoundArtifactPaths(runsDir, "2026-03-17T00-00-00-000Z");
+      const unsuccessfulMetrics = makeMetrics(3, "2026-03-17T00:00:00.000Z", unsuccessfulTask, 0.3);
+      unsuccessfulMetrics.evaluator_decision = "fail";
+      unsuccessfulMetrics.human_interventions = 1;
+      unsuccessfulMetrics.hot_file_growth_lines = 4;
+
+      await Promise.all([
+        fs.writeFile(firstSuccessArtifacts.summaryPath, "Initial retry captured.\n", "utf8"),
+        fs.writeFile(firstSuccessArtifacts.stateChangePath, "No state changes detected.", "utf8"),
+        fs.writeFile(firstSuccessArtifacts.metricsPath, `${JSON.stringify(firstSuccessMetrics, null, 2)}\n`, "utf8"),
+        fs.writeFile(
+          firstSuccessArtifacts.evaluationPath,
+          `${JSON.stringify(
+            {
+              decision: "fail",
+              justification: "One more bounded round required.",
+              evidence: []
+            } satisfies EvaluationResult,
+            null,
+            2
+          )}\n`,
+          "utf8"
+        ),
+        fs.writeFile(secondSuccessArtifacts.summaryPath, "Success round recorded.\n", "utf8"),
+        fs.writeFile(secondSuccessArtifacts.stateChangePath, "No state changes detected.", "utf8"),
+        fs.writeFile(secondSuccessArtifacts.metricsPath, `${JSON.stringify(secondSuccessMetrics, null, 2)}\n`, "utf8"),
+        fs.writeFile(
+          secondSuccessArtifacts.evaluationPath,
+          `${JSON.stringify(
+            {
+              decision: "pass",
+              justification: "Validated successfully.",
+              evidence: []
+            } satisfies EvaluationResult,
+            null,
+            2
+          )}\n`,
+          "utf8"
+        ),
+        fs.writeFile(unsuccessfulArtifacts.summaryPath, "Infra failure recorded.\n", "utf8"),
+        fs.writeFile(unsuccessfulArtifacts.stateChangePath, "No state changes detected.", "utf8"),
+        fs.writeFile(unsuccessfulArtifacts.metricsPath, `${JSON.stringify(unsuccessfulMetrics, null, 2)}\n`, "utf8"),
+        fs.writeFile(
+          unsuccessfulArtifacts.evaluationPath,
+          `${JSON.stringify(
+            {
+              decision: "fail",
+              justification: "Evaluator infrastructure failure: timeout while judging round.",
+              root_cause: "evaluator_infrastructure:timeout",
+              evidence: []
+            } satisfies EvaluationResult,
+            null,
+            2
+          )}\n`,
+          "utf8"
+        )
+      ]);
+
+      const report = await buildExternalValidationMetricsReport(runsDir);
+
+      expect(report.task_count).toBe(2);
+      expect(report.successful_task_count).toBe(1);
+      expect(report.checklist.rounds_per_successful_task).toBe(2);
+      expect(report.checklist.human_interventions_per_task).toBe(2);
+      expect(report.checklist.average_cost_usd_per_round).toBe(0.2);
+      expect(report.checklist.evaluator_infrastructure_failures).toBe(1);
+      expect(report.checklist.hot_file_growth_lines).toBe(9);
     } finally {
       await fs.rm(runsDir, { recursive: true, force: true });
     }

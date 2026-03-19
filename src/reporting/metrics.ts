@@ -61,9 +61,18 @@ export interface ExternalValidationTaskMetrics {
   latest_run_timestamp: string;
 }
 
+export interface ExternalValidationChecklistMetrics {
+  rounds_per_successful_task: number | null;
+  human_interventions_per_task: number | null;
+  average_cost_usd_per_round: number | null;
+  evaluator_infrastructure_failures: number;
+  hot_file_growth_lines: number;
+}
+
 export interface ExternalValidationMetricsReport {
   task_count: number;
   successful_task_count: number;
+  checklist: ExternalValidationChecklistMetrics;
   tasks: ExternalValidationTaskMetrics[];
 }
 
@@ -102,6 +111,10 @@ function normalizeCounter(value: unknown): number {
 
 function normalizeUsd(value: unknown): number {
   return Number(normalizeCounter(value).toFixed(6));
+}
+
+function normalizeAverage(value: number): number {
+  return Number(value.toFixed(6));
 }
 
 const NO_OP_CLAIM_PATTERNS: RegExp[] = [
@@ -223,10 +236,28 @@ export async function buildExternalValidationMetricsReport(runsDir: string): Pro
   const tasks = Array.from(tasksByStableId.values()).sort((left, right) =>
     left.first_run_timestamp.localeCompare(right.first_run_timestamp)
   );
+  const successfulTasks = tasks.filter((task) => task.successful);
+  const totalRounds = tasks.reduce((sum, task) => sum + task.rounds, 0);
+  const totalSuccessfulTaskRounds = successfulTasks.reduce((sum, task) => sum + task.rounds, 0);
+  const totalHumanInterventions = tasks.reduce((sum, task) => sum + task.human_interventions, 0);
+  const totalCostUsd = tasks.reduce((sum, task) => sum + task.total_cost_usd, 0);
+  const totalEvaluatorInfrastructureFailures = tasks.reduce(
+    (sum, task) => sum + task.evaluator_infrastructure_failures,
+    0
+  );
+  const totalHotFileGrowthLines = tasks.reduce((sum, task) => sum + task.hot_file_growth_lines, 0);
 
   return {
     task_count: tasks.length,
-    successful_task_count: tasks.filter((task) => task.successful).length,
+    successful_task_count: successfulTasks.length,
+    checklist: {
+      rounds_per_successful_task:
+        successfulTasks.length > 0 ? normalizeAverage(totalSuccessfulTaskRounds / successfulTasks.length) : null,
+      human_interventions_per_task: tasks.length > 0 ? normalizeAverage(totalHumanInterventions / tasks.length) : null,
+      average_cost_usd_per_round: totalRounds > 0 ? normalizeUsd(totalCostUsd / totalRounds) : null,
+      evaluator_infrastructure_failures: totalEvaluatorInfrastructureFailures,
+      hot_file_growth_lines: totalHotFileGrowthLines
+    },
     tasks
   };
 }

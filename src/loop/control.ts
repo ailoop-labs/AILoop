@@ -178,6 +178,10 @@ function formatUsd(value: number): string {
   return value.toFixed(4);
 }
 
+function formatAverage(value: number | null): string {
+  return value === null ? "n/a" : value.toFixed(2);
+}
+
 function roleTitle(role: ProjectRole): string {
   if (role === "planner") {
     return "Project Planner";
@@ -283,6 +287,12 @@ export function renderExternalValidationMetricsReport(report: ExternalValidation
     "External validation metrics report",
     `Tasks analyzed: ${report.task_count}`,
     `Successful tasks: ${report.successful_task_count}`,
+    "Verification checklist summary:",
+    `- Rounds per successful task: ${formatAverage(report.checklist.rounds_per_successful_task)} (target < 5)`,
+    `- Human interventions per task: ${formatAverage(report.checklist.human_interventions_per_task)} (target < 2)`,
+    `- Average cost per round (USD): ${report.checklist.average_cost_usd_per_round === null ? "n/a" : formatUsd(report.checklist.average_cost_usd_per_round)}`,
+    `- Evaluator infrastructure failures: ${report.checklist.evaluator_infrastructure_failures} (target 0)`,
+    `- Hot-file growth lines: ${report.checklist.hot_file_growth_lines} (target 0)`,
     "Rounds per successful task:"
   ];
 
