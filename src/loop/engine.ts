@@ -3,6 +3,7 @@ import path from "node:path";
 import { lstatSync } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import type { AppConfig } from "../config/env";
+import { applyRuntimeLoopConfig, readRuntimeLoopConfig } from "../config/runtime";
 import { ExecutorAgent } from "../agent/executor";
 import { DesignerAgent } from "../agent/designer";
 import { Guardrails, BudgetBreachError } from "../agent/guardrails";
@@ -291,6 +292,20 @@ export function resolveNextLastError(currentLastError: string | null, requestedL
   return requestedLastError;
 }
 
+function runtimeConfigFingerprint(config: AppConfig): string {
+  return JSON.stringify({
+    intervalSeconds: config.intervalSeconds,
+    maxCycles: config.maxCycles,
+    exitOnError: config.exitOnError,
+    evaluatorReworkMaxAttempts: config.evaluatorReworkMaxAttempts,
+    consoleHost: config.consoleHost,
+    consolePort: config.consolePort,
+    maxRetainRuns: config.maxRetainRuns,
+    budget: config.budget,
+    ai: config.ai
+  });
+}
+
 export function summarizeGovernanceFailureForState(message: string): string {
   const normalized = message.replace(/\s+/g, " ").trim();
   if (!normalized) {
@@ -525,21 +540,21 @@ async function readLeaderStateChangeEvidence(toolResult: ToolResult | null | und
 
 export class LoopEngine {
   private readonly paths;
-  private readonly planner: PlannerAgent;
-  private readonly productManager: ProductManagerAgent;
+  private planner: PlannerAgent;
+  private productManager: ProductManagerAgent;
   private readonly tools: ToolRegistry;
-  private readonly executor: ExecutorAgent;
-  private readonly designer: DesignerAgent;
-  private readonly leader: LeaderAgent;
-  private readonly ccb: CCBSession;
-  private readonly evaluator;
+  private executor: ExecutorAgent;
+  private designer: DesignerAgent;
+  private leader: LeaderAgent;
+  private ccb: CCBSession;
+  private evaluator;
   private readonly uiEvaluator: UIEvaluator;
   private readonly redactor = new SecretRedactor(process.env);
   private previousToolResult: ToolResult | null = null;
   private lockHandle: FileHandle | null = null;
   private humanInterventions = 0;
 
-  constructor(private readonly config: AppConfig) {
+  constructor(private config: AppConfig) {
     this.paths = buildLoopPaths(config.homeDir);
     this.tools = new ToolRegistry();
     this.planner = new PlannerAgent(this.tools, config);
@@ -550,6 +565,33 @@ export class LoopEngine {
     this.ccb = new CCBSession(config);
     this.evaluator = createEvaluator(config);
     this.uiEvaluator = new UIEvaluator(config.homeDir);
+  }
+
+  private rebuildRuntimeAgents(): void {
+    this.planner = new PlannerAgent(this.tools, this.config);
+    this.productManager = new ProductManagerAgent(this.config);
+    this.executor = new ExecutorAgent(this.tools, this.config);
+    this.designer = new DesignerAgent(this.tools, this.config);
+    this.leader = new LeaderAgent(this.config);
+    this.ccb = new CCBSession(this.config);
+    this.evaluator = createEvaluator(this.config);
+  }
+
+  private async refreshRuntimeConfig(): Promise<void> {
+    const runtimeConfig = await readRuntimeLoopConfig(this.config);
+    const nextConfig = applyRuntimeLoopConfig(this.config, runtimeConfig);
+    if (runtimeConfigFingerprint(this.config) === runtimeConfigFingerprint(nextConfig)) {
+      this.config = nextConfig;
+      return;
+    }
+
+    this.config = nextConfig;
+    this.rebuildRuntimeAgents();
+  }
+
+  private async readCurrentIntervalSeconds(): Promise<number> {
+    const runtimeConfig = await readRuntimeLoopConfig(this.config);
+    return runtimeConfig.intervalSeconds;
   }
 
   async collectOperationalEvidence(context: Omit<OperationalEvidenceContext, "consolePort"> & { consolePort?: number }): Promise<OperationalEvidence> {
@@ -577,6 +619,8 @@ export class LoopEngine {
       let leaderReworkCount = 0;
 
       while (true) {
+        await this.refreshRuntimeConfig();
+
         if (await hasFlag(this.paths.stopFlagPath)) {
           await this.setState("stopping");
           break;
@@ -627,8 +671,9 @@ export class LoopEngine {
           }
 
           console.log(`[STRUCTURAL MAINTENANCE] Structural-maintenance round completed successfully.`);
+          await this.refreshRuntimeConfig();
           await this.setState("cooldown");
-          const cooldownResult = await cooldownWithControlChecks(this.paths, this.config.intervalSeconds);
+          const cooldownResult = await cooldownWithControlChecks(this.paths, () => this.readCurrentIntervalSeconds());
           if (cooldownResult === "stop") break;
           await this.setState("running");
           continue;
@@ -801,8 +846,9 @@ export class LoopEngine {
           continue;
         }
 
+        await this.refreshRuntimeConfig();
         await this.setState("cooldown");
-        const cooldownResult = await cooldownWithControlChecks(this.paths, this.config.intervalSeconds);
+        const cooldownResult = await cooldownWithControlChecks(this.paths, () => this.readCurrentIntervalSeconds());
         if (cooldownResult === "stop") break;
         await this.setState("running");
       }

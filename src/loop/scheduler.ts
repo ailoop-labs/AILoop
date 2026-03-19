@@ -2,20 +2,27 @@ import type { LoopPaths } from "./state";
 import { hasFlag } from "./state";
 import { sleep } from "../utils/time";
 
-export async function cooldownWithControlChecks(paths: LoopPaths, seconds: number): Promise<"continue" | "stop"> {
-  const totalMs = Math.max(0, seconds) * 1000;
+type CooldownSecondsSource = number | (() => Promise<number>);
+
+export async function cooldownWithControlChecks(
+  paths: LoopPaths,
+  secondsSource: CooldownSecondsSource
+): Promise<"continue" | "stop"> {
   const intervalMs = 1_000;
   let elapsed = 0;
 
-  while (elapsed < totalMs) {
+  while (true) {
+    const seconds = typeof secondsSource === "function" ? await secondsSource() : secondsSource;
+    const totalMs = Math.max(0, seconds) * 1000;
+    if (elapsed >= totalMs) {
+      return "continue";
+    }
     if (await hasFlag(paths.stopFlagPath)) {
       return "stop";
     }
     await sleep(intervalMs);
     elapsed += intervalMs;
   }
-
-  return "continue";
 }
 
 export async function waitWhilePaused(paths: LoopPaths): Promise<"resumed" | "stopped"> {

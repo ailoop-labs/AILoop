@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../config/env";
+import { patchRuntimeLoopConfig } from "../config/runtime";
 import type {
   ActionRecord,
   EvaluationResult,
@@ -2240,5 +2241,142 @@ describe("LoopEngine structural-maintenance pass", () => {
     expect(finalState.last_error ?? null).toBeNull();
 
     await fs.rm(homeDir, { recursive: true, force: true });
+  });
+});
+
+describe("LoopEngine runtime config refresh", () => {
+  test("applies updated intervalSeconds from the database before cooldown", async () => {
+    const originalCwd = process.cwd();
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-runtime-refresh-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+
+    try {
+      process.chdir(workspaceRoot);
+      await fs.mkdir(homeDir, { recursive: true });
+      await fs.writeFile(path.join(workspaceRoot, "README.md"), "Test README", "utf8");
+
+      const config = loadConfig({
+        AILOOP_HOME: homeDir,
+        AILOOP_INTERVAL_SECONDS: "3600",
+        AILOOP_MAX_CYCLES: "0"
+      });
+      const paths = (new LoopEngine(config) as unknown as { paths: LoopPaths }).paths;
+      await ensureLoopHome(paths);
+      await fs.writeFile(paths.taskPath, "Test goal", "utf8");
+
+      const engine = new LoopEngine(config);
+      const secondRoundStarted = Promise.withResolvers<void>();
+      let roundCalls = 0;
+
+      (engine as unknown as { runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }> }).runRound =
+        async () => {
+          roundCalls += 1;
+
+          if (roundCalls === 1) {
+            await patchRuntimeLoopConfig(config, { intervalSeconds: 1 });
+            return { success: true };
+          }
+
+          if (roundCalls === 2) {
+            secondRoundStarted.resolve();
+            await setFlag(paths.stopFlagPath);
+            return { success: true };
+          }
+
+          throw new Error(`Unexpected round call ${roundCalls}`);
+        };
+
+      const runPromise = engine.run();
+
+      await Promise.race([
+        secondRoundStarted.promise,
+        Bun.sleep(2_500).then(() => {
+          throw new Error("Loop did not pick up updated intervalSeconds before cooldown");
+        })
+      ]);
+
+      await Promise.race([
+        runPromise,
+        Bun.sleep(2_500).then(() => {
+          throw new Error("Loop did not stop after stop flag was set");
+        })
+      ]);
+    } finally {
+      process.chdir(originalCwd);
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("applies updated intervalSeconds while already in cooldown", async () => {
+    const originalCwd = process.cwd();
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-cooldown-refresh-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+
+    try {
+      process.chdir(workspaceRoot);
+      await fs.mkdir(homeDir, { recursive: true });
+      await fs.writeFile(path.join(workspaceRoot, "README.md"), "Test README", "utf8");
+
+      const config = loadConfig({
+        AILOOP_HOME: homeDir,
+        AILOOP_INTERVAL_SECONDS: "3600",
+        AILOOP_MAX_CYCLES: "0"
+      });
+      const paths = (new LoopEngine(config) as unknown as { paths: LoopPaths }).paths;
+      await ensureLoopHome(paths);
+      await fs.writeFile(paths.taskPath, "Test goal", "utf8");
+
+      const engine = new LoopEngine(config);
+      const secondRoundStarted = Promise.withResolvers<void>();
+      let roundCalls = 0;
+
+      (engine as unknown as { runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }> }).runRound =
+        async () => {
+          roundCalls += 1;
+
+          if (roundCalls === 1) {
+            return { success: true };
+          }
+
+          if (roundCalls === 2) {
+            secondRoundStarted.resolve();
+            await setFlag(paths.stopFlagPath);
+            return { success: true };
+          }
+
+          throw new Error(`Unexpected round call ${roundCalls}`);
+        };
+
+      const runPromise = engine.run();
+
+      const cooldownDeadline = Date.now() + 2_500;
+      while (Date.now() < cooldownDeadline) {
+        const state = await readLoopState(paths);
+        if (state.state === "cooldown") {
+          break;
+        }
+        await Bun.sleep(25);
+      }
+
+      expect((await readLoopState(paths)).state).toBe("cooldown");
+      await patchRuntimeLoopConfig(config, { intervalSeconds: 1 });
+
+      await Promise.race([
+        secondRoundStarted.promise,
+        Bun.sleep(2_500).then(() => {
+          throw new Error("Loop did not pick up updated intervalSeconds during cooldown");
+        })
+      ]);
+
+      await Promise.race([
+        runPromise,
+        Bun.sleep(2_500).then(() => {
+          throw new Error("Loop did not stop after stop flag was set");
+        })
+      ]);
+    } finally {
+      process.chdir(originalCwd);
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
   });
 });
