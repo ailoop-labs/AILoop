@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../config/env";
 import { patchRuntimeLoopConfig } from "../config/runtime";
+import { PlannerInfrastructureError } from "../agent/planner";
 import type {
   ActionRecord,
   EvaluationResult,
@@ -421,6 +422,63 @@ describe("LoopEngine auto rework", () => {
     expect(finalState.last_error).toContain("Governance failed due to provider/network error:");
     expect(finalState.last_error).toContain("usage limit exceeded");
     expect(finalState.last_error).toContain("/tmp/leader.debug.json");
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
+  test("does not start executor or evaluator after planner provider rate-limit failure", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-planner-rate-limit-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir,
+      AILOOP_MAX_CYCLES: "1"
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      executor: { execute: () => Promise<{ actions: ActionRecord[]; toolResult: ToolResult }> };
+      evaluator: { evaluate: () => Promise<EvaluationResult> };
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+
+    let executorCalled = false;
+    let evaluatorCalled = false;
+
+    mutable.planner = {
+      plan: async () => {
+        throw new PlannerInfrastructureError(
+          'Planner AI CLI rate-limited: AI CLI exited with code 1 | stderr: API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)"}}'
+        );
+      }
+    };
+    mutable.executor = {
+      execute: async () => {
+        executorCalled = true;
+        return {
+          actions: [],
+          toolResult: makeToolResult("should not run")
+        };
+      }
+    };
+    mutable.evaluator = {
+      evaluate: async () => {
+        evaluatorCalled = true;
+        return makeEvaluation("pass", "should not run");
+      }
+    };
+
+    const outcome = await mutable.runRound(1);
+
+    expect(outcome.success).toBe(false);
+    expect(outcome.errorMessage).toContain("Planner AI CLI rate-limited");
+    expect(executorCalled).toBe(false);
+    expect(evaluatorCalled).toBe(false);
+
+    const state = await readLoopState(paths);
+    expect(state.state).toBe("paused");
+    expect(state.last_error).toContain("usage limit exceeded");
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });

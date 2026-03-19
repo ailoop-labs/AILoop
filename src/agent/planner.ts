@@ -26,6 +26,13 @@ const SUBTASK_SCHEMA: JsonSchema = {
   additionalProperties: false
 };
 
+export class PlannerInfrastructureError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PlannerInfrastructureError";
+  }
+}
+
 function sanitizeInstruction(message: string): string {
   return message.replace(/\s+/g, " ").trim().slice(0, 240);
 }
@@ -33,6 +40,25 @@ function sanitizeInstruction(message: string): string {
 function hasExplicitDocumentationRequest(instructions: string[]): boolean {
   const merged = instructions.join(" ").toLowerCase();
   return /(readme|docs?|文档|报告|checklist|audit|baseline|goal\.md|task\.md|plan)/.test(merged);
+}
+
+function isProviderRateLimitFailure(result: { error?: string; stderr: string }): boolean {
+  const combined = `${result.error ?? ""}\n${result.stderr}`.toLowerCase();
+  return (
+    combined.includes("429") ||
+    combined.includes("rate_limit_error") ||
+    combined.includes("usage limit exceeded") ||
+    combined.includes("too many requests")
+  );
+}
+
+function summarizeInfrastructureFailure(result: { error?: string; stderr: string }): string {
+  const message = result.error?.trim() || "AI CLI execution failed";
+  const stderr = result.stderr.trim();
+  if (!stderr) {
+    return message;
+  }
+  return `${message} | stderr: ${stderr}`;
 }
 
 function hasNoDiffSignal(previousRoundError: string | null): boolean {
@@ -354,6 +380,11 @@ export class PlannerAgent {
     emitLog(`ProjectPlanner AI CLI planning finished (ok=${result.ok}).`);
 
     if (!result.ok || !result.data) {
+      if (isProviderRateLimitFailure(result)) {
+        throw new PlannerInfrastructureError(
+          `Planner AI CLI rate-limited: ${summarizeInfrastructureFailure(result)}`
+        );
+      }
       return fallbackPlan(context);
     }
 

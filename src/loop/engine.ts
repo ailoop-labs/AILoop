@@ -8,6 +8,7 @@ import { ExecutorAgent } from "../agent/executor";
 import { DesignerAgent } from "../agent/designer";
 import { Guardrails, BudgetBreachError } from "../agent/guardrails";
 import { PlannerAgent, resolvePlannerRequirementMode } from "../agent/planner";
+import { PlannerInfrastructureError } from "../agent/planner";
 import { LeaderAgent } from "../agent/leader";
 import { ProductManagerAgent } from "../agent/product-manager";
 import { buildProductManagerSourceManifest, extractRuntimePolicyBriefFromAgents } from "../agent/runtime-policy";
@@ -1166,10 +1167,13 @@ export class LoopEngine {
       const message = error instanceof BudgetBreachError ? error.message : (error as Error).message;
       const errorType = error instanceof BudgetBreachError ? "BudgetBreach" : "RoundExecutionError";
       let failureMessage = message;
-      let rollbackRecordedPause = error instanceof BudgetBreachError;
+      const plannerInfrastructureFailure = error instanceof PlannerInfrastructureError;
+      let rollbackRecordedPause = error instanceof BudgetBreachError || plannerInfrastructureFailure;
       const failureToolResult: ToolResult = {
         status: "failure",
-        summary: "Round failed before evaluation completed.",
+        summary: plannerInfrastructureFailure
+          ? "Round aborted before execution because planner infrastructure failed."
+          : "Round failed before evaluation completed.",
         artifacts: {
           log_path: artifacts.logPath,
           state_change_path: artifacts.stateChangePath
@@ -1232,7 +1236,9 @@ export class LoopEngine {
           decision: "fail",
           justification: failureMessage,
           evidence: [failureMessage],
-          recommended_next_action: "pause and inspect round error"
+          recommended_next_action: plannerInfrastructureFailure
+            ? "pause and inspect planner/provider failure before retrying the round"
+            : "pause and inspect round error"
         },
         metrics,
         stateChange,

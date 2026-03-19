@@ -4,7 +4,13 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import type { AppConfig } from "../config/env";
 import type { PlannerContext } from "../types/contracts";
-import { buildAdaptivePlannerDirectives, buildPlannerPrompt, PlannerAgent, resolvePlannerRequirementMode } from "./planner";
+import {
+  buildAdaptivePlannerDirectives,
+  buildPlannerPrompt,
+  PlannerAgent,
+  PlannerInfrastructureError,
+  resolvePlannerRequirementMode
+} from "./planner";
 
 function createContext(overrides: Partial<PlannerContext> = {}): PlannerContext {
   return {
@@ -281,6 +287,50 @@ describe("PlannerAgent", () => {
       expect(result.expected_outcome).toContain("At least one file under src/, scripts/, or web/src/ changes");
       expect(result.impacted_files).toEqual(["src/", "scripts/", "web/src/"]);
       expect(result.recommended_tools).toEqual(["read_file", "write_file", "run_shell"]);
+    } finally {
+      process.chdir(originalCwd);
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("throws planner infrastructure failure instead of falling back when the provider reports usage-limit exhaustion", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-planner-rate-limit-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.writeFile(path.join(homeDir, "PLANNER_ROLE.md"), "# Planner Role\n\nCustom planner guidance.\n", "utf8");
+
+    const mockCodex = {
+      async runJson<T>() {
+        return {
+          ok: false,
+          data: undefined as T | undefined,
+          rawMessage: "",
+          stdout: "",
+          stderr:
+            'API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)"}}',
+          error: "AI CLI exited with code 1"
+        };
+      }
+    };
+    const stubTools = {
+      async initialize() {},
+      getSkillManager() {
+        return {
+          getAvailableSkills() {
+            return [];
+          }
+        };
+      }
+    };
+
+    const originalCwd = process.cwd();
+    process.chdir(workspaceRoot);
+
+    try {
+      const agent = new PlannerAgent(stubTools as never, makeConfig(homeDir), mockCodex as never);
+
+      await expect(agent.plan(createContext(), { onLog: async () => {} })).rejects.toBeInstanceOf(PlannerInfrastructureError);
+      await expect(agent.plan(createContext(), { onLog: async () => {} })).rejects.toThrow("usage limit exceeded");
     } finally {
       process.chdir(originalCwd);
       await fs.rm(workspaceRoot, { recursive: true, force: true });
