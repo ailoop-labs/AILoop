@@ -216,11 +216,32 @@ export interface ExternalValidationChecklistMetrics {
   hot_file_growth_lines: number;
 }
 
+export interface ExternalValidationChecklistMetricComparison {
+  baseline: number | null;
+  pilot: number | null;
+  delta: number | null;
+}
+
+export interface ExternalValidationChecklistBaselineComparison {
+  baseline_runs_dir: string;
+  checklist: {
+    rounds_per_successful_task: ExternalValidationChecklistMetricComparison;
+    human_interventions_per_task: ExternalValidationChecklistMetricComparison;
+    average_cost_usd_per_round: ExternalValidationChecklistMetricComparison;
+    evaluator_infrastructure_failures: ExternalValidationChecklistMetricComparison;
+    hot_file_growth_lines: ExternalValidationChecklistMetricComparison;
+  };
+}
+
 export interface ExternalValidationMetricsReport {
   task_count: number;
   successful_task_count: number;
   checklist: ExternalValidationChecklistMetrics;
   tasks: ExternalValidationTaskMetrics[];
+}
+
+export interface ExternalValidationMetricsApiResponse extends ExternalValidationMetricsReport {
+  baseline_comparison?: ExternalValidationChecklistBaselineComparison;
 }
 
 export interface ExternalValidationPreflightChecks {

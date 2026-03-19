@@ -19,6 +19,7 @@ import {
   getCliStatus,
   getLoopStatus,
   getRunArtifacts,
+  InvalidExternalValidationBaselineRunsDirError,
   listRuns,
   listProjectRoles,
   pauseLoop,
@@ -26,6 +27,7 @@ import {
   renderCliStatus,
   resolveStartedLoopState,
   resumeLoop,
+  runExternalValidationMetricsReport,
   startBackgroundLoop,
   stopLoop,
   tailLatestLog
@@ -2735,6 +2737,25 @@ describe("external-validation report CLI", () => {
     } finally {
       await fs.rm(workspaceRoot, { recursive: true, force: true });
       await fs.rm(baselineRunsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("fails clearly when the requested baseline runs directory does not exist", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-control-external-validation-invalid-baseline-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    const config = makeTestConfig(homeDir);
+
+    try {
+      await expect(
+        runExternalValidationMetricsReport(config, "missing-baseline-runs", workspaceRoot)
+      ).rejects.toBeInstanceOf(InvalidExternalValidationBaselineRunsDirError);
+      await expect(
+        runExternalValidationMetricsReport(config, "missing-baseline-runs", workspaceRoot)
+      ).rejects.toThrow(
+        `Baseline runs directory does not exist: ${path.join(workspaceRoot, "missing-baseline-runs")}`
+      );
+    } finally {
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
     }
   });
 });

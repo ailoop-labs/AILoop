@@ -889,6 +889,234 @@ describe("console server API contract", () => {
     });
   });
 
+  test("returns baseline comparison metrics when an authenticated operator supplies baselineRunsDir", async () => {
+    const token = "test-token";
+    const { fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+    const baselineRunsDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-server-baseline-runs-"));
+    tempDirs.add(baselineRunsDir);
+
+    await writeRunArtifacts(paths.runsDir, "2026-03-19T01-00-00-000Z", {
+      metrics: {
+        round: 1,
+        run_timestamp: "2026-03-19T01-00-00-000Z",
+        duration_ms: 1_000,
+        budget_limits: {
+          usdPerRound: 1,
+          timeMinutes: 10,
+          actions: 10
+        },
+        budget_usage: {
+          usdUsed: 0.1,
+          elapsedMs: 1_000,
+          actionsUsed: 2
+        },
+        evaluator_decision: "fail",
+        tool_status: "failure",
+        retries: {
+          evidence_remediation_attempts: 0,
+          auto_rework_attempts: 1,
+          auto_rework_limit: 2
+        },
+        phase_timings_ms: {
+          planning: 100,
+          execution: 400,
+          evaluation: 400,
+          operational_followup: 100
+        },
+        human_interventions: 1,
+        hot_file_growth_lines: 2,
+        sub_task_identity: {
+          stable_id: "pilot-task",
+          assignee: "executor",
+          objective: "Run the external-validation pilot on a fixture repository",
+          expected_outcome: "The pilot completes without evaluator infrastructure faults."
+        }
+      },
+      evaluation: {
+        decision: "fail",
+        justification: "Evaluator infrastructure failure: upstream timeout.",
+        root_cause: "evaluator_infrastructure:upstream-timeout",
+        evidence: ["bun test src/server.test.ts"]
+      },
+      summary: "Pilot retry remained blocked by evaluator infrastructure.",
+      stateChange: "No state changes detected.\n"
+    });
+
+    await writeRunArtifacts(paths.runsDir, "2026-03-19T02-00-00-000Z", {
+      metrics: {
+        round: 2,
+        run_timestamp: "2026-03-19T02-00-00-000Z",
+        duration_ms: 1_000,
+        budget_limits: {
+          usdPerRound: 1,
+          timeMinutes: 10,
+          actions: 10
+        },
+        budget_usage: {
+          usdUsed: 0.3,
+          elapsedMs: 1_000,
+          actionsUsed: 2
+        },
+        evaluator_decision: "pass",
+        tool_status: "success",
+        retries: {
+          evidence_remediation_attempts: 0,
+          auto_rework_attempts: 0,
+          auto_rework_limit: 2
+        },
+        phase_timings_ms: {
+          planning: 100,
+          execution: 500,
+          evaluation: 300,
+          operational_followup: 100
+        },
+        human_interventions: 1,
+        hot_file_growth_lines: 3,
+        sub_task_identity: {
+          stable_id: "pilot-task",
+          assignee: "executor",
+          objective: "Run the external-validation pilot on a fixture repository",
+          expected_outcome: "The pilot completes without evaluator infrastructure faults."
+        }
+      },
+      evaluation: {
+        decision: "pass",
+        justification: "Pilot summary metrics were persisted successfully.",
+        evidence: ["bun test src/server.test.ts"]
+      },
+      summary: "Pilot summary metrics persisted successfully.",
+      stateChange: "No state changes detected.\n"
+    });
+
+    await writeRunArtifacts(baselineRunsDir, "2026-03-18T01-00-00-000Z", {
+      metrics: {
+        round: 1,
+        run_timestamp: "2026-03-18T01-00-00-000Z",
+        duration_ms: 1_000,
+        budget_limits: {
+          usdPerRound: 1,
+          timeMinutes: 10,
+          actions: 10
+        },
+        budget_usage: {
+          usdUsed: 0.05,
+          elapsedMs: 1_000,
+          actionsUsed: 1
+        },
+        evaluator_decision: "pass",
+        tool_status: "success",
+        retries: {
+          evidence_remediation_attempts: 0,
+          auto_rework_attempts: 0,
+          auto_rework_limit: 2
+        },
+        phase_timings_ms: {
+          planning: 100,
+          execution: 400,
+          evaluation: 400,
+          operational_followup: 100
+        },
+        human_interventions: 1,
+        hot_file_growth_lines: 2,
+        sub_task_identity: {
+          stable_id: "baseline-task",
+          assignee: "executor",
+          objective: "Run a self-iteration baseline against a fixture repository",
+          expected_outcome: "The baseline completes without evaluator infrastructure faults."
+        }
+      },
+      evaluation: {
+        decision: "pass",
+        justification: "Baseline summary metrics were persisted successfully.",
+        evidence: ["bun test src/server.test.ts"]
+      },
+      summary: "Baseline summary metrics persisted successfully.",
+      stateChange: "No state changes detected.\n"
+    });
+
+    const response = await fetchHandler(
+      createAuthorizedRequest(
+        `http://console.test/api/metrics/external-validation?baselineRunsDir=${encodeURIComponent(baselineRunsDir)}`,
+        token
+      )
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      task_count: 1,
+      successful_task_count: 1,
+      checklist: {
+        rounds_per_successful_task: 2,
+        human_interventions_per_task: 2,
+        average_cost_usd_per_round: 0.2,
+        evaluator_infrastructure_failures: 1,
+        hot_file_growth_lines: 5
+      },
+      tasks: [
+        expect.objectContaining({
+          stable_id: "pilot-task",
+          objective: "Run the external-validation pilot on a fixture repository",
+          successful: true
+        })
+      ],
+      baseline_comparison: {
+        baseline_runs_dir: baselineRunsDir,
+        checklist: {
+          rounds_per_successful_task: {
+            baseline: 1,
+            pilot: 2,
+            delta: 1
+          },
+          human_interventions_per_task: {
+            baseline: 1,
+            pilot: 2,
+            delta: 1
+          },
+          average_cost_usd_per_round: {
+            baseline: 0.05,
+            pilot: 0.2,
+            delta: 0.15
+          },
+          evaluator_infrastructure_failures: {
+            baseline: 0,
+            pilot: 1,
+            delta: 1
+          },
+          hot_file_growth_lines: {
+            baseline: 2,
+            pilot: 5,
+            delta: 3
+          }
+        }
+      }
+    });
+  });
+
+  test("returns a 400 JSON error when baselineRunsDir is not a directory", async () => {
+    const token = "test-token";
+    const { fetchHandler, workspaceRoot } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    const response = await fetchHandler(
+      createAuthorizedRequest(
+        `http://console.test/api/metrics/external-validation?baselineRunsDir=${encodeURIComponent(
+          path.join(workspaceRoot, "missing-baseline-runs")
+        )}`,
+        token
+      )
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: `Baseline runs directory does not exist: ${path.join(workspaceRoot, "missing-baseline-runs")}`,
+      code: "invalid_external_validation_baseline_runs_dir"
+    });
+  });
+
   test("returns an authenticated Phase 3 preflight result for an eligible candidate repository", async () => {
     const token = "test-token";
     const { fetchHandler } = await createFixture({

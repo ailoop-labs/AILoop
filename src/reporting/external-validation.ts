@@ -1,22 +1,10 @@
-import type { ExternalValidationChecklistMetrics, ExternalValidationMetricsReport } from "../types/contracts";
+import type {
+  ExternalValidationChecklistBaselineComparison,
+  ExternalValidationChecklistMetricComparison,
+  ExternalValidationChecklistMetrics,
+  ExternalValidationMetricsReport
+} from "../types/contracts";
 import { buildExternalValidationMetricsReport } from "./metrics";
-
-export interface ExternalValidationChecklistMetricComparison {
-  baseline: number | null;
-  pilot: number | null;
-  delta: number | null;
-}
-
-export interface ExternalValidationChecklistBaselineComparison {
-  baseline_runs_dir: string;
-  checklist: {
-    rounds_per_successful_task: ExternalValidationChecklistMetricComparison;
-    human_interventions_per_task: ExternalValidationChecklistMetricComparison;
-    average_cost_usd_per_round: ExternalValidationChecklistMetricComparison;
-    evaluator_infrastructure_failures: ExternalValidationChecklistMetricComparison;
-    hot_file_growth_lines: ExternalValidationChecklistMetricComparison;
-  };
-}
 
 function normalizeAverage(value: number): number {
   return Number(value.toFixed(6));

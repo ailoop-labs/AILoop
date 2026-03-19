@@ -8,6 +8,7 @@ import { DatabaseManager } from "./utils/db";
 import {
   getLoopStatus,
   getRunArtifacts,
+  InvalidExternalValidationBaselineRunsDirError,
   InvalidLifecycleTransitionError,
   instructLoop,
   listProjectRoles,
@@ -208,7 +209,24 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
       }
 
       if (url.pathname === "/api/metrics/external-validation" && request.method === "GET") {
-        return json((await runExternalValidationMetricsReport(config)).metrics);
+        const rawBaselineRunsDir = url.searchParams.get("baselineRunsDir");
+        const baselineRunsDir = rawBaselineRunsDir === null ? undefined : rawBaselineRunsDir.trim();
+
+        if (rawBaselineRunsDir !== null && !baselineRunsDir) {
+          throw new InvalidExternalValidationBaselineRunsDirError(
+            "baselineRunsDir must be a non-empty directory path."
+          );
+        }
+
+        const report = await runExternalValidationMetricsReport(config, baselineRunsDir);
+        return json(
+          report.baselineComparison
+            ? {
+                ...report.metrics,
+                baseline_comparison: report.baselineComparison
+              }
+            : report.metrics
+        );
       }
 
       if (url.pathname === "/api/external-validation/preflight" && request.method === "POST") {
@@ -403,7 +421,11 @@ function createConsoleFetchFromRuntime(runtime: ConsoleRuntime) {
 
       return json({ error: "Not Found" }, 404);
     } catch (error) {
-      if (url.pathname.startsWith("/api/") && error instanceof InvalidLifecycleTransitionError) {
+      if (
+        url.pathname.startsWith("/api/") &&
+        (error instanceof InvalidLifecycleTransitionError ||
+          error instanceof InvalidExternalValidationBaselineRunsDirError)
+      ) {
         return json(
           {
             ok: false,

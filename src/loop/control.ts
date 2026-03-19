@@ -30,6 +30,7 @@ import type {
   BudgetLimits,
   CrashRecoveryStatus,
   EvaluationResult,
+  ExternalValidationChecklistBaselineComparison,
   ExternalValidationPreflightReport,
   HotFileGovernanceResult,
   LoopStateData,
@@ -85,6 +86,16 @@ export class InvalidLifecycleTransitionError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "InvalidLifecycleTransitionError";
+  }
+}
+
+export class InvalidExternalValidationBaselineRunsDirError extends Error {
+  readonly code = "invalid_external_validation_baseline_runs_dir";
+  readonly status = 400;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidExternalValidationBaselineRunsDirError";
   }
 }
 
@@ -166,6 +177,7 @@ export interface ProjectRoleView {
 
 export interface ExternalValidationMetricsCliReport {
   metrics: ExternalValidationMetricsReport;
+  baselineComparison?: ExternalValidationChecklistBaselineComparison;
   report: string;
 }
 
@@ -277,11 +289,20 @@ export async function runExternalValidationMetricsReport(
   const paths = await ensureLoopHomeAndGetPaths(config);
   let resolvedBaselineRunsDir: string | undefined;
 
-  if (baselineRunsDir) {
-    resolvedBaselineRunsDir = path.resolve(cwd, baselineRunsDir);
+  if (baselineRunsDir !== undefined) {
+    const normalizedBaselineRunsDir = baselineRunsDir.trim();
+    if (!normalizedBaselineRunsDir) {
+      throw new InvalidExternalValidationBaselineRunsDirError(
+        "baselineRunsDir must be a non-empty directory path."
+      );
+    }
+
+    resolvedBaselineRunsDir = path.resolve(cwd, normalizedBaselineRunsDir);
     const baselineStats = await fs.stat(resolvedBaselineRunsDir).catch(() => null);
     if (!baselineStats?.isDirectory()) {
-      throw new Error(`Baseline runs directory does not exist: ${resolvedBaselineRunsDir}`);
+      throw new InvalidExternalValidationBaselineRunsDirError(
+        `Baseline runs directory does not exist: ${resolvedBaselineRunsDir}`
+      );
     }
   }
 
@@ -292,6 +313,7 @@ export async function runExternalValidationMetricsReport(
 
   return {
     metrics,
+    baselineComparison,
     report: renderExternalValidationMetricsReport(metrics, baselineComparison)
   };
 }
