@@ -2438,6 +2438,108 @@ describe("external-validation report CLI", () => {
       await fs.rm(workspaceRoot, { recursive: true, force: true });
     }
   });
+
+  test("reports stable-id scoped no-op claim mismatches without attributing them to unaffected tasks", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-control-external-validation-no-op-report-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    const runsDir = path.join(homeDir, "runs");
+    const mismatchTask = buildRoundSubTaskIdentity({
+      rationale: "Pilot operators need a concrete mismatch count for false no-op claims.",
+      assignee: "executor",
+      objective: "Reconcile no-op summary claims",
+      expected_outcome: "The report counts rounds where summary claims no code changes despite recorded edits.",
+      impacted_files: ["/tmp/reporting.ts"],
+      recommended_tools: ["read_file", "write_file", "run_shell"]
+    });
+    const unaffectedTask = buildRoundSubTaskIdentity({
+      rationale: "This task makes an intentional workspace edit and should not count as a no-op mismatch.",
+      assignee: "executor",
+      objective: "Ship the intentional report update",
+      expected_outcome: "The report shows zero mismatches for rounds that accurately summarize edits.",
+      impacted_files: ["/tmp/control.ts"],
+      recommended_tools: ["read_file", "write_file", "run_shell"]
+    });
+
+    try {
+      await fs.mkdir(runsDir, { recursive: true });
+
+      await writeRunArtifacts(runsDir, "2026-03-18T10-00-00-000Z", {
+        summary: [
+          "# AILoop Round Summary",
+          "",
+          "## Execution Result",
+          "- Work Summary: No code change was required; verified the reporting path without workspace edits."
+        ].join("\n"),
+        metrics: makePersistedRoundMetrics({
+          round: 1,
+          run_timestamp: "2026-03-18T10:00:00.000Z",
+          evaluator_decision: "fail",
+          human_interventions: 0,
+          hot_file_growth_lines: 2,
+          sub_task_identity: mismatchTask
+        }),
+        evaluation: {
+          decision: "fail",
+          justification: "Summary claim conflicts with recorded state change.",
+          evidence: []
+        },
+        stateChange: [
+          "### Snapshot File Diffs",
+          "```diff",
+          "--- a/src/reporting/metrics.ts",
+          "+++ b/src/reporting/metrics.ts",
+          "@@ -150,0 +151,4 @@",
+          "+export const mismatchCount = 1;",
+          "```"
+        ].join("\n")
+      });
+
+      await writeRunArtifacts(runsDir, "2026-03-18T10-05-00-000Z", {
+        summary: [
+          "# AILoop Round Summary",
+          "",
+          "## Execution Result",
+          "- Work Summary: Updated the report renderer and added the mismatch count output."
+        ].join("\n"),
+        metrics: makePersistedRoundMetrics({
+          round: 2,
+          run_timestamp: "2026-03-18T10:05:00.000Z",
+          evaluator_decision: "pass",
+          human_interventions: 1,
+          hot_file_growth_lines: 3,
+          sub_task_identity: unaffectedTask
+        }),
+        evaluation: {
+          decision: "pass",
+          justification: "Intentional edit completed.",
+          evidence: []
+        },
+        stateChange: [
+          "### Snapshot File Diffs",
+          "```diff",
+          "--- a/src/loop/control.ts",
+          "+++ b/src/loop/control.ts",
+          "@@ -280,0 +281,4 @@",
+          '+  lines.push("No-op claim mismatches per task:");',
+          "```"
+        ].join("\n")
+      });
+
+      const result = runAiloopCli(["external-validation", "report"], workspaceRoot);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toContain("No-op claim mismatches per task:");
+      expect(result.stdout).toContain(
+        `- Reconcile no-op summary claims | stable_id=${mismatchTask.stable_id} | count=1`
+      );
+      expect(result.stdout).toContain(
+        `- Ship the intentional report update | stable_id=${unaffectedTask.stable_id} | count=0`
+      );
+    } finally {
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("external-validation preflight CLI", () => {

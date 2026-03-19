@@ -52,6 +52,7 @@ export interface ExternalValidationTaskMetrics {
   successful: boolean;
   latest_decision: RoundMetrics["evaluator_decision"] | "unknown";
   human_interventions: number;
+  no_op_claim_mismatches: number;
   evaluator_infrastructure_failures: number;
   hot_file_growth_lines: number;
   first_run_timestamp: string;
@@ -97,6 +98,57 @@ function normalizeCounter(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+const NO_OP_CLAIM_PATTERNS: RegExp[] = [
+  /\bno code change(?:s)? (?:was|were) required\b/i,
+  /\bno code change(?:s)? needed\b/i,
+  /\bno code change(?:s)? required\b/i,
+  /\bno workspace change(?:s)? (?:was|were) required\b/i,
+  /\bno workspace change(?:s)? needed\b/i,
+  /\bno workspace change(?:s)? required\b/i,
+  /\bno changes? (?:was|were) required\b/i,
+  /\bno file edits? (?:was|were) required\b/i,
+  /\bno file mutations?\b/i
+];
+
+function normalizeArtifactText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function summaryClaimsNoOp(summary: string): boolean {
+  const normalized = normalizeArtifactText(summary);
+  return normalized.length > 0 && NO_OP_CLAIM_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+function collectChangedFilePaths(stateChange: string): string[] {
+  return Array.from(
+    new Set(
+      stateChange
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.startsWith("+++ "))
+        .map((line) => line.slice(4).trim().replace(/^b\//, ""))
+        .filter((line) => line.length > 0 && line !== "/dev/null")
+    )
+  );
+}
+
+function stateChangeShowsConcreteEdits(stateChange: string): boolean {
+  const normalized = stateChange.trim();
+  if (!normalized || normalized === "No state changes detected.") {
+    return false;
+  }
+
+  if (collectChangedFilePaths(stateChange).length > 0) {
+    return true;
+  }
+
+  return /(^|\n)@@ /m.test(stateChange) && /(^|\n)[+-](?![+-])/m.test(stateChange);
+}
+
+function roundHasNoOpClaimMismatch(summary: string, stateChange: string): boolean {
+  return summaryClaimsNoOp(summary) && stateChangeShowsConcreteEdits(stateChange);
+}
+
 function isEvaluatorInfrastructureFailure(evaluation: EvaluationResult | null): boolean {
   if (!evaluation) {
     return false;
@@ -114,9 +166,11 @@ export async function buildExternalValidationMetricsReport(runsDir: string): Pro
   const tasksByStableId = new Map<string, ExternalValidationTaskMetrics>();
 
   for (const record of records.sort((left, right) => left.timestamp.localeCompare(right.timestamp))) {
-    const [metrics, evaluation] = await Promise.all([
+    const [metrics, evaluation, summaryText, stateChangeText] = await Promise.all([
       record.metricsPath ? readMetricsFile(record.metricsPath) : Promise.resolve(null),
-      record.evaluationPath ? readJsonFile<EvaluationResult | null>(record.evaluationPath, null) : Promise.resolve(null)
+      record.evaluationPath ? readJsonFile<EvaluationResult | null>(record.evaluationPath, null) : Promise.resolve(null),
+      record.summaryPath ? fs.readFile(record.summaryPath, "utf8").catch(() => "") : Promise.resolve(""),
+      record.stateChangePath ? fs.readFile(record.stateChangePath, "utf8").catch(() => "") : Promise.resolve("")
     ]);
     const identity = metrics?.sub_task_identity;
 
@@ -134,6 +188,7 @@ export async function buildExternalValidationMetricsReport(runsDir: string): Pro
       successful: false,
       latest_decision: "unknown" as const,
       human_interventions: 0,
+      no_op_claim_mismatches: 0,
       evaluator_infrastructure_failures: 0,
       hot_file_growth_lines: 0,
       first_run_timestamp: record.timestamp,
@@ -144,6 +199,7 @@ export async function buildExternalValidationMetricsReport(runsDir: string): Pro
     existing.successful = existing.successful || latestDecision === "pass";
     existing.latest_decision = latestDecision;
     existing.human_interventions += normalizeCounter(metrics?.human_interventions);
+    existing.no_op_claim_mismatches += roundHasNoOpClaimMismatch(summaryText, stateChangeText) ? 1 : 0;
     existing.hot_file_growth_lines += normalizeCounter(metrics?.hot_file_growth_lines);
     existing.evaluator_infrastructure_failures += isEvaluatorInfrastructureFailure(evaluation) ? 1 : 0;
     existing.first_run_timestamp =

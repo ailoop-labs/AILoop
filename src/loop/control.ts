@@ -300,6 +300,15 @@ export function renderExternalValidationMetricsReport(report: ExternalValidation
     }
   }
 
+  lines.push("No-op claim mismatches per task:");
+  if (report.tasks.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const task of report.tasks) {
+      lines.push(`- ${task.objective} | stable_id=${task.stable_id} | count=${task.no_op_claim_mismatches}`);
+    }
+  }
+
   lines.push("Evaluator infrastructure failure count:");
   if (report.tasks.length === 0) {
     lines.push("- none");
