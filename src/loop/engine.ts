@@ -274,7 +274,15 @@ export function decideEvaluationFailureRecoveryPath(
     /validation evidence is missing/.test(text) ||
     /attach minimal proof/.test(text);
 
-  if (hasKeyUnknownDimension || looksLikeEvidenceHandoffFailure) {
+  const looksLikeRoundArtifactContradiction =
+    rootCause.startsWith("artifact_summary_conflict:") ||
+    /claims no code change/.test(text) ||
+    /state-change artifact records edits/.test(text) ||
+    /summary and state-change artifact conflict/.test(text) ||
+    /no-mutation summary/.test(text) ||
+    /do not trust the no[-\s]mutation summary/.test(text);
+
+  if (hasKeyUnknownDimension || looksLikeEvidenceHandoffFailure || looksLikeRoundArtifactContradiction) {
     return "leader";
   }
 

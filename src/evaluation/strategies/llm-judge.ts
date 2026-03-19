@@ -644,6 +644,14 @@ const NO_MUTATION_CLAIM_PATTERNS: RegExp[] = [
   /\bno file mutations?\b/i
 ];
 
+const ROUND_ARTIFACT_CONTRADICTION_PATTERNS: RegExp[] = [
+  /claims no code change/i,
+  /state-change artifact records edits/i,
+  /summary and state-change artifact conflict/i,
+  /no-mutation summary/i,
+  /do not trust the no(?:-|\s)mutation summary/i
+];
+
 type RoundInconsistencySummary = {
   status: "none" | "present";
   summary: string;
@@ -1162,6 +1170,30 @@ function detectEvaluatorInfrastructureFailure(
   return undefined;
 }
 
+function detectRoundArtifactContradiction(
+  assessments: DimensionAssessment[]
+):
+  | {
+      matchedAssessments: DimensionAssessment[];
+      recommendedNextAction: string;
+    }
+  | undefined {
+  const matchedAssessments = assessments.filter((assessment) =>
+    hasPattern(ROUND_ARTIFACT_CONTRADICTION_PATTERNS, toAssessmentText(assessment))
+  );
+
+  if (matchedAssessments.length === 0) {
+    return undefined;
+  }
+
+  return {
+    matchedAssessments,
+    recommendedNextAction:
+      toFollowUpActions(matchedAssessments) ||
+      "pause and review the recorded file edits; do not trust the no-mutation summary until governance resolves the contradiction"
+  };
+}
+
 export function aggregateDimensionAssessments(
   assessments: DimensionAssessment[],
   minPassScore: number
@@ -1213,6 +1245,22 @@ export function aggregateDimensionAssessments(
       root_cause: infrastructureFailure.rootCause,
       evidence: withDetailedEvidence(evidence, infrastructureFailure.matchedAssessments),
       recommended_next_action: infrastructureFailure.recommendedNextAction,
+      recovery_path: "strategic_governance",
+      aggregateScore: score
+    };
+  }
+
+  const roundArtifactContradiction = detectRoundArtifactContradiction(adjusted);
+  if (roundArtifactContradiction) {
+    return {
+      decision: "fail",
+      justification: "Executor summary conflicts with recorded round artifacts.",
+      root_cause: "artifact_summary_conflict:no_mutation_claim",
+      evidence: withDetailedEvidence(
+        [...evidence, "Executor summary claims no code change, but the state-change artifact records edits."],
+        roundArtifactContradiction.matchedAssessments
+      ),
+      recommended_next_action: roundArtifactContradiction.recommendedNextAction,
       recovery_path: "strategic_governance",
       aggregateScore: score
     };

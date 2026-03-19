@@ -360,6 +360,36 @@ describe("aggregateDimensionAssessments", () => {
     expect(result.recovery_path).toBe("tactical_rework");
   });
 
+  test("routes no-mutation summary contradictions to strategic governance", () => {
+    const result = aggregateDimensionAssessments(
+      [
+        makeAssessment({
+          dimension: "goal_alignment",
+          decision: "fail",
+          score: 24,
+          justification:
+            "Executor summary claims no code change, but the state-change artifact records edits in src/evaluation/strategies/llm-judge.ts.",
+          evidence: [
+            "round_inconsistency_summary.direct_evidence: src/evaluation/strategies/llm-judge.ts | @@ -1212,6 +1234,18 @@ | +      recovery_path: \"strategic_governance\","
+          ],
+          blocking_issues: ["Do not trust the no-mutation summary until the contradiction is resolved."],
+          recommended_next_action: "pause and review the recorded file edits before retrying"
+        }),
+        makeAssessment({ dimension: "causal_validity", score: 81 }),
+        makeAssessment({ dimension: "constraint_compliance", score: 92 })
+      ],
+      75
+    );
+
+    expect(result.decision).toBe("fail");
+    expect(result.justification).toContain("summary conflicts with recorded round artifacts");
+    expect(result.root_cause).toBe("artifact_summary_conflict:no_mutation_claim");
+    expect(result.evidence.some((line) => line.includes("claims no code change"))).toBe(true);
+    expect(result.evidence.some((line) => line.includes("round_inconsistency_summary.direct_evidence"))).toBe(true);
+    expect(result.recommended_next_action).toContain("review the recorded file edits");
+    expect(result.recovery_path).toBe("strategic_governance");
+  });
+
   test("passes when weighted score meets threshold and no blockers", () => {
     const result = aggregateDimensionAssessments(
       [
