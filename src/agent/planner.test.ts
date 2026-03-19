@@ -75,6 +75,9 @@ function makeConfig(homeDir: string): AppConfig {
 function createStubTools() {
   return {
     async initialize() {},
+    listTools() {
+      return [{ name: "read_file", description: "Reads and returns the content of a specified file." }];
+    },
     getSkillManager() {
       return {
         getAvailableSkills() {
@@ -450,6 +453,38 @@ describe("PlannerAgent", () => {
         };
       }
     };
+    const failureSnapshot = {
+      captured_at: "2026-03-19T00:00:00.000Z",
+      cpu_state: {
+        process_user_cpu_time_us: 101_000,
+        process_system_cpu_time_us: 22_000,
+        system_load_average: [0.12, 0.34, 0.56],
+        available_parallelism: 8
+      },
+      memory_state: {
+        process_rss_bytes: 4_096,
+        process_heap_total_bytes: 8_192,
+        process_heap_used_bytes: 2_048,
+        process_external_bytes: 256,
+        process_array_buffers_bytes: 128,
+        system_total_bytes: 16_384,
+        system_free_bytes: 8_192
+      },
+      network_connectivity: {
+        status: "reachable",
+        probe_target: "dns:example.com",
+        probe_latency_ms: 24,
+        timed_out: false,
+        error: null,
+        non_internal_interface_count: 1,
+        interface_names: ["en0"]
+      },
+      tool_availability: {
+        status: "available",
+        registered_count: 3,
+        registered_tools: ["activate_skill", "read_file", "run_shell_command"]
+      }
+    };
 
     const originalCwd = process.cwd();
     process.chdir(workspaceRoot);
@@ -462,7 +497,8 @@ describe("PlannerAgent", () => {
         mockCodex as never,
         async (ms) => {
           sleepCalls.push(ms);
-        }
+        },
+        async () => failureSnapshot
       );
 
       let failure: unknown;
@@ -514,6 +550,7 @@ describe("PlannerAgent", () => {
         stderr_tail: "planner request timed out after 30000ms",
         raw_tail: null
       });
+      expect(timeoutContext.failure_snapshot).toEqual(failureSnapshot);
 
       const diagnosticsLog = logs.find((message) => message.includes("ProjectPlanner diagnostics artifact:"));
       expect(diagnosticsLog).toBeTruthy();
@@ -556,6 +593,7 @@ describe("PlannerAgent", () => {
         stderr_tail: "planner request timed out after 30000ms",
         raw_tail: null
       });
+      expect(payload.failure_snapshot).toEqual(failureSnapshot);
     } finally {
       process.chdir(originalCwd);
       await fs.rm(workspaceRoot, { recursive: true, force: true });

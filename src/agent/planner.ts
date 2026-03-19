@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { lookup } from "node:dns/promises";
+import os from "node:os";
 import path from "node:path";
 import type { AppConfig } from "../config/env";
 import type { PlannerContext, SubTask } from "../types/contracts";
@@ -39,8 +41,20 @@ const SUBTASK_SCHEMA: JsonSchema = {
 const PLANNER_TRANSIENT_RETRY_MAX_ATTEMPTS = 3;
 const PLANNER_TRANSIENT_RETRY_BASE_DELAY_MS = 1_000;
 const PLANNER_TRANSIENT_RETRY_MAX_DELAY_MS = 8_000;
+const PLANNER_NETWORK_PROBE_TARGET = "example.com";
+const PLANNER_NETWORK_PROBE_TIMEOUT_MS = 250;
+const PLANNER_DIAGNOSTIC_LIST_LIMIT = 16;
 
 type PlannerTransientFailureKind = "provider_rate_limit" | "provider_upstream_error" | "timeout";
+type PlannerFailureSnapshot = Record<string, unknown>;
+type PlannerFailureSnapshotBuilder = (tools: ToolRegistry) => Promise<PlannerFailureSnapshot>;
+interface PlannerTimeoutContext {
+  timeout_duration_ms: number | null;
+  partial_output: Record<string, unknown>;
+  exit_status: Record<string, unknown>;
+  environment_state: Record<string, unknown>;
+  failure_snapshot: PlannerFailureSnapshot;
+}
 
 export class PlannerInfrastructureError extends Error {
   constructor(message: string) {
@@ -196,11 +210,88 @@ function normalizePlannerEnvironmentState(
   };
 }
 
+async function buildPlannerFailureSnapshot(tools: ToolRegistry): Promise<PlannerFailureSnapshot> {
+  const cpuUsage = process.cpuUsage();
+  const memoryUsage = process.memoryUsage();
+  const registeredTools = tools
+    .listTools()
+    .map((tool) => tool.name)
+    .sort();
+  const interfaceNames = Object.entries(os.networkInterfaces())
+    .filter(([, addresses]) => (addresses ?? []).some((address) => address.internal === false))
+    .map(([name]) => name)
+    .sort()
+    .slice(0, PLANNER_DIAGNOSTIC_LIST_LIMIT);
+  const probeStartedAt = Date.now();
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  let networkConnectivity: Record<string, unknown>;
+
+  try {
+    await Promise.race([
+      lookup(PLANNER_NETWORK_PROBE_TARGET),
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => reject(new Error("network_probe_timeout")), PLANNER_NETWORK_PROBE_TIMEOUT_MS);
+      })
+    ]);
+
+    networkConnectivity = {
+      status: "reachable",
+      probe_target: `dns:${PLANNER_NETWORK_PROBE_TARGET}`,
+      probe_latency_ms: Date.now() - probeStartedAt,
+      timed_out: false,
+      error: null,
+      non_internal_interface_count: interfaceNames.length,
+      interface_names: interfaceNames
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    networkConnectivity = {
+      status: message === "network_probe_timeout" ? "timeout" : "unreachable",
+      probe_target: `dns:${PLANNER_NETWORK_PROBE_TARGET}`,
+      probe_latency_ms: Date.now() - probeStartedAt,
+      timed_out: message === "network_probe_timeout",
+      error: message,
+      non_internal_interface_count: interfaceNames.length,
+      interface_names: interfaceNames
+    };
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+
+  return {
+    captured_at: new Date().toISOString(),
+    cpu_state: {
+      process_user_cpu_time_us: cpuUsage.user,
+      process_system_cpu_time_us: cpuUsage.system,
+      system_load_average: os.loadavg(),
+      available_parallelism: typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length
+    },
+    memory_state: {
+      process_rss_bytes: memoryUsage.rss,
+      process_heap_total_bytes: memoryUsage.heapTotal,
+      process_heap_used_bytes: memoryUsage.heapUsed,
+      process_external_bytes: memoryUsage.external,
+      process_array_buffers_bytes: memoryUsage.arrayBuffers,
+      system_total_bytes: os.totalmem(),
+      system_free_bytes: os.freemem()
+    },
+    network_connectivity: networkConnectivity,
+    tool_availability: {
+      status: registeredTools.length > 0 ? "available" : "none_registered",
+      registered_count: registeredTools.length,
+      registered_tools: registeredTools.slice(0, PLANNER_DIAGNOSTIC_LIST_LIMIT)
+    }
+  };
+}
+
 function buildPlannerTimeoutContext(
   result: AIJsonCallResult<unknown>,
   sandbox: AppConfig["ai"]["plannerSandbox"],
-  cwd: string
-): Record<string, unknown> {
+  cwd: string,
+  failureSnapshot: PlannerFailureSnapshot
+): PlannerTimeoutContext {
   const redactor = new SecretRedactor(process.env);
   const diagnostics = result.diagnostics;
 
@@ -217,7 +308,8 @@ function buildPlannerTimeoutContext(
       exit_signal: diagnostics?.exitSignal ?? null,
       timed_out: diagnostics?.timedOut ?? /timed out/i.test(`${result.error ?? ""}\n${result.stderr}\n${result.rawMessage}`)
     },
-    environment_state: normalizePlannerEnvironmentState(sandbox, cwd)
+    environment_state: normalizePlannerEnvironmentState(sandbox, cwd),
+    failure_snapshot: failureSnapshot
   };
 }
 
@@ -226,13 +318,11 @@ async function writePlannerDiagnosticsArtifact(
   prompt: string,
   result: AIJsonCallResult<unknown>,
   failureKind: PlannerTransientFailureKind,
-  sandbox: AppConfig["ai"]["plannerSandbox"],
-  cwd: string
+  timeoutContext: PlannerTimeoutContext
 ): Promise<string> {
   const redactor = new SecretRedactor(process.env);
   const diagnosticsPath = resolvePlannerDiagnosticsPath(homeDir);
   const diagnostics = result.diagnostics;
-  const timeoutContext = buildPlannerTimeoutContext(result, sandbox, cwd);
 
   await writeJsonFile(diagnosticsPath, {
     created_at: new Date().toISOString(),
@@ -240,8 +330,8 @@ async function writePlannerDiagnosticsArtifact(
     exit_code: diagnostics?.exitCode ?? parsePlannerExitCode(result.error),
     exit_signal: diagnostics?.exitSignal ?? null,
     timed_out: diagnostics?.timedOut ?? /timed out/i.test(`${result.error ?? ""}\n${result.stderr}\n${result.rawMessage}`),
-    sandbox,
-    cwd,
+    sandbox: timeoutContext.environment_state?.sandbox ?? null,
+    cwd: timeoutContext.environment_state?.cwd ?? null,
     model: diagnostics?.model ?? null,
     prompt_chars: diagnostics?.promptChars ?? prompt.length,
     input_tokens: diagnostics?.inputTokens ?? null,
@@ -253,6 +343,7 @@ async function writePlannerDiagnosticsArtifact(
     partial_output: timeoutContext.partial_output,
     exit_status: timeoutContext.exit_status,
     environment_state: timeoutContext.environment_state,
+    failure_snapshot: timeoutContext.failure_snapshot,
     prompt_sha256: createHash("sha256").update(prompt).digest("hex"),
     role_contract_mode: "runtime_json_v1",
     stdout_tail: normalizeDiagnosticExcerpt(result.stdout, redactor),
@@ -506,12 +597,14 @@ export class PlannerAgent {
   private readonly tools: ToolRegistry;
   private readonly workspaceRoot: string;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly buildFailureSnapshot: PlannerFailureSnapshotBuilder;
 
   constructor(
     tools: ToolRegistry,
     config: AppConfig,
     aiClient?: Pick<AIClient, "runJson">,
-    sleepFn: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+    sleepFn: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    buildFailureSnapshotFn: PlannerFailureSnapshotBuilder = buildPlannerFailureSnapshot
   ) {
     this.tools = tools;
     this.ai = aiClient ?? new AIClient(config.ai);
@@ -519,6 +612,7 @@ export class PlannerAgent {
     this.homeDir = config.homeDir;
     this.workspaceRoot = process.cwd();
     this.sleep = sleepFn;
+    this.buildFailureSnapshot = buildFailureSnapshotFn;
   }
 
   async plan(
@@ -619,18 +713,21 @@ export class PlannerAgent {
       if (finalTransientFailure) {
         let diagnosticsPath: string | undefined;
         if (finalTransientFailure === "timeout") {
+          const timeoutContext = buildPlannerTimeoutContext(
+            result,
+            this.sandbox,
+            this.workspaceRoot,
+            await this.buildFailureSnapshot(this.tools)
+          );
           emitLog(
-            `ProjectPlanner timeout context: ${JSON.stringify(
-              buildPlannerTimeoutContext(result, this.sandbox, this.workspaceRoot)
-            )}`
+            `ProjectPlanner timeout context: ${JSON.stringify(timeoutContext)}`
           );
           diagnosticsPath = await writePlannerDiagnosticsArtifact(
             this.homeDir,
             prompt,
             result,
             finalTransientFailure,
-            this.sandbox,
-            this.workspaceRoot
+            timeoutContext
           );
           emitLog(`ProjectPlanner diagnostics artifact: ${diagnosticsPath}`);
         }
