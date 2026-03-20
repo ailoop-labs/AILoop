@@ -119,7 +119,9 @@ Planning/runtime isolation rule:
 Evaluation handoff rules:
 - engine-managed observability artifacts such as `.ailoop/runs/*.round.log` must remain reviewable on disk, but should not be recursively embedded wholesale into the evaluator prompt
 - `State Change Artifact` should emphasize intentional workspace mutations and concise evidence notes
+- the compact evaluation brief and the round summary must point to the same round artifact write paths opened for that round
 - if the Evaluator itself cannot complete because its Codex call fails, the engine must record that as evaluator infrastructure failure instead of pretending the round merely lacked ordinary evidence
+- if evaluation cannot complete, the engine must still persist the round's evaluation artifact as evaluator infrastructure failure before handing control to pause handling or crash recovery
 - evaluator runtime sessions must not inherit development-assistant instructions from the repository root
 - the same compact evidence shape should flow into Leader diagnostics and Web Console summaries unless a human explicitly drills down into the raw artifact
 
@@ -137,11 +139,15 @@ ProductManager handoff rules:
 Rework handoff rule:
 - evaluator-to-executor rework instructions should be navigational and issue-focused
 - pass blocking dimensions, recommended next action, and artifact references
+- if the round evidence set is incomplete, the rework handoff must explicitly identify which artifact is missing or incomplete instead of presenting the gap as ordinary task-quality failure
 - avoid replaying entire raw state-change files into the rework prompt unless the minimal relevant excerpt is known
 
 ### Phase 6: Leader / CCB Intervention
 1. When the loop is set to `paused` (whether due to human intervention or severe failure), the engine awakens the **LeaderAgent** (and potentially introduces CCB experts like SeniorDev, QALead, ProductOwner for consultation).
 2. The Leader reads a compact pause diagnostic, artifact map, and targeted evidence excerpts first, with raw logs still available through drill-down when necessary. It then analyzes the Friction Index and decides whether to guide the Executor, reduce scope, or issue a Clarification Request to the human. It waits for new intervention instructions from the human before continuing.
+
+Leader handoff rule:
+- pause diagnostics and leader handoffs must explicitly show whether round evidence is complete, partially written, or missing, while preserving artifact references for drill-down
 
 ## 4. External Intervention & State Alignment
 

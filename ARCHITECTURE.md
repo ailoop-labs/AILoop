@@ -259,7 +259,8 @@ The engine:
 - loads current goal, prior summaries, pending instructions, and budgets,
 - checks whether stop or pause was requested,
 - creates a workspace snapshot if supported,
-- opens a new timestamped artifact set.
+- opens a new timestamped artifact set,
+- fixes the round's artifact write paths for that round so evaluation packaging, summary generation, pause diagnostics, and crash recovery all reuse the same path set instead of inventing new artifact paths mid-round.
 
 ### 7.2 Phase 1: Planning
 
@@ -324,6 +325,11 @@ The same compact-by-default rule should apply when the engine packages pause dia
 
 The engine must not treat engine-managed run artifacts such as `.ailoop/runs/*.round.log` as ordinary product workspace diffs when constructing the evaluator handoff.
 
+Evaluation packaging requirements:
+
+- evaluation packaging must reference the current round's artifact write paths and may cite only artifacts that already exist or are explicitly marked incomplete for that same round,
+- if evaluator infrastructure fails because of authentication, transport, tooling, or prompt-construction issues, the engine must still persist `*.round.evaluation.json` for that round with infrastructure-failure classification, the best available failure clue, and references to the same artifact write paths used by the round summary.
+
 Possible decisions:
 
 - `pass`
@@ -346,6 +352,11 @@ The engine writes all artifacts, updates metrics, records the current state, and
 - `paused` on recoverable safety interruption,
 - `stopping` if a stop request is pending,
 - `error` on unhandled engine failure.
+
+Minimum durable round record requirements:
+
+- before transitioning to `cooldown`, `paused`, `stopping`, or `error`, the engine must durably persist a minimum round record for the current artifact set: round summary, metrics, state-change evidence or explicit no-change note, and evaluation artifact or evaluator-infrastructure-failure record,
+- pause semantics require that this minimum round record be written before the round is considered safely paused, unless the engine process dies first and crash recovery assumes responsibility for finishing the diagnostic record.
 
 ## 8. Core Contracts
 
@@ -502,9 +513,10 @@ The MVP uses file-based persistence rooted at `AILOOP_HOME`, defaulting to `.ail
 - `goal.md`: current high-level objective.
 - `instructions.queue.json`: operator feedback to inject at the next round boundary.
 - `*.round.log`: timestamped execution log with secret redaction.
-- `*.round.summary.md`: human-readable summary of the round.
+- `*.round.summary.md`: human-readable summary of the round derived from the current round artifact set; it must reference the same artifact write paths used during evaluation packaging and explicitly mark missing or incomplete evidence instead of omitting the gap.
 - `*.round.metrics.json`: budget use, duration, retries, and phase timings.
 - `*.round.state_change.txt`: unified diff or concise mutation log.
+- `*.round.evaluation.json`: required evaluation record for every round outcome, including pass, fail, and evaluator infrastructure failure; it must preserve failure classification and references to the current round artifact set.
 
 Artifact composition requirements:
 
@@ -512,7 +524,6 @@ Artifact composition requirements:
 - engine-managed observability artifacts under `.ailoop/runs/` should not recursively dominate the state-change body,
 - large artifacts remain on disk for human review, but downstream agent prompts should receive compact summaries plus artifact paths,
 - operator-facing console surfaces should expose large artifacts through sectioned summaries, expand/collapse, pagination, or explicit drill-down instead of dumping full bodies into the primary view.
-- `*.round.evaluation.json`: evaluator decision and evidence.
 
 ### 10.3 Secret Redaction
 
@@ -526,9 +537,10 @@ On engine startup:
 
 - detect whether the previous process died mid-round,
 - inspect lock file, persisted phase, and snapshot metadata,
-- mark the interrupted round as incomplete,
+- preserve any partial artifacts already written for the interrupted round,
+- mark missing artifacts as incomplete,
 - attempt rollback when policy and environment allow,
-- transition to `paused` for operator review.
+- transition to `paused` for operator review with a summary-first diagnostic instead of silently replacing or discarding evidence.
 
 This prevents the engine from silently continuing on top of uncertain state.
 
