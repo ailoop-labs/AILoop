@@ -11,6 +11,19 @@ Prove AILoop can work on a second repository without relying on self-iteration f
 
 ---
 
+## Completed Groundwork
+
+The following Phase 3 foundations are already shipped and should not be redefined as the active slice:
+
+- Candidate-repository preflight for pass/fail eligibility checks
+- Aggregate external-validation checklist metrics from persisted run artifacts
+- Aggregate baseline-vs-pilot checklist comparison
+- Manual pre-run verification checklist guidance
+- Read-only `First Pilot Scope` boundary in the Web Console
+- Per-task pilot telemetry drill-down inside the checklist
+
+---
+
 ## Slice 3.1: Pilot Repository Selection Criteria
 
 ### Selection Matrix
@@ -109,19 +122,9 @@ Prove AILoop can work on a second repository without relying on self-iteration f
 
 ## Slice 3.3: Pilot Scope Definition
 
-### Concrete Scope-Cut Proposal
+### Delivered Scope Boundary
 
-#### Behavior to Change
-- Add a summary-first Phase 3 "First Pilot Scope" panel to the Web Console.
-- Make the first pilot boundary explicit: one external repository, one bounded task, existing guardrails only.
-- Keep the documented narrow task classes visible in the panel so the operator can choose only from the allowed pilot shapes.
-- Include a dedicated `Out of Scope` section so deferred functionality is visible without opening the requirement markdown.
-
-#### Files / Surfaces Affected
-- `.ailoop/product-requirements/current.md`
-- `docs/plans/external-validation.md`
-- `web/src/App.tsx`
-- `web/src/App.test.tsx`
+The documented `First Pilot Scope` boundary is already implemented as a read-only Web Console panel. It remains the governing pilot boundary, but it is not the active implementation target anymore.
 
 ### Narrow First Scope
 
@@ -142,26 +145,59 @@ The first pilot is intentionally cut to a single bounded task in a single extern
    - Module reorganization
    - Test-preserving refactor
 
+---
+
+## Slice 3.4: Task-Level Baseline Comparison
+
+### Why This Slice
+
+Round 119 already added per-task pilot telemetry drill-down to the existing checklist, and earlier slices already added the aggregate baseline overlay plus the `First Pilot Scope` and manual checklist surfaces. The remaining narrow gap is that operators still cannot compare a pilot task against its self-iteration baseline inside the same drill-down. This slice closes that gap without reopening repository selection, pilot execution, or broader workflow work.
+
+### Concrete Scope Cut Proposal
+
+#### Behavior to Change
+- Extend the current `External Validation Checklist` task drill-down so matched tasks show baseline, pilot, and delta values.
+- Match baseline tasks to pilot tasks by `stable_id` only.
+- Limit task-level comparison to the five existing checklist metrics:
+  - rounds
+  - human interventions
+  - average cost per round
+  - evaluator infrastructure failures
+  - hot-file growth
+- When a pilot task has no matching baseline task, show an explicit pilot-only state rather than hiding the task or fabricating a comparison.
+- Preserve the current aggregate checklist comparison and the current task drill-down structure.
+
+#### Files / Surfaces Affected
+- `.ailoop/product-requirements/current.md`
+- `docs/plans/external-validation.md`
+- `src/types/contracts.ts`
+- `src/reporting/metrics.ts`
+- `src/reporting/metrics.test.ts`
+- `src/server.ts`
+- `src/server.test.ts`
+- `web/src/App.tsx`
+- `web/src/App.test.tsx`
+
+### Acceptance Criteria
+
+- The active Phase 3 requirement no longer names the already-shipped `First Pilot Scope` panel as the next implementation target.
+- When a baseline overlay is active, task cards can render matched baseline, pilot, and delta values for the five documented metrics.
+- Matching is keyed by `stable_id`; title or objective text is not used as a fallback join key.
+- Unmatched pilot tasks remain visible with an explicit pilot-only treatment.
+- Aggregate checklist cards and current pilot-only drill-down behavior remain intact when no baseline overlay is active.
+- The slice stays within existing reporting, API, and checklist-view surfaces.
+
 ### Out of Scope
 
-- Selecting the real pilot repository in-product
-- Persisting pilot-scope state or checklist state
-- Backend guardrails, API changes, or automation
-- Automatic task generation
-- Budget-math changes
-- Checklist or preflight logic changes
-- Multi-repo workflows
-- Complex refactors
-- Production or deploy changes
-- Comparative benchmarking against other tools
-- Executing the pilot itself
-
-### Success Criteria
-
-- Task completes within budget (time, cost, actions)
-- Human intervention required < 2 times
-- Evaluator confirms success
-- No regressions in test suite
+- Reworking the shipped `First Pilot Scope` panel
+- Running or automating a real external-validation pilot
+- Repository auto-discovery, cloning, or persistence
+- New metrics beyond the five documented checklist metrics
+- Aggregate checklist math changes
+- CLI task-level baseline comparison output
+- Multi-repo comparisons or repository history tracking
+- Persistence-schema changes, budget-policy changes, or evaluator-governance changes
+- Broad Web Console redesign beyond the existing checklist and task drill-down
 
 ---
 
@@ -225,7 +261,6 @@ The first pilot is intentionally cut to a single bounded task in a single extern
 
 ## Next Steps
 
-After Slice 3.1 approval:
-- Proceed to Slice 3.2: Implement verification checklist
-- Proceed to Slice 3.3: Execute first pilot task
-- Iterate on criteria based on pilot results
+- Keep Slices 3.1-3.3 as completed groundwork and pilot guardrails.
+- Proceed with Slice 3.4: task-level baseline comparison inside the existing checklist drill-down.
+- Defer real pilot execution until the task-level comparison slice is complete and reviewable.
