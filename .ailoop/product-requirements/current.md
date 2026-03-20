@@ -1,71 +1,72 @@
-# External-Validation Action-Bloat Docs/Test Requirement Refresh
+# External-Validation Action-Bloat Durable-Evidence Docs/Test Slice
 
 ## Problem
-The previous active requirement slice is complete, and the requirement artifact must be refreshed before normal implementation continues. The next bounded gap is narrower than runtime or UI feature work: the external-validation path already documents a deliberately small first pilot and already persists durable round evidence, but the active requirement set does not yet define how action bloat should be constrained in the external-validation docs/tests slice. Without a refreshed requirement, later work could sprawl into new metrics, new UI scope, or architecture changes instead of tightening the existing documentation and regression-test contract around persisted action evidence.
+Round 125 completed the prior requirement refresh, so the active artifact must now be superseded by exactly one new requirement-only slice before further implementation continues. The next bounded gap is still documentation-first: the external-validation path already relies on persisted round artifacts and the durable evidence handoff contract, but the current active requirements do not yet define how the next docs/tests follow-up should describe and verify action bloat without expanding into runtime, UI, or architecture work.
 
 ## Current Objective
-Define exactly one documentation-first requirement slice for the external-validation docs/tests follow-up on action bloat. This slice must state how later work should document and test bounded action usage by reusing the durable round evidence handoff contract that now governs round summaries, evaluation records, and persisted artifact paths. This round does not authorize code implementation.
+Define exactly one atomic requirement-only slice for the next external-validation docs/tests follow-up on action bloat. The next implementation round may update documentation and the smallest existing regression-test surface needed to explain and verify how action bloat is judged from the durable evidence handoff contract, using persisted round summaries, evaluation artifacts, metrics, and artifact paths. This round does not authorize code implementation.
 
 ## User Value
-Operators and follow-on implementation rounds get a narrow, reviewable contract for evaluating action bloat in the first external-validation pilot path. Later changes can stay small, evidence-backed, and re-runnable because they must rely on persisted round metrics and summary-first diagnostics instead of ad hoc logs or broad workflow expansion.
+Operators and follow-on implementation rounds get a narrow contract for reviewing action bloat from evidence that already exists in persisted round artifacts. This keeps the next step reviewable and re-runnable while preventing scope drift into new telemetry, broader workflow redesign, or architectural expansion.
 
 ## Scope
-- Refresh the active requirement artifact so it no longer points at the completed durable-evidence slice.
-- Define action bloat for the external-validation path as excess or unclear action usage relative to persisted round budget evidence, using existing round metrics and artifact references rather than new telemetry systems.
-- State that the follow-up is limited to documentation and regression-test surfaces for external-validation guidance and evidence checks.
-- Require the later docs/tests slice to stay aligned with the durable round evidence handoff contract: summary, evaluation, and verification must all point back to the same persisted round evidence.
+- Refresh the active requirement artifact so it supersedes the completed prior slice from round 125 with one new active requirement-only slice.
+- Limit the next follow-up to external-validation documentation and regression tests that explain how to detect action bloat from existing persisted round evidence.
+- Define action bloat for this slice as action usage that exceeds, obscures, or cannot be clearly reconciled with the bounded task's persisted action budget evidence and the durable evidence handoff contract.
+- Require the next follow-up to reuse the same persisted evidence bundle across operator-facing summaries, evaluator-facing diagnostics, and verification guidance instead of introducing alternate evidence paths.
+- Keep the intended future implementation surface narrow: update `docs/plans/external-validation.md` and, only if needed, the smallest existing regression-test surface that already exercises external-validation evidence reporting or checklist rendering.
 - Provide re-runnable verification steps for this refreshed requirement artifact only.
 
 ## Out of Scope
-- Runtime, server, reporting, CLI, schema, or Web Console implementation changes in this round.
-- New external-validation metrics, new artifact types, or changes to round persistence semantics.
-- Broad action-budget redesign, governance-policy changes, or constitutional reinterpretation.
-- Running an actual pilot, mutating test fixtures, or expanding external-validation beyond the existing bounded first-pilot path.
-- Architecture or UI expansion unrelated to the narrow docs/tests action bloat follow-up.
+- Runtime implementation changes in `src/`.
+- Server or API behavior changes.
+- CLI behavior or command-surface changes.
+- Schema, storage, or persistence-format changes.
+- Web Console implementation or UI redesign work.
+- Broader architectural, migration, infrastructure, or governance changes.
+- New telemetry, new artifact types, or new metrics beyond the persisted evidence already captured for rounds.
+- Running an actual external-validation pilot, creating new fixtures, or expanding the pilot scope beyond this docs/tests follow-up.
 
 ## Acceptance Criteria
-- The refreshed artifact explicitly names `external-validation` and `action bloat` as the only active follow-up topic.
-- The refreshed artifact explicitly states that this round is requirement-only and does not authorize code implementation.
-- The refreshed artifact defines the future slice as docs/tests-only and ties it to existing persisted budget evidence rather than new runtime instrumentation.
-- The refreshed artifact explicitly references the durable round evidence handoff contract and requires future verification to reuse the same persisted round evidence across summary, evaluation, and diagnostics.
-- The refreshed artifact includes an `Out of Scope` section that forbids unrelated code, architecture, or UI expansion.
-- The refreshed artifact includes re-runnable verification commands that confirm the file was refreshed and still contains the required scope-guard sections and focus terms.
+- The refreshed artifact contains exactly one active slice centered on `external-validation` and `action bloat`.
+- The refreshed artifact explicitly says, `This round does not authorize code implementation`.
+- The refreshed artifact defines the next follow-up as documentation and regression-test work only, grounded in the durable evidence handoff contract.
+- The refreshed artifact requires reuse of persisted round summaries, evaluation artifacts, metrics, and artifact paths as one evidence bundle for operator guidance, evaluator diagnostics, and verification.
+- The refreshed artifact includes an `Out of Scope` section that explicitly excludes runtime, server, CLI, schema, Web Console, and broader architectural work.
+- The refreshed artifact includes re-runnable verification commands that confirm the required sections and bounded-focus language are present.
 
 ## Design Expectations
-- Summary-first evidence remains the default: any future external-validation action-bloat documentation or tests must rely on persisted round metrics, evaluation artifacts, and summary references before considering raw logs.
-- The follow-up must stay deliberately narrow. If the existing persisted budget evidence is insufficient, that gap should be documented explicitly instead of using the requirement as permission to broaden runtime scope.
-- Regression tests in the later slice should validate documented evidence usage and scope boundaries, not introduce speculative behavior or alternate workflows.
-- Later docs/tests work must preserve the first-pilot discipline already documented for external-validation: one repository, one bounded task, and reviewable evidence.
+- Summary-first evidence remains the default. The next docs/tests slice must describe action bloat using persisted summaries and linked artifacts before falling back to raw log inspection.
+- The durable evidence handoff contract remains the source of truth for how persisted round evidence is traced across summary, evaluation, metrics, and artifact references.
+- If existing persisted evidence is insufficient to explain a specific action-bloat case, the follow-up should document that limitation explicitly instead of treating this slice as permission for new runtime instrumentation.
+- The next follow-up must stay small enough that existing tests can remain green without introducing unrelated product surfaces.
 
-## Proposed Documentation/Test Follow-Up
+## Proposed Next Slice
 
-### `docs/plans/external-validation.md`
-Add a small follow-up subsection that defines how the first pilot should judge action bloat from persisted round budget evidence. The subsection should describe action bloat as action usage that exceeds, obscures, or cannot be clearly reconciled with the bounded task's persisted action budget and round summary artifacts.
+### Documentation Target
+Add a short subsection to `docs/plans/external-validation.md` that explains how the first pilot should review action bloat using persisted round action-budget evidence and the durable evidence handoff contract. The subsection should describe the minimum evidence chain as: summary references, evaluation artifact references, metrics evidence, and persisted artifact paths for the same round bundle.
 
-### Regression-Test Expectations
-Limit the next implementation slice to tests and documentation that prove the external-validation path consumes existing persisted action evidence consistently. Candidate regression surfaces may include the external-validation reporting tests, control/report CLI tests, and console-facing tests, but only where they verify documented reuse of existing round evidence rather than introduce new feature scope.
-
-### Durable Evidence Constraint
-Any later docs/tests update for action bloat must reuse the durable evidence handoff contract already documented for round summaries and evaluation artifacts. The same persisted round evidence should remain traceable from verification guidance, evaluator-facing diagnostics, and operator-facing summaries.
+### Regression-Test Target
+If regression coverage is needed, constrain it to the smallest existing test surface that already exercises external-validation evidence reporting or checklist rendering. The test intent should be to prove that documented action-bloat guidance reuses existing persisted evidence consistently, not to add new behavior, new routes, or new presentation surfaces.
 
 ## Verification
 Run the following commands:
 
 ```sh
-git -C /Users/yinjames/projects/AILoop diff --name-only
-rg -n "Out of Scope|Acceptance Criteria|Verification|external-validation|action bloat" /Users/yinjames/projects/AILoop/.ailoop/product-requirements/current.md
+rg -n "^## Current Objective|^## Out of Scope|^## Acceptance Criteria|^## Verification" /Users/yinjames/projects/AILoop/.ailoop/product-requirements/current.md
+rg -n "This round does not authorize code implementation|external-validation|action bloat|durable evidence handoff" /Users/yinjames/projects/AILoop/.ailoop/product-requirements/current.md
 ```
 
 Expected verification outcome:
 
-- The `git diff --name-only` output includes `.ailoop/product-requirements/current.md`.
-- The `rg` output returns matches for the required sections and the narrow external-validation action-bloat focus terms.
+- The first `rg` command returns matches for `## Current Objective`, `## Out of Scope`, `## Acceptance Criteria`, and `## Verification`.
+- The second `rg` command returns matches for `This round does not authorize code implementation`, `external-validation`, `action bloat`, and `durable evidence handoff`.
 
 ## Open Questions
-None. The goal, senior-dev instruction, and durable evidence handoff contract are sufficient to refresh the active requirement artifact without expanding scope.
+None. The project goal, prior durable-evidence documentation, and the senior-dev scoping hint are sufficient to define this bounded requirement-only slice without authorizing implementation.
 
 ## Lifecycle Status
-- Status: active
-- Created In Round: 125
-- Previous Slice Status: complete in Round 124
-- Completion Target: requirement refresh for the narrow external-validation docs/tests action-bloat follow-up; no code implementation in this round
+- Status: ready
+- Created In Round: 126
+- Supersedes: round 125 requirement refresh marked complete
+- Authorization: requirement-only slice; no code implementation is authorized in this round
