@@ -8,6 +8,7 @@ import {
   CrashRecoveryPanel,
   ExternalValidationChecklistCard,
   Phase3CandidatePreflightCard,
+  Phase3PreRunVerificationCard,
   FailureDiagnosticsPanel,
   HotFileGovernancePanel,
   LifecycleStatusGrid,
@@ -806,6 +807,25 @@ describe("ExternalValidationChecklistCard", () => {
     expect(html).toContain("-1.17");
     expect(html).toContain("-$0.0634");
     expect(html).toContain("-8 lines");
+  });
+});
+
+describe("Phase3PreRunVerificationCard", () => {
+  test("renders the documented operator checklist before an external-validation pilot starts", () => {
+    const html = renderToStaticMarkup(<Phase3PreRunVerificationCard />);
+
+    expect(html).toContain("Phase 3 Operator Guardrail");
+    expect(html).toContain("Pre-Run Verification Checklist");
+    expect(html).toContain("Manual operator confirmation only.");
+    expect(html).toContain("4 manual checks");
+    expect(html).toContain("Baseline test evidence");
+    expect(html).toContain("Run the local baseline test suite before the pilot starts");
+    expect(html).toContain("Working state");
+    expect(html).toContain("record the branch, commit");
+    expect(html).toContain("Metrics capture");
+    expect(html).toContain("rounds per successful task, human interventions, cost per round");
+    expect(html).toContain("Rollback preparation");
+    expect(html).toContain("Create a rollback checkpoint");
   });
 });
 

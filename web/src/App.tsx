@@ -359,6 +359,41 @@ const preflightStatusTone = {
   blocked: "border-ember/40 bg-ember/10 text-ember"
 } as const;
 
+const phase3PreRunVerificationChecklist = [
+  {
+    label: "1. Baseline test evidence",
+    title: "Prove the untouched repository is green",
+    summary:
+      "Run the local baseline test suite before the pilot starts and record the exact command plus the passing result.",
+    operatorOutput: "Capture the baseline test command and timestamp in the pilot notes.",
+    accent: "border-accent/30 bg-accent/10 text-accent"
+  },
+  {
+    label: "2. Working state",
+    title: "Document the known-good starting point",
+    summary:
+      "Confirm local clone or access, then record the branch, commit, and any repo-specific context that defines the safe starting state.",
+    operatorOutput: "Keep the repo path, branch name, and commit SHA visible to reviewers.",
+    accent: "border-sky-300/25 bg-sky-300/10 text-sky-100"
+  },
+  {
+    label: "3. Metrics capture",
+    title: "Prepare the comparison surface before execution",
+    summary:
+      "Be ready to capture rounds per successful task, human interventions, cost per round, evaluator infrastructure failures, and hot-file growth for the pilot.",
+    operatorOutput: "Optional baseline runs overlays should be resolved before the first comparison review.",
+    accent: "border-warning/35 bg-warning/10 text-warning"
+  },
+  {
+    label: "4. Rollback preparation",
+    title: "Set the recovery path before edits begin",
+    summary:
+      "Create a rollback checkpoint and verify the operator can restore the repository if the pilot fails or exits early.",
+    operatorOutput: "Record the backup branch, stash, or reset strategy before starting the run.",
+    accent: "border-ember/35 bg-ember/10 text-ember"
+  }
+] as const;
+
 const failureDiagnosticsTone: Record<FailureDiagnosticsTone, string> = {
   neutral: "border-white/10 bg-ink/60 text-mist/80",
   warning: "border-warning/40 bg-warning/10 text-warning",
@@ -1830,6 +1865,67 @@ export function Phase3CandidatePreflightCard({
   );
 }
 
+export function Phase3PreRunVerificationCard() {
+  return (
+    <section className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-ink/60 shadow-[0_0_0_1px_rgba(255,255,255,0.04)]">
+      <div className="border-b border-white/10 bg-[linear-gradient(135deg,rgba(80,170,255,0.16),rgba(8,11,20,0.88)_50%,rgba(102,255,187,0.12))] p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-mist/70">Phase 3 Operator Guardrail</p>
+            <h2 className="mt-1 text-xl font-semibold text-mist">Pre-Run Verification Checklist</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-mist/70">
+              Review this manual checklist after the candidate preflight passes and before an external-validation pilot
+              starts. The goal is to keep the runbook summary-first without adding stored checklist state.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-panel/60 px-4 py-3 text-right">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-mist/55">Use this before</p>
+            <p className="mt-2 text-lg font-semibold text-mist">pilot execution</p>
+            <p className="mt-1 text-xs text-mist/60">Manual operator confirmation only.</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-4">
+        <div className="rounded-2xl border border-white/10 bg-panel/45 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-mist/55">Summary-first runbook</p>
+              <p className="mt-2 text-lg font-semibold text-mist">Keep the pilot reversible, measurable, and easy to audit.</p>
+            </div>
+            <span className="rounded-full border border-white/10 bg-ink/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-mist/65">
+              4 manual checks
+            </span>
+          </div>
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-mist/70">
+            The existing preflight card answers whether a repository is eligible. These checks answer whether the operator
+            has captured enough evidence to run the pilot safely.
+          </p>
+        </div>
+
+        <div className="mt-4 grid gap-3 xl:grid-cols-2">
+          {phase3PreRunVerificationChecklist.map((item) => (
+            <article key={item.label} className={`rounded-2xl border p-4 ${item.accent}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-current/80">{item.label}</p>
+                  <h3 className="mt-3 text-lg font-semibold text-mist">{item.title}</h3>
+                </div>
+                <span className="mt-1 h-2.5 w-2.5 rounded-full bg-current shadow-[0_0_10px_currentColor]" />
+              </div>
+              <p className="mt-3 text-sm leading-6 text-mist/80">{item.summary}</p>
+              <div className="mt-4 rounded-2xl border border-current/15 bg-ink/55 px-4 py-3">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-current/80">Operator output</p>
+                <p className="mt-2 text-sm leading-6 text-mist/80">{item.operatorOutput}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export function ExternalValidationChecklistCard({
   report,
   baselineRunsDir = "",
@@ -2795,6 +2891,7 @@ export default function App() {
           }}
           onSubmit={() => void submitExternalValidationPreflight()}
         />
+        <Phase3PreRunVerificationCard />
         <ExternalValidationChecklistCard
           report={externalValidation}
           baselineRunsDir={baselineRunsDirInput}
