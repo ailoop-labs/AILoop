@@ -1654,9 +1654,15 @@ describe("LoopEngine auto rework", () => {
 
     expect(outcome.success).toBe(false);
     const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+    const evaluationFile = runArtifacts.find((entry) => entry.endsWith(".round.evaluation.json"));
+    const logFile = runArtifacts.find((entry) => entry.endsWith(".round.log"));
     const metricsFile = runArtifacts.find((entry) => entry.endsWith(".round.metrics.json"));
+    const stateChangeFile = runArtifacts.find((entry) => entry.endsWith(".round.state_change.txt"));
     const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
+    expect(evaluationFile).toBeDefined();
+    expect(logFile).toBeDefined();
     expect(metricsFile).toBeDefined();
+    expect(stateChangeFile).toBeDefined();
     expect(summaryFile).toBeDefined();
 
     const metrics = JSON.parse(
@@ -1664,8 +1670,25 @@ describe("LoopEngine auto rework", () => {
     ) as Record<string, unknown>;
     expect(metrics.failure_mode).toBe("planning_failure");
 
+    const evaluationPath = path.join(homeDir, "runs", evaluationFile as string);
+    const evaluation = JSON.parse(await fs.readFile(evaluationPath, "utf8")) as Record<string, unknown>;
+    expect(evaluation.decision).toBe("fail");
+    expect(evaluation.justification).toBe("Planner AI CLI rate-limited and timed out before returning a sub-task.");
+    expect(evaluation.root_cause).toBe("planning_failure:pre_evaluation_infrastructure");
+
     const summaryText = await fs.readFile(path.join(homeDir, "runs", summaryFile as string), "utf8");
     expect(summaryText).toContain("- Failure Mode: planning_failure");
+    expect(summaryText).toContain(`- Evaluation: ${evaluationPath}`);
+
+    const persistedState = await readLoopState(paths);
+    expect(persistedState.state).toBe("paused");
+    expect(persistedState.previous_tool_result?.artifacts.log_path).toBe(path.join(homeDir, "runs", logFile as string));
+    expect(persistedState.previous_tool_result?.artifacts.state_change_path).toBe(
+      path.join(homeDir, "runs", stateChangeFile as string)
+    );
+    expect(persistedState.previous_tool_result?.artifacts.bundle_path).toBe(
+      path.join(homeDir, "runs", summaryFile as string)
+    );
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });

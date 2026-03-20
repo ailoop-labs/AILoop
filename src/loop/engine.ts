@@ -439,6 +439,35 @@ function withPriorSuccessfulExecution(toolResult: ToolResult, priorSuccessfulSum
   };
 }
 
+function buildPreEvaluationFailureEvaluation(input: {
+  failureMessage: string;
+  plannerInfrastructureFailure: boolean;
+  artifacts: {
+    logPath: string;
+    summaryPath: string;
+    stateChangePath: string;
+    evaluationPath: string;
+  };
+}): EvaluationResult {
+  return {
+    decision: "fail",
+    justification: input.failureMessage,
+    root_cause: input.plannerInfrastructureFailure
+      ? "planning_failure:pre_evaluation_infrastructure"
+      : "execution_failure:pre_evaluation_round_error",
+    evidence: [
+      input.failureMessage,
+      `Round log artifact: ${input.artifacts.logPath}`,
+      `Round state change artifact: ${input.artifacts.stateChangePath}`,
+      `Round summary artifact: ${input.artifacts.summaryPath}`,
+      `Round evaluation artifact: ${input.artifacts.evaluationPath}`
+    ],
+    recommended_next_action: input.plannerInfrastructureFailure
+      ? "pause and inspect planner/provider failure before retrying the round"
+      : "pause and inspect round error"
+  };
+}
+
 function buildSummaryActionsWithPriorSuccess(
   successfulActions: ActionRecord[],
   failureMessage: string
@@ -1287,7 +1316,8 @@ export class LoopEngine {
           : "Round failed before evaluation completed.",
         artifacts: {
           log_path: artifacts.logPath,
-          state_change_path: artifacts.stateChangePath
+          state_change_path: artifacts.stateChangePath,
+          bundle_path: artifacts.summaryPath
         },
         error: {
           type: errorType,
@@ -1340,24 +1370,24 @@ export class LoopEngine {
         hot_file_growth_lines: 0,
         ...(subTaskIdentity ? { sub_task_identity: subTaskIdentity } : {})
       };
+      const failureEvaluation = buildPreEvaluationFailureEvaluation({
+        failureMessage,
+        plannerInfrastructureFailure,
+        artifacts
+      });
 
       await writeStateChangeFile(artifacts.stateChangePath, stateChange);
       await log(`Round error: ${message}`);
       await writeLogFile(artifacts.logPath, logLines);
+      await writeEvaluationFile(artifacts.evaluationPath, failureEvaluation);
       await writeMetricsFile(artifacts.metricsPath, metrics);
+      await saveEvaluation(this.paths, round, failureEvaluation);
       await writeSummaryFile(artifacts.summaryPath, {
         goal,
         subTask,
         actions: [],
         toolResult: failureToolResult,
-        evaluation: {
-          decision: "fail",
-          justification: failureMessage,
-          evidence: [failureMessage],
-          recommended_next_action: plannerInfrastructureFailure
-            ? "pause and inspect planner/provider failure before retrying the round"
-            : "pause and inspect round error"
-        },
+        evaluation: failureEvaluation,
         metrics,
         stateChange,
         risks: [failureMessage],
