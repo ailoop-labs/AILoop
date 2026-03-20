@@ -213,6 +213,12 @@ Operators should report action bloat from the persisted evidence bundle in a fix
 5. When the action count stays below the persisted limit, report the evidence as descriptive and non-CCB. Below-threshold cases are not CCB-worthy unless a separate documented escalation trigger is met.
 6. Keep `stable_id` explicit in both the summary line and the targeted artifact handoff so repeated pilot work is reviewed by durable task identity instead of title matching.
 
+### Round 121 Workflow-First Failure Analysis
+
+For `2026-03-20T01-40-18-087Z`, the persisted summary, log, metrics, and state-change artifacts show the workflow failure path without requiring new telemetry. The log records `Executor Codex execution finished (ok=true)` at `01:46:14` before evaluation continued, so executor work completed successfully before evaluation packaging finished. The same summary then points to `/Users/yinjames/projects/AILoop/.ailoop/runs/2026-03-20T01-40-18-087Z.round.evaluation.json`, but that canonical evaluation artifact is absent while the summary, log, metrics, and state-change files were persisted, which makes this an evaluator-packaging gap rather than an executor-output gap.
+
+The same evidence bundle also explains the action-budget overrun: after `Evaluator completed LLM dimension checks (decision=fail)`, the log shows `[GOVERNANCE] Tactical Rework attempt 1/3`, and the metrics file ends at `budget_usage.actionsUsed: 11` against `budget_limits.actions: 10` (`11 / 10`). The round therefore terminated with `BudgetBreach: action budget exceeded` before another evaluation package could be persisted. When action-budget evidence stays below the persisted limit it remains descriptive and non-CCB, unless the already documented escalation triggers in `Decision Branch B` or `Decision Branch C` apply; Round 121 crossed the limit, so this note records a budget-breach workflow failure without inventing a new action-count rule.
+
 ### Web Console Implication
 
 - Mirror the same summary-first contract inside the `External Validation Checklist` as a single `Most action-heavy round` panel.
