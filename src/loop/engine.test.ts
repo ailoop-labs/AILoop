@@ -91,6 +91,46 @@ function makeAction(tool: string): ActionRecord {
   };
 }
 
+function buildCanonicalEvaluationPath(homeDir: string, runTimestamp: string): string {
+  return path.join(homeDir, "runs", `${runTimestamp}.round.evaluation.json`);
+}
+
+async function expectCanonicalEvaluationArtifact(homeDir: string): Promise<{
+  evaluationPath: string;
+  evaluationText: string;
+  evaluation: EvaluationResult;
+  summaryText: string;
+}> {
+  const runsDir = path.join(homeDir, "runs");
+  const runArtifacts = await fs.readdir(runsDir);
+  const evaluationFiles = runArtifacts.filter((entry) => entry.endsWith(".round.evaluation.json"));
+  const metricsFile = runArtifacts.find((entry) => entry.endsWith(".round.metrics.json"));
+  const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
+
+  expect(evaluationFiles).toHaveLength(1);
+  expect(metricsFile).toBeDefined();
+  expect(summaryFile).toBeDefined();
+
+  const metrics = JSON.parse(await fs.readFile(path.join(runsDir, metricsFile as string), "utf8")) as {
+    run_timestamp: string;
+  };
+  const evaluationPath = buildCanonicalEvaluationPath(homeDir, metrics.run_timestamp);
+  const summaryPath = path.join(runsDir, summaryFile as string);
+  const evaluationText = await fs.readFile(evaluationPath, "utf8");
+  const summaryText = await fs.readFile(summaryPath, "utf8");
+
+  expect(path.join(runsDir, evaluationFiles[0] as string)).toBe(evaluationPath);
+  expect(evaluationText.trim().length).toBeGreaterThan(0);
+  expect(summaryText).toContain(`- Evaluation: ${evaluationPath}`);
+
+  return {
+    evaluationPath,
+    evaluationText,
+    evaluation: JSON.parse(evaluationText) as EvaluationResult,
+    summaryText
+  };
+}
+
 describe("extractSnapshotTargetsFromSubTask", () => {
   async function createWorkspace(files: string[]): Promise<string> {
     const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-snapshot-targets-"));
@@ -1783,24 +1823,27 @@ describe("LoopEngine auto rework", () => {
       })
     };
     mutable.evaluator = {
-      evaluate: async () => makeEvaluation("fail", "Executor failed before finishing the sub-task.")
+      evaluate: async ({ runTimestamp }: RoundEvaluationContext) => ({
+        ...makeEvaluation("fail", "Executor failed before finishing the sub-task."),
+        evidence: ["test-evidence", `Round evaluation artifact: ${buildCanonicalEvaluationPath(homeDir, runTimestamp)}`]
+      })
     };
 
     const outcome = await mutable.runRound(1);
 
     expect(outcome.success).toBe(false);
+    const { evaluationPath, evaluationText, evaluation, summaryText } = await expectCanonicalEvaluationArtifact(homeDir);
     const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
     const metricsFile = runArtifacts.find((entry) => entry.endsWith(".round.metrics.json"));
-    const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
     expect(metricsFile).toBeDefined();
-    expect(summaryFile).toBeDefined();
 
-    const metrics = JSON.parse(
-      await fs.readFile(path.join(homeDir, "runs", metricsFile as string), "utf8")
-    ) as Record<string, unknown>;
+    const metrics = JSON.parse(await fs.readFile(path.join(homeDir, "runs", metricsFile as string), "utf8")) as Record<
+      string,
+      unknown
+    >;
     expect(metrics.failure_mode).toBe("execution_failure");
-
-    const summaryText = await fs.readFile(path.join(homeDir, "runs", summaryFile as string), "utf8");
+    expect(evaluationText).toContain("\"decision\": \"fail\"");
+    expect(evaluation.evidence).toContain(`Round evaluation artifact: ${evaluationPath}`);
     expect(summaryText).toContain("- Failure Mode: execution_failure");
 
     await fs.rm(homeDir, { recursive: true, force: true });
@@ -1902,12 +1945,15 @@ describe("LoopEngine auto rework", () => {
     };
 
     let evalCall = 0;
-    const evaluate = async (): Promise<EvaluationResult> => {
+    const evaluate = async ({ runTimestamp }: RoundEvaluationContext): Promise<EvaluationResult> => {
       evalCall += 1;
       if (evalCall === 1) {
         return makeEvaluation("fail", "Missing negative tests for edge cases.");
       }
-      return makeEvaluation("pass", "All checks satisfied.");
+      return {
+        ...makeEvaluation("pass", "All checks satisfied."),
+        evidence: ["test-evidence", `Round evaluation artifact: ${buildCanonicalEvaluationPath(homeDir, runTimestamp)}`]
+      };
     };
 
     const mutable = engine as unknown as {
@@ -1951,6 +1997,9 @@ describe("LoopEngine auto rework", () => {
     expect(summaryText).toContain("Attempt 1/1:");
     expect(summaryText).toContain("trigger='Missing negative tests for edge cases.'");
     expect(summaryText).toContain("evaluation=pass");
+    const { evaluationPath, evaluationText, evaluation } = await expectCanonicalEvaluationArtifact(homeDir);
+    expect(evaluationText).toContain("\"decision\": \"pass\"");
+    expect(evaluation.evidence).toContain(`Round evaluation artifact: ${evaluationPath}`);
 
     await fs.rm(homeDir, { recursive: true, force: true });
   });
@@ -1984,15 +2033,24 @@ describe("LoopEngine auto rework", () => {
     };
 
     let evaluationCall = 0;
-    const evaluate = async (): Promise<EvaluationResult> => {
+    const evaluate = async ({ runTimestamp }: RoundEvaluationContext): Promise<EvaluationResult> => {
       evaluationCall += 1;
       if (evaluationCall === 1) {
-        return makeEvaluation("fail", "Missing rollback coverage for the paused path.");
+        return {
+          ...makeEvaluation("fail", "Missing rollback coverage for the paused path."),
+          evidence: ["test-evidence", `Round evaluation artifact: ${buildCanonicalEvaluationPath(homeDir, runTimestamp)}`]
+        };
       }
       if (evaluationCall === 2) {
-        return makeEvaluation("fail", "History still drops the first rework attempt.");
+        return {
+          ...makeEvaluation("fail", "History still drops the first rework attempt."),
+          evidence: ["test-evidence", `Round evaluation artifact: ${buildCanonicalEvaluationPath(homeDir, runTimestamp)}`]
+        };
       }
-      return makeEvaluation("fail", "Final paused summary still needs both rework attempts.");
+      return {
+        ...makeEvaluation("fail", "Final paused summary still needs both rework attempts."),
+        evidence: ["test-evidence", `Round evaluation artifact: ${buildCanonicalEvaluationPath(homeDir, runTimestamp)}`]
+      };
     };
 
     let releaseLeader = () => {};
@@ -2057,6 +2115,9 @@ describe("LoopEngine auto rework", () => {
       expect(summaryText).toContain(
         "Paused for operator review after 2 auto rework attempts still ended in evaluator failure."
       );
+      const { evaluationPath, evaluationText, evaluation } = await expectCanonicalEvaluationArtifact(homeDir);
+      expect(evaluationText).toContain("\"decision\": \"fail\"");
+      expect(evaluation.evidence).toContain(`Round evaluation artifact: ${evaluationPath}`);
 
       releaseLeader();
     } finally {

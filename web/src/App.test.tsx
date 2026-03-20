@@ -70,6 +70,8 @@ function makeReport(overrides: Partial<RoundReport> = {}): RoundReport {
     budgetCost: "0.08",
     budgetTime: "3200",
     budgetActions: "4",
+    autoReworkAttempts: [],
+    roundOutcome: [],
     dimensionBreakdown: [],
     nextRecommendation: "Continue",
     ...overrides
@@ -93,6 +95,14 @@ function makeRunHistoryItem(overrides: Partial<RunHistoryItem> = {}): RunHistory
       "- Cost USD: 0.02",
       "- Time ms: 2200",
       "- Actions: 3",
+      "",
+      "## Auto Rework Attempts",
+      "- Attempt 1/2: trigger='Missing rollback coverage for the paused path.' evaluation=fail",
+      "- Attempt 2/2: trigger='History still drops the first rework attempt.' evaluation=fail",
+      "",
+      "## Round Outcome",
+      "- Paused for operator review after 2 auto rework attempts still ended in evaluator failure.",
+      "- Next safe action: Split the next change into a bounded follow-up.",
       "",
       "## Next Round Recommendation",
       "Split the next change into a bounded follow-up."
@@ -560,6 +570,34 @@ describe("RunHistoryCard", () => {
     expect(html).toContain("File: src/loop/control.ts");
     expect(html).toContain("Reason: paused history kept the governance signal after evaluation details were trimmed");
     expect(html).toContain("review the paused run and split the next edit into a bounded follow-up");
+  });
+
+  test("renders summary-first auto-rework history and paused outcome when evaluation artifacts were trimmed", () => {
+    const html = renderToStaticMarkup(
+      <RunHistoryCard
+        run={makeRunHistoryItem({
+          evaluation: null,
+          artifacts: {
+            kind: "partial_bundle",
+            label: "Partial evidence bundle",
+            present: ["log", "summary"],
+            missing: ["metrics", "state_change", "evaluation"]
+          }
+        })}
+        index={0}
+        startIndex={0}
+        onOpenArtifacts={() => {}}
+      />
+    );
+
+    expect(html).toContain("Incomplete evidence");
+    expect(html).toContain("Governance History");
+    expect(html).toContain("Auto-Rework Attempts");
+    expect(html).toContain("Attempt 1/2: trigger=&#x27;Missing rollback coverage for the paused path.&#x27; evaluation=fail");
+    expect(html).toContain("Attempt 2/2: trigger=&#x27;History still drops the first rework attempt.&#x27; evaluation=fail");
+    expect(html).toContain("Round Outcome");
+    expect(html).toContain("Paused for operator review after 2 auto rework attempts still ended in evaluator failure.");
+    expect(html).toContain("Next safe action: Split the next change into a bounded follow-up.");
   });
 });
 

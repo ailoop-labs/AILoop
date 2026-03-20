@@ -35,6 +35,14 @@ function makeSummary(): string {
 - Justification: Parsed markdown should only be fallback data.
 - Evidence: bun test web/src/App.test.tsx
 
+## Auto Rework Attempts
+- Attempt 1/2: trigger='Missing rollback coverage for the paused path.' evaluation=fail
+- Attempt 2/2: trigger='History still drops the first rework attempt.' evaluation=fail
+
+## Round Outcome
+- Paused for operator review after 2 auto rework attempts still ended in evaluator failure.
+- Next safe action: Inspect the evaluator findings and narrow the next sub-task before resuming.
+
 ## Budget
 - Cost USD: 0.12
 - Time ms: 4200
@@ -108,6 +116,14 @@ describe("projectRunHistoryReport", () => {
     expect(report.justification).toBe("Structured evaluation should override summary parsing.");
     expect(report.evidence).toBe("bun test web/src/run-history.test.ts | bun run web:build");
     expect(report.aggregateScore).toBe("96");
+    expect(report.autoReworkAttempts).toEqual([
+      "Attempt 1/2: trigger='Missing rollback coverage for the paused path.' evaluation=fail",
+      "Attempt 2/2: trigger='History still drops the first rework attempt.' evaluation=fail"
+    ]);
+    expect(report.roundOutcome).toEqual([
+      "Paused for operator review after 2 auto rework attempts still ended in evaluator failure.",
+      "Next safe action: Inspect the evaluator findings and narrow the next sub-task before resuming."
+    ]);
     expect(report.nextRecommendation).toBe("Proceed to the next planner task.");
     expect(report.dimensionBreakdown).toEqual([
       {
@@ -163,6 +179,14 @@ describe("projectRunHistoryReport", () => {
     expect(report.justification).toBe("Parsed markdown should only be fallback data.");
     expect(report.evidence).toBe("bun test web/src/App.test.tsx");
     expect(report.aggregateScore).toBe("N/A");
+    expect(report.autoReworkAttempts).toEqual([
+      "Attempt 1/2: trigger='Missing rollback coverage for the paused path.' evaluation=fail",
+      "Attempt 2/2: trigger='History still drops the first rework attempt.' evaluation=fail"
+    ]);
+    expect(report.roundOutcome).toEqual([
+      "Paused for operator review after 2 auto rework attempts still ended in evaluator failure.",
+      "Next safe action: Inspect the evaluator findings and narrow the next sub-task before resuming."
+    ]);
     expect(report.dimensionBreakdown).toEqual([]);
     expect(report.nextRecommendation).toBe("Fallback next step from summary");
   });

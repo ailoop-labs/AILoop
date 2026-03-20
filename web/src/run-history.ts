@@ -97,6 +97,8 @@ export interface RoundReport {
   budgetCost: string;
   budgetTime: string;
   budgetActions: string;
+  autoReworkAttempts: string[];
+  roundOutcome: string[];
   dimensionBreakdown: RoundReportDimension[];
   nextRecommendation: string;
 }
@@ -148,6 +150,11 @@ function parseMarkdownList(section: string): string[] {
   return items;
 }
 
+function parseOptionalMarkdownList(section: string, emptyState: string): string[] {
+  const items = parseMarkdownList(section);
+  return items.length === 1 && items[0] === emptyState ? [] : items;
+}
+
 function parseRoundReport(summary: string): RoundReport {
   return {
     objective: extractBulletValue(summary, "Objective") ?? "No objective captured",
@@ -166,6 +173,11 @@ function parseRoundReport(summary: string): RoundReport {
     budgetCost: extractBulletValue(summary, "Cost USD") ?? "N/A",
     budgetTime: extractBulletValue(summary, "Time ms") ?? "N/A",
     budgetActions: extractBulletValue(summary, "Actions") ?? "N/A",
+    autoReworkAttempts: parseOptionalMarkdownList(
+      extractMarkdownSection(summary, "Auto Rework Attempts"),
+      "No auto rework attempts were executed."
+    ),
+    roundOutcome: parseMarkdownList(extractMarkdownSection(summary, "Round Outcome")),
     aggregateScore: "N/A",
     dimensionBreakdown: [],
     nextRecommendation: extractMarkdownSection(summary, "Next Round Recommendation") || "No recommendation captured"

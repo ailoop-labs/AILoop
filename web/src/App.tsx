@@ -1486,6 +1486,7 @@ export function RunHistoryCard({
   const artifacts = resolveRunArtifactPresence(run);
   const hotFileGovernance = run.hot_file_governance ?? run.evaluation?.hot_file_governance ?? null;
   const incompleteEvidence = artifacts.kind !== "full_bundle";
+  const hasGovernanceHistory = report.autoReworkAttempts.length > 0 || report.roundOutcome.length > 0;
   const parsedTimestamp = parseRunTimestamp(run.timestamp);
   const displayTimestamp = formatRunTimestamp(run.timestamp);
 
@@ -1541,6 +1542,31 @@ export function RunHistoryCard({
           <p className="mt-3 text-xs text-mist/65">
             Available summary: {run.summary.trim() ? "yes" : "no"} | Metrics: {run.metrics ? "yes" : "no"} | Evaluation: {run.evaluation ? "yes" : "no"}
           </p>
+          {hasGovernanceHistory ? (
+            <div className="mt-3 rounded-xl border border-warning/25 bg-warning/10 p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-warning">Governance History</p>
+              {report.autoReworkAttempts.length > 0 ? (
+                <div className="mt-2">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-mist/60">Auto-Rework Attempts</p>
+                  <ul className="mt-2 space-y-1 text-xs text-mist/80">
+                    {report.autoReworkAttempts.map((attempt) => (
+                      <li key={`${run.timestamp}-attempt-${attempt}`}>{attempt}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {report.roundOutcome.length > 0 ? (
+                <div className="mt-3">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-mist/60">Round Outcome</p>
+                  <ul className="mt-2 space-y-1 text-xs text-mist/80">
+                    {report.roundOutcome.map((item) => (
+                      <li key={`${run.timestamp}-outcome-${item}`}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </>
       ) : (
         <>
@@ -1591,6 +1617,31 @@ export function RunHistoryCard({
                   <p className="mt-2 text-xs text-mist/60">Next: {dimension.nextRecommendation}</p>
                 </div>
               ))}
+            </div>
+          ) : null}
+          {hasGovernanceHistory ? (
+            <div className="mt-3 rounded-xl border border-warning/25 bg-warning/10 p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-warning">Governance History</p>
+              {report.autoReworkAttempts.length > 0 ? (
+                <div className="mt-2">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-mist/60">Auto-Rework Attempts</p>
+                  <ul className="mt-2 space-y-1 text-xs text-mist/80">
+                    {report.autoReworkAttempts.map((attempt) => (
+                      <li key={`${run.timestamp}-attempt-${attempt}`}>{attempt}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {report.roundOutcome.length > 0 ? (
+                <div className="mt-3">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-mist/60">Round Outcome</p>
+                  <ul className="mt-2 space-y-1 text-xs text-mist/80">
+                    {report.roundOutcome.map((item) => (
+                      <li key={`${run.timestamp}-outcome-${item}`}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </div>
           ) : null}
           <p className="mt-2 text-xs text-mist/65">Next: {report.nextRecommendation}</p>
