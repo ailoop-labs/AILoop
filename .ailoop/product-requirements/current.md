@@ -1,128 +1,71 @@
-# Durable Round Evidence Handoff and Pause-Safe Persistence
+# External-Validation Action-Bloat Docs/Test Requirement Refresh
 
 ## Problem
-The previous active requirement slice is complete, so the product requirement artifact must be refreshed before implementation continues. The next slice needs to close a documentation gap exposed by evidence handoff failure risk: the current docs require compact evaluator handoffs and reviewable artifacts, but they do not yet define the minimum durable round record across evaluation packaging, summary generation, artifact write paths, pause semantics, and crash-safe persistence when a round is interrupted or evaluator infrastructure fails.
+The previous active requirement slice is complete, and the requirement artifact must be refreshed before normal implementation continues. The next bounded gap is narrower than runtime or UI feature work: the external-validation path already documents a deliberately small first pilot and already persists durable round evidence, but the active requirement set does not yet define how action bloat should be constrained in the external-validation docs/tests slice. Without a refreshed requirement, later work could sprawl into new metrics, new UI scope, or architecture changes instead of tightening the existing documentation and regression-test contract around persisted action evidence.
 
 ## Current Objective
-Define exactly one documentation-first requirement slice for durable round evidence handoff. This slice must clarify how evaluation packaging, summary generation, artifact write paths, pause semantics, and crash-safe persistence stay consistent for a single round, especially when evaluator infrastructure fails, pause occurs before normal completion, or crash recovery resumes an interrupted round.
+Define exactly one documentation-first requirement slice for the external-validation docs/tests follow-up on action bloat. This slice must state how later work should document and test bounded action usage by reusing the durable round evidence handoff contract that now governs round summaries, evaluation records, and persisted artifact paths. This round does not authorize code implementation.
 
 ## User Value
-Operators and later runtime roles can reliably inspect what happened in an affected round without confusing task-quality failure with loop-infrastructure failure. A round remains summary-first and reviewable while still preserving enough durable evidence to support safe pause, crash recovery, and governance decisions.
+Operators and follow-on implementation rounds get a narrow, reviewable contract for evaluating action bloat in the first external-validation pilot path. Later changes can stay small, evidence-backed, and re-runnable because they must rely on persisted round metrics and summary-first diagnostics instead of ad hoc logs or broad workflow expansion.
 
 ## Scope
-- Define the documentation contract for reusing one round artifact path set across evaluation packaging, summary generation, and persisted round outputs.
-- Define the minimum durable round record that must exist before the engine treats a round transition as safely complete.
-- Define how evaluator infrastructure failure is recorded without dropping the round summary or artifact references.
-- Define crash-recovery expectations for partially written round artifacts.
-- Provide diff-ready documentation-only updates for the governing docs.
-- Provide rerunnable verification steps for this requirement artifact.
+- Refresh the active requirement artifact so it no longer points at the completed durable-evidence slice.
+- Define action bloat for the external-validation path as excess or unclear action usage relative to persisted round budget evidence, using existing round metrics and artifact references rather than new telemetry systems.
+- State that the follow-up is limited to documentation and regression-test surfaces for external-validation guidance and evidence checks.
+- Require the later docs/tests slice to stay aligned with the durable round evidence handoff contract: summary, evaluation, and verification must all point back to the same persisted round evidence.
+- Provide re-runnable verification steps for this refreshed requirement artifact only.
 
-## Non-Goals
-- Code changes outside requirement documentation.
-- Schema migrations or new storage backends.
-- Changes to budget thresholds, scoring policy, or planner scope selection.
-- UI redesign beyond documenting evidence visibility expectations.
-- New speculative artifact types or workflow branches not required to preserve one round's durable evidence handoff.
+## Out of Scope
+- Runtime, server, reporting, CLI, schema, or Web Console implementation changes in this round.
+- New external-validation metrics, new artifact types, or changes to round persistence semantics.
+- Broad action-budget redesign, governance-policy changes, or constitutional reinterpretation.
+- Running an actual pilot, mutating test fixtures, or expanding external-validation beyond the existing bounded first-pilot path.
+- Architecture or UI expansion unrelated to the narrow docs/tests action bloat follow-up.
 
 ## Acceptance Criteria
-- The requirement slice explicitly states that evaluation packaging and summary generation must reuse the same round artifact write paths reserved for that round.
-- The requirement slice explicitly defines the minimum durable round record required before transitions to `cooldown`, `paused`, `stopping`, or `error`.
-- The requirement slice explicitly requires evaluator infrastructure failure to emit a persisted evaluation record that is distinguishable from ordinary task-quality failure.
-- The requirement slice explicitly requires pause semantics to preserve durable evidence before a round is considered safely paused, except where crash recovery must take over after process death.
-- The requirement slice explicitly requires crash-safe persistence to preserve partial round evidence, mark incomplete artifacts clearly, and surface those gaps through summary-first diagnostics instead of silent omission.
-- The proposed documentation changes remain documentation-only and do not prescribe low-level implementation structure or round-level execution tasks.
+- The refreshed artifact explicitly names `external-validation` and `action bloat` as the only active follow-up topic.
+- The refreshed artifact explicitly states that this round is requirement-only and does not authorize code implementation.
+- The refreshed artifact defines the future slice as docs/tests-only and ties it to existing persisted budget evidence rather than new runtime instrumentation.
+- The refreshed artifact explicitly references the durable round evidence handoff contract and requires future verification to reuse the same persisted round evidence across summary, evaluation, and diagnostics.
+- The refreshed artifact includes an `Out of Scope` section that forbids unrelated code, architecture, or UI expansion.
+- The refreshed artifact includes re-runnable verification commands that confirm the file was refreshed and still contains the required scope-guard sections and focus terms.
 
 ## Design Expectations
-- Human-facing diagnostics remain summary-first: show round outcome, evidence completeness status, failure class, and artifact references before any deep drill-down.
-- If evidence is incomplete, the operator-visible summary and leader handoff must say which artifact is missing, incomplete, or unavailable instead of silently collapsing the gap into prose.
-- Raw logs and large state-change artifacts remain drill-down material. Primary views should preserve pattern recognition through concise status, explicit artifact references, and targeted excerpts only.
-- Evaluator infrastructure failure, normal evaluator fail, budget-triggered pause, and crash-recovery pause must remain visually and semantically distinct in operator-facing summaries.
+- Summary-first evidence remains the default: any future external-validation action-bloat documentation or tests must rely on persisted round metrics, evaluation artifacts, and summary references before considering raw logs.
+- The follow-up must stay deliberately narrow. If the existing persisted budget evidence is insufficient, that gap should be documented explicitly instead of using the requirement as permission to broaden runtime scope.
+- Regression tests in the later slice should validate documented evidence usage and scope boundaries, not introduce speculative behavior or alternate workflows.
+- Later docs/tests work must preserve the first-pilot discipline already documented for external-validation: one repository, one bounded task, and reviewable evidence.
 
-## Proposed Documentation Changes
+## Proposed Documentation/Test Follow-Up
 
-### `README.md`
-No README change is required for this slice.
+### `docs/plans/external-validation.md`
+Add a small follow-up subsection that defines how the first pilot should judge action bloat from persisted round budget evidence. The subsection should describe action bloat as action usage that exceeds, obscures, or cannot be clearly reconciled with the bounded task's persisted action budget and round summary artifacts.
 
-Reviewer rationale:
+### Regression-Test Expectations
+Limit the next implementation slice to tests and documentation that prove the external-validation path consumes existing persisted action evidence consistently. Candidate regression surfaces may include the external-validation reporting tests, control/report CLI tests, and console-facing tests, but only where they verify documented reuse of existing round evidence rather than introduce new feature scope.
 
-> `README.md` already establishes transparent history, summary-first handoff, navigational references, pause as a safety tool, and crash recovery as a product requirement. This slice only needs to tighten the workflow and persistence contract in the technical and runtime workflow docs.
+### Durable Evidence Constraint
+Any later docs/tests update for action bloat must reuse the durable evidence handoff contract already documented for round summaries and evaluation artifacts. The same persisted round evidence should remain traceable from verification guidance, evaluator-facing diagnostics, and operator-facing summaries.
 
-### `ARCHITECTURE.md`
-Update the round lifecycle, persistence, and crash recovery sections with the following diff-ready text.
-
-Add the following requirement to `### 7.1 Phase 0: Preflight` after the timestamped artifact set is opened:
-
-````md
-- opening a new timestamped artifact set fixes the round's artifact write paths for that round; evaluation packaging, summary generation, pause diagnostics, and crash recovery must reuse that same path set rather than inventing new artifact paths mid-round.
-````
-
-Add the following requirements to `### 7.4 Phase 3: Evaluation`:
-
-````md
-- evaluation packaging must reference the current round's artifact write paths and may cite only artifacts that already exist or are explicitly marked incomplete for that same round.
-- if evaluator infrastructure fails because of authentication, transport, tooling, or prompt-construction issues, the engine must still persist `*.round.evaluation.json` for that round with infrastructure-failure classification, the best available failure clue, and references to the same artifact write paths used by the round summary.
-````
-
-Add the following requirements to `### 7.5 Phase 4: Persist and Transition`:
-
-````md
-- before transitioning to `cooldown`, `paused`, `stopping`, or `error`, the engine must durably persist a minimum round record for the current artifact set: round summary, metrics, state-change evidence or explicit no-change note, and evaluation artifact or evaluator-infrastructure-failure record.
-- pause semantics require that this minimum round record be written before the round is considered safely paused, unless the engine process dies first and crash recovery assumes responsibility for finishing the diagnostic record.
-````
-
-Replace the `*.round.summary.md` and `*.round.evaluation.json` semantics in `### 10.2 Artifact Semantics` with:
-
-````md
-- `*.round.summary.md`: human-readable summary of the round derived from the current round artifact set; it must reference the same artifact write paths used during evaluation packaging and explicitly mark missing or incomplete evidence instead of omitting the gap.
-- `*.round.evaluation.json`: required evaluation record for every round outcome, including pass, fail, and evaluator infrastructure failure; it must preserve failure classification and references to the current round artifact set.
-````
-
-Add the following requirement to `## 11. Crash Recovery and Rollback`:
-
-````md
-- crash recovery must inspect the interrupted round's persisted phase and timestamped artifact set, preserve any partial artifacts already written, mark missing artifacts as incomplete, and transition to `paused` with a summary-first diagnostic instead of silently replacing or discarding evidence.
-````
-
-### `AILOOP_ENGINE_WORKFLOW.md`
-Update the workflow narrative for evaluation, rework, and leader handoff with the following diff-ready text.
-
-Add the following bullets under `Evaluation handoff rules`:
-
-````md
-- the compact evaluation brief and the round summary must point to the same round artifact write paths opened for that round.
-- if evaluation cannot complete, the engine must still persist the round's evaluation artifact as evaluator infrastructure failure before handing control to pause handling or crash recovery.
-````
-
-Add the following bullet under `Rework handoff rule`:
-
-````md
-- if the round evidence set is incomplete, the rework handoff must explicitly identify which artifact is missing or incomplete instead of presenting the gap as ordinary task-quality failure.
-````
-
-Add the following bullet under `Phase 6: Leader / CCB Intervention`:
-
-````md
-- pause diagnostics and leader handoffs must explicitly show whether round evidence is complete, partially written, or missing, while preserving artifact references for drill-down.
-````
-
-## Verification Steps
+## Verification
 Run the following commands:
 
 ```sh
-rg -n "^## (Current Objective|Scope|Non-Goals|Acceptance Criteria|Design Expectations|Proposed Documentation Changes|Open Questions)$" /Users/yinjames/projects/AILoop/.ailoop/product-requirements/current.md
-rg -n "evaluation packaging|summary generation|artifact write paths|pause semantics|crash-safe persistence" /Users/yinjames/projects/AILoop/.ailoop/product-requirements/current.md
+git -C /Users/yinjames/projects/AILoop diff --name-only
+rg -n "Out of Scope|Acceptance Criteria|Verification|external-validation|action bloat" /Users/yinjames/projects/AILoop/.ailoop/product-requirements/current.md
 ```
 
 Expected verification outcome:
 
-- The first command lists the required sections for this active requirement slice.
-- The second command shows the exact focus areas from the CCB hint in the active artifact.
+- The `git diff --name-only` output includes `.ailoop/product-requirements/current.md`.
+- The `rg` output returns matches for the required sections and the narrow external-validation action-bloat focus terms.
 
 ## Open Questions
-None. The mandatory source set is sufficient to define this documentation slice without expanding repository exploration.
+None. The goal, senior-dev instruction, and durable evidence handoff contract are sufficient to refresh the active requirement artifact without expanding scope.
 
 ## Lifecycle Status
 - Status: active
-- Created In Round: 124
-- Previous Slice Status: complete in Round 123
-- Completion Target: documentation alignment for durable round evidence handoff, not code implementation in this round
+- Created In Round: 125
+- Previous Slice Status: complete in Round 124
+- Completion Target: requirement refresh for the narrow external-validation docs/tests action-bloat follow-up; no code implementation in this round
