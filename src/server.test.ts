@@ -874,17 +874,57 @@ describe("console server API contract", () => {
         evaluator_infrastructure_failures: 1,
         hot_file_growth_lines: 7
       },
+      action_budget_evidence: {
+        stable_id: "task-b",
+        assignee: "executor",
+        objective: "Run the external-validation pilot on a fixture repository",
+        expected_outcome: "The pilot completes without evaluator infrastructure faults.",
+        round: 2,
+        run_timestamp: "2026-03-18T02-00-00-000Z",
+        actions_used: 3,
+        action_limit: 10,
+        threshold_breached: false,
+        artifact_references: {
+          summary_path: path.join(paths.runsDir, "2026-03-18T02-00-00-000Z.round.summary.md"),
+          evaluation_path: path.join(paths.runsDir, "2026-03-18T02-00-00-000Z.round.evaluation.json"),
+          state_change_path: path.join(paths.runsDir, "2026-03-18T02-00-00-000Z.round.state_change.txt")
+        }
+      },
       tasks: [
-        expect.objectContaining({
+        {
           stable_id: "task-a",
+          assignee: "designer",
           objective: "Surface pilot readiness in the Web Console",
-          successful: true
-        }),
-        expect.objectContaining({
+          expected_outcome: "Operators can assess readiness without parsing CLI output.",
+          rounds: 1,
+          total_cost_usd: 0.2,
+          average_cost_usd_per_round: 0.2,
+          successful: true,
+          latest_decision: "pass",
+          human_interventions: 1,
+          no_op_claim_mismatches: 0,
+          evaluator_infrastructure_failures: 0,
+          hot_file_growth_lines: 5,
+          first_run_timestamp: "2026-03-18T01-00-00-000Z",
+          latest_run_timestamp: "2026-03-18T01-00-00-000Z"
+        },
+        {
           stable_id: "task-b",
+          assignee: "executor",
           objective: "Run the external-validation pilot on a fixture repository",
-          successful: false
-        })
+          expected_outcome: "The pilot completes without evaluator infrastructure faults.",
+          rounds: 1,
+          total_cost_usd: 0.4,
+          average_cost_usd_per_round: 0.4,
+          successful: false,
+          latest_decision: "fail",
+          human_interventions: 0,
+          no_op_claim_mismatches: 0,
+          evaluator_infrastructure_failures: 1,
+          hot_file_growth_lines: 2,
+          first_run_timestamp: "2026-03-18T02-00-00-000Z",
+          latest_run_timestamp: "2026-03-18T02-00-00-000Z"
+        }
       ]
     });
   });
@@ -1054,12 +1094,40 @@ describe("console server API contract", () => {
         evaluator_infrastructure_failures: 1,
         hot_file_growth_lines: 5
       },
+      action_budget_evidence: {
+        stable_id: "pilot-task",
+        assignee: "executor",
+        objective: "Run the external-validation pilot on a fixture repository",
+        expected_outcome: "The pilot completes without evaluator infrastructure faults.",
+        round: 2,
+        run_timestamp: "2026-03-19T02-00-00-000Z",
+        actions_used: 2,
+        action_limit: 10,
+        threshold_breached: false,
+        artifact_references: {
+          summary_path: path.join(paths.runsDir, "2026-03-19T02-00-00-000Z.round.summary.md"),
+          evaluation_path: path.join(paths.runsDir, "2026-03-19T02-00-00-000Z.round.evaluation.json"),
+          state_change_path: path.join(paths.runsDir, "2026-03-19T02-00-00-000Z.round.state_change.txt")
+        }
+      },
       tasks: [
-        expect.objectContaining({
+        {
           stable_id: "pilot-task",
+          assignee: "executor",
           objective: "Run the external-validation pilot on a fixture repository",
-          successful: true
-        })
+          expected_outcome: "The pilot completes without evaluator infrastructure faults.",
+          rounds: 2,
+          total_cost_usd: 0.4,
+          average_cost_usd_per_round: 0.2,
+          successful: true,
+          latest_decision: "pass",
+          human_interventions: 2,
+          no_op_claim_mismatches: 0,
+          evaluator_infrastructure_failures: 1,
+          hot_file_growth_lines: 5,
+          first_run_timestamp: "2026-03-19T01-00-00-000Z",
+          latest_run_timestamp: "2026-03-19T02-00-00-000Z"
+        }
       ],
       baseline_comparison: {
         baseline_runs_dir: baselineRunsDir,

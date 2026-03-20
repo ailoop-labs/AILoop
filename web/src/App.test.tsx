@@ -173,6 +173,43 @@ function makeExternalValidationTask(
   };
 }
 
+function makeActionBudgetEvidence(
+  overrides: Partial<{
+    stable_id: string;
+    assignee: "executor" | "designer";
+    objective: string;
+    expected_outcome: string;
+    round: number;
+    run_timestamp: string;
+    actions_used: number;
+    action_limit: number;
+    threshold_breached: boolean;
+    artifact_references: {
+      summary_path: string | null;
+      evaluation_path: string | null;
+      state_change_path: string | null;
+    };
+  }> = {}
+) {
+  return {
+    stable_id: "task-a",
+    assignee: "designer" as const,
+    objective: "Surface pilot readiness in the Web Console",
+    expected_outcome: "Operators can assess readiness without parsing CLI output.",
+    round: 3,
+    run_timestamp: "2026-03-18T03-00-00-000Z",
+    actions_used: 7,
+    action_limit: 10,
+    threshold_breached: false,
+    artifact_references: {
+      summary_path: "/tmp/pilot/2026-03-18T03-00-00-000Z.round.summary.md",
+      evaluation_path: "/tmp/pilot/2026-03-18T03-00-00-000Z.round.evaluation.json",
+      state_change_path: "/tmp/pilot/2026-03-18T03-00-00-000Z.round.state_change.txt"
+    },
+    ...overrides
+  };
+}
+
 describe("RunArtifactEvidenceGrid", () => {
   test("renders populated evidence blocks as compact labeled cards", () => {
     const html = renderToStaticMarkup(<RunArtifactEvidenceGrid report={makeReport()} />);
@@ -814,6 +851,7 @@ describe("ExternalValidationChecklistCard", () => {
             evaluator_infrastructure_failures: 1,
             hot_file_growth_lines: 6
           },
+          action_budget_evidence: null,
           tasks: []
         }}
       />
@@ -835,6 +873,48 @@ describe("ExternalValidationChecklistCard", () => {
     expect(html).toContain(">1<");
     expect(html).toContain("Hot-file growth");
     expect(html).toContain("6 lines");
+    expect(html).not.toContain("Action Budget Evidence");
+  });
+
+  test("renders the most action-heavy round as a summary-first evidence panel when persisted action-budget evidence exists", () => {
+    const html = renderToStaticMarkup(
+      <ExternalValidationChecklistCard
+        report={{
+          task_count: 2,
+          successful_task_count: 1,
+          checklist: {
+            rounds_per_successful_task: 3,
+            human_interventions_per_task: 1,
+            average_cost_usd_per_round: 0.225,
+            evaluator_infrastructure_failures: 1,
+            hot_file_growth_lines: 7
+          },
+          action_budget_evidence: makeActionBudgetEvidence({
+            stable_id: "task-b",
+            assignee: "executor",
+            objective: "Run the external-validation pilot on a fixture repository",
+            expected_outcome: "The pilot completes without evaluator infrastructure faults.",
+            round: 2,
+            actions_used: 7,
+            action_limit: 10
+          }),
+          tasks: [makeExternalValidationTask()]
+        }}
+      />
+    );
+
+    expect(html).toContain("Action Budget Evidence");
+    expect(html).toContain("Most action-heavy round");
+    expect(html).toContain("stable_id=task-b");
+    expect(html).toContain("Run the external-validation pilot on a fixture repository");
+    expect(html).toContain("Round 2 used");
+    expect(html).toContain("7 / 10");
+    expect(html).toContain("Within persisted budget");
+    expect(html).toContain("Same-round artifact references");
+    expect(html).toContain("Summary artifact");
+    expect(html).toContain("Evaluation artifact");
+    expect(html).toContain("State-change artifact");
+    expect(html).toContain("/tmp/pilot/2026-03-18T03-00-00-000Z.round.summary.md");
   });
 
   test("renders a progressive task drill-down when per-task pilot telemetry is present", () => {
@@ -850,6 +930,7 @@ describe("ExternalValidationChecklistCard", () => {
             evaluator_infrastructure_failures: 1,
             hot_file_growth_lines: 7
           },
+          action_budget_evidence: null,
           tasks: [
             makeExternalValidationTask(),
             makeExternalValidationTask({
@@ -909,6 +990,7 @@ describe("ExternalValidationChecklistCard", () => {
             evaluator_infrastructure_failures: 0,
             hot_file_growth_lines: 0
           },
+          action_budget_evidence: null,
           tasks: []
         }}
       />
@@ -933,6 +1015,7 @@ describe("ExternalValidationChecklistCard", () => {
             evaluator_infrastructure_failures: 0,
             hot_file_growth_lines: 3
           },
+          action_budget_evidence: null,
           tasks: []
         }}
       />
@@ -959,6 +1042,7 @@ describe("ExternalValidationChecklistCard", () => {
             evaluator_infrastructure_failures: 1,
             hot_file_growth_lines: 6
           },
+          action_budget_evidence: makeActionBudgetEvidence(),
           baseline_comparison: {
             baseline_runs_dir: "/tmp/baseline/.ailoop/runs",
             checklist: {

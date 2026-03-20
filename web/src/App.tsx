@@ -218,10 +218,30 @@ interface ExternalValidationChecklistBaselineComparison {
   };
 }
 
+interface ExternalValidationActionBudgetArtifactReferences {
+  summary_path: string | null;
+  evaluation_path: string | null;
+  state_change_path: string | null;
+}
+
+interface ExternalValidationActionBudgetEvidence {
+  stable_id: string;
+  assignee: "executor" | "designer";
+  objective: string;
+  expected_outcome: string;
+  round: number;
+  run_timestamp: string;
+  actions_used: number;
+  action_limit: number;
+  threshold_breached: boolean;
+  artifact_references: ExternalValidationActionBudgetArtifactReferences;
+}
+
 interface ExternalValidationMetricsReport {
   task_count: number;
   successful_task_count: number;
   checklist: ExternalValidationChecklistMetrics;
+  action_budget_evidence: ExternalValidationActionBudgetEvidence | null;
   tasks: Array<{
     stable_id: string;
     assignee: "executor" | "designer";
@@ -360,6 +380,16 @@ function formatExternalValidationTaskAssignee(assignee: "executor" | "designer")
 
 function formatExternalValidationTaskDecision(decision: "pass" | "fail" | "unknown"): string {
   return decision === "pass" ? "Pass" : decision === "fail" ? "Fail" : "Unknown";
+}
+
+function formatExternalValidationActionBudgetStatus(
+  evidence: Pick<ExternalValidationActionBudgetEvidence, "threshold_breached">
+): string {
+  return evidence.threshold_breached ? "Exceeded persisted budget" : "Within persisted budget";
+}
+
+function formatExternalValidationArtifactReference(path: string | null): string {
+  return path ?? "Not captured";
 }
 
 function resolvePilotEvidenceBadge(report: Pick<ExternalValidationMetricsReport, "task_count" | "successful_task_count">): {
@@ -2390,6 +2420,24 @@ export function ExternalValidationChecklistCard({
   const improvedMetricCount = comparisonCards.filter((card) => card.comparison.delta !== null && card.comparison.delta < 0).length;
   const regressedMetricCount = comparisonCards.filter((card) => card.comparison.delta !== null && card.comparison.delta > 0).length;
   const latestFailureCount = report.tasks.filter((task) => task.latest_decision === "fail").length;
+  const actionBudgetEvidence = report.action_budget_evidence;
+  const actionBudgetStatusTone = actionBudgetEvidence?.threshold_breached ? checklistSignalTone.critical : checklistSignalTone.good;
+  const actionBudgetArtifacts = actionBudgetEvidence
+    ? [
+        {
+          label: "Summary artifact",
+          value: formatExternalValidationArtifactReference(actionBudgetEvidence.artifact_references.summary_path)
+        },
+        {
+          label: "Evaluation artifact",
+          value: formatExternalValidationArtifactReference(actionBudgetEvidence.artifact_references.evaluation_path)
+        },
+        {
+          label: "State-change artifact",
+          value: formatExternalValidationArtifactReference(actionBudgetEvidence.artifact_references.state_change_path)
+        }
+      ]
+    : [];
 
   return (
     <section className="mt-4 rounded-2xl border border-white/10 bg-ink/60 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.04)]">
@@ -2552,6 +2600,88 @@ export function ExternalValidationChecklistCard({
               </div>
             </div>
           </div>
+
+          {actionBudgetEvidence ? (
+            <div className="mt-4 rounded-2xl border border-white/10 bg-panel/50 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.18em] text-mist/55">Action Budget Evidence</p>
+                  <h3 className="mt-2 text-lg font-semibold text-mist">Most action-heavy round</h3>
+                  <p className="mt-2 max-w-3xl text-sm leading-6 text-mist/75">
+                    Summary-first evidence for the round with the highest persisted action count, so operators can
+                    inspect action bloat without leaving the checklist.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${externalValidationTaskAssigneeTone[actionBudgetEvidence.assignee]}`}
+                  >
+                    {formatExternalValidationTaskAssignee(actionBudgetEvidence.assignee)}
+                  </span>
+                  <span
+                    className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${actionBudgetStatusTone}`}
+                  >
+                    {formatExternalValidationActionBudgetStatus(actionBudgetEvidence)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+                <div className="rounded-2xl border border-white/10 bg-ink/70 p-4">
+                  <p className="font-mono text-[11px] text-mist/45">stable_id={actionBudgetEvidence.stable_id}</p>
+                  <h4 className="mt-3 text-base font-semibold text-mist">{actionBudgetEvidence.objective}</h4>
+                  <p className="mt-2 max-w-3xl text-sm leading-6 text-mist/70">
+                    {actionBudgetEvidence.expected_outcome}
+                  </p>
+                  <p className="mt-4 rounded-2xl border border-white/10 bg-panel/70 px-4 py-3 text-sm text-mist">
+                    Round {actionBudgetEvidence.round} used{" "}
+                    <span className="font-semibold text-white">
+                      {actionBudgetEvidence.actions_used} / {actionBudgetEvidence.action_limit}
+                    </span>{" "}
+                    actions.
+                  </p>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-white/10 bg-ink/70 p-4">
+                    <p className="text-[11px] uppercase tracking-[0.18em] text-mist/55">Actions used / limit</p>
+                    <p className="mt-2 text-2xl font-semibold text-mist">
+                      {actionBudgetEvidence.actions_used} / {actionBudgetEvidence.action_limit}
+                    </p>
+                  </div>
+                  <div className={`rounded-2xl border p-4 ${actionBudgetStatusTone}`}>
+                    <p className="text-[11px] uppercase tracking-[0.18em] text-current/80">Budget status</p>
+                    <p className="mt-2 text-sm font-semibold text-mist">
+                      {formatExternalValidationActionBudgetStatus(actionBudgetEvidence)}
+                    </p>
+                    <p className="mt-3 text-xs leading-5 text-current/80">
+                      {actionBudgetEvidence.threshold_breached
+                        ? "This round crossed the persisted action threshold and warrants explicit operator review."
+                        : "This round stayed within the persisted threshold, so the evidence remains descriptive only."}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-ink/70 p-4 sm:col-span-2">
+                    <p className="text-[11px] uppercase tracking-[0.18em] text-mist/55">Observed</p>
+                    <p className="mt-2 text-sm font-semibold text-mist">
+                      {formatRunTimestamp(actionBudgetEvidence.run_timestamp)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-mist/55">Same-round artifact references</p>
+                <div className="mt-3 grid gap-3 md:grid-cols-3">
+                  {actionBudgetArtifacts.map((artifact) => (
+                    <div key={artifact.label} className="rounded-2xl border border-white/10 bg-ink/70 p-4">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-mist/55">{artifact.label}</p>
+                      <p className="mt-3 break-all font-mono text-xs leading-5 text-mist/80">{artifact.value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
             {checklistCards.map((card) => (

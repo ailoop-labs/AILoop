@@ -213,6 +213,13 @@ Operators should report action bloat from the persisted evidence bundle in a fix
 5. When the action count stays below the persisted limit, report the evidence as descriptive and non-CCB. Below-threshold cases are not CCB-worthy unless a separate documented escalation trigger is met.
 6. Keep `stable_id` explicit in both the summary line and the targeted artifact handoff so repeated pilot work is reviewed by durable task identity instead of title matching.
 
+### Web Console Implication
+
+- Mirror the same summary-first contract inside the `External Validation Checklist` as a single `Most action-heavy round` panel.
+- Keep `stable_id`, round number, and persisted `actionsUsed / actions` values visible at a glance before any artifact paths.
+- Show only same-round artifact references (summary, evaluation, state-change) from the persisted `action_budget_evidence` payload.
+- When no action-budget evidence exists, leave the existing baseline overlay, checklist cards, and task drill-down unchanged.
+
 ---
 
 ## Runbook: External Validation Execution
