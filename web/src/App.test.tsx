@@ -7,6 +7,7 @@ import {
   ControlErrorPanel,
   CrashRecoveryPanel,
   ExternalValidationChecklistCard,
+  Phase3FirstPilotScopeCard,
   Phase3CandidatePreflightCard,
   Phase3PreRunVerificationCard,
   FailureDiagnosticsPanel,
@@ -807,6 +808,30 @@ describe("ExternalValidationChecklistCard", () => {
     expect(html).toContain("-1.17");
     expect(html).toContain("-$0.0634");
     expect(html).toContain("-8 lines");
+  });
+});
+
+describe("Phase3FirstPilotScopeCard", () => {
+  test("renders the read-only first-pilot scope cut with allowed task classes and deferred work", () => {
+    const html = renderToStaticMarkup(<Phase3FirstPilotScopeCard />);
+
+    expect(html).toContain("Phase 3 Scope Cut");
+    expect(html).toContain("First Pilot Scope");
+    expect(html).toContain("Read-only scope cut");
+    expect(html).toContain("one external repository, one bounded task");
+    expect(html).toContain("One bounded bugfix");
+    expect(html).toContain("One small feature");
+    expect(html).toContain("One structural-maintenance task");
+    expect(html).toContain("Files / surfaces affected");
+    expect(html).toContain(".ailoop/product-requirements/current.md");
+    expect(html).toContain("web/src/App.tsx");
+    expect(html).toContain("Out of Scope");
+    expect(html).toContain("Multi-repo support");
+    expect(html).toContain("Backend enforcement or automation");
+    expect(html).toContain("Persisted checklist state");
+    expect(html).toContain("Complex refactors");
+    expect(html).toContain("Production or deploy changes");
+    expect(html).toContain("Comparative benchmarking");
   });
 });
 

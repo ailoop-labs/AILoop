@@ -109,22 +109,52 @@ Prove AILoop can work on a second repository without relying on self-iteration f
 
 ## Slice 3.3: Pilot Scope Definition
 
+### Concrete Scope-Cut Proposal
+
+#### Behavior to Change
+- Add a summary-first Phase 3 "First Pilot Scope" panel to the Web Console.
+- Make the first pilot boundary explicit: one external repository, one bounded task, existing guardrails only.
+- Keep the documented narrow task classes visible in the panel so the operator can choose only from the allowed pilot shapes.
+- Include a dedicated `Out of Scope` section so deferred functionality is visible without opening the requirement markdown.
+
+#### Files / Surfaces Affected
+- `.ailoop/product-requirements/current.md`
+- `docs/plans/external-validation.md`
+- `web/src/App.tsx`
+- `web/src/App.test.tsx`
+
 ### Narrow First Scope
 
-1. **Bugfix Task**
+The first pilot is intentionally cut to a single bounded task in a single external repository. That task may be only one of the following:
+
+1. **Bounded Bugfix**
    - Small, isolated bug
    - Clear reproduction steps
    - Testable outcome
 
-2. **Small Feature Task**
+2. **Small Feature**
    - Single-file addition
    - No architecture changes
    - Contained scope
 
-3. **Structural Maintenance Task**
+3. **Structural-Maintenance Task**
    - Hot-file extraction
    - Module reorganization
    - Test-preserving refactor
+
+### Out of Scope
+
+- Selecting the real pilot repository in-product
+- Persisting pilot-scope state or checklist state
+- Backend guardrails, API changes, or automation
+- Automatic task generation
+- Budget-math changes
+- Checklist or preflight logic changes
+- Multi-repo workflows
+- Complex refactors
+- Production or deploy changes
+- Comparative benchmarking against other tools
+- Executing the pilot itself
 
 ### Success Criteria
 

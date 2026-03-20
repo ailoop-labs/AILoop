@@ -394,6 +394,53 @@ const phase3PreRunVerificationChecklist = [
   }
 ] as const;
 
+const phase3FirstPilotTaskCards = [
+  {
+    label: "Allowed pilot class",
+    title: "One bounded bugfix",
+    summary: "Use a small isolated bug with clear reproduction steps and a testable outcome.",
+    detail: "Stay inside one external repository and close only the defect in front of you.",
+    accent: "border-accent/30 bg-accent/10 text-accent"
+  },
+  {
+    label: "Allowed pilot class",
+    title: "One small feature",
+    summary: "Limit the change to a contained addition with no architecture changes.",
+    detail: "Prefer a single-file addition or an equally narrow feature slice.",
+    accent: "border-sky-300/25 bg-sky-300/10 text-sky-100"
+  },
+  {
+    label: "Allowed pilot class",
+    title: "One structural-maintenance task",
+    summary: "Keep maintenance work test-preserving and focused on bounded module cleanup.",
+    detail: "Hot-file extraction or module reorganization is allowed when the blast radius stays small.",
+    accent: "border-warning/35 bg-warning/10 text-warning"
+  }
+] as const;
+
+const phase3FirstPilotOutOfScope = [
+  "Selecting a real repository",
+  "Persisted checklist state",
+  "Persisted pilot-scope state",
+  "Backend enforcement or automation",
+  "API changes for pilot scope control",
+  "Automatic task generation",
+  "Budget-math changes",
+  "Checklist or preflight logic changes",
+  "Multi-repo support",
+  "Complex refactors",
+  "Production or deploy changes",
+  "Comparative benchmarking",
+  "Executing the pilot itself"
+] as const;
+
+const phase3FirstPilotSurfaces = [
+  ".ailoop/product-requirements/current.md",
+  "docs/plans/external-validation.md",
+  "web/src/App.tsx",
+  "web/src/App.test.tsx"
+] as const;
+
 const failureDiagnosticsTone: Record<FailureDiagnosticsTone, string> = {
   neutral: "border-white/10 bg-ink/60 text-mist/80",
   warning: "border-warning/40 bg-warning/10 text-warning",
@@ -1926,6 +1973,101 @@ export function Phase3PreRunVerificationCard() {
   );
 }
 
+export function Phase3FirstPilotScopeCard() {
+  return (
+    <section className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-ink/60 shadow-[0_0_0_1px_rgba(255,255,255,0.04)]">
+      <div className="border-b border-white/10 bg-[linear-gradient(135deg,rgba(255,168,76,0.18),rgba(8,11,20,0.9)_50%,rgba(80,170,255,0.14))] p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-mist/70">Phase 3 Scope Cut</p>
+            <h2 className="mt-1 text-xl font-semibold text-mist">First Pilot Scope</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-mist/70">
+              Keep the first external-validation attempt deliberately narrow: one external repository, one bounded task,
+              and the existing Phase 3 guardrails only.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-panel/60 px-4 py-3 text-right">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-mist/55">Proposal mode</p>
+            <p className="mt-2 text-lg font-semibold text-mist">Read-only scope cut</p>
+            <p className="mt-1 text-xs text-mist/60">No state is stored from this panel.</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-4">
+        <div className="grid gap-3 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.75fr)]">
+          <div className="rounded-2xl border border-white/10 bg-panel/45 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.18em] text-mist/55">Behavior change</p>
+                <p className="mt-2 text-lg font-semibold text-mist">Only one task shape may enter the first pilot.</p>
+              </div>
+              <div className="flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.16em]">
+                <span className="rounded-full border border-accent/25 bg-accent/10 px-3 py-1 text-accent">1 repo max</span>
+                <span className="rounded-full border border-sky-300/20 bg-sky-300/10 px-3 py-1 text-sky-100">1 task max</span>
+                <span className="rounded-full border border-white/10 bg-ink/70 px-3 py-1 text-mist/70">existing guardrails</span>
+              </div>
+            </div>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-mist/70">
+              This slice does not add new automation. It makes the first-pilot boundary visible in the console so an
+              operator can confirm the trial stays within the documented external-validation path.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-panel/45 p-4">
+            <p className="text-xs uppercase tracking-[0.18em] text-mist/55">Files / surfaces affected</p>
+            <ul className="mt-3 grid gap-2 text-sm text-mist/80">
+              {phase3FirstPilotSurfaces.map((surface) => (
+                <li key={surface} className="rounded-xl border border-white/10 bg-ink/60 px-3 py-2 font-mono text-xs text-mist/75">
+                  {surface}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 xl:grid-cols-3">
+          {phase3FirstPilotTaskCards.map((item) => (
+            <article key={item.title} className={`rounded-2xl border p-4 ${item.accent}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-current/80">{item.label}</p>
+                  <h3 className="mt-3 text-lg font-semibold text-mist">{item.title}</h3>
+                </div>
+                <span className="mt-1 h-2.5 w-2.5 rounded-full bg-current shadow-[0_0_10px_currentColor]" />
+              </div>
+              <p className="mt-3 text-sm leading-6 text-mist/80">{item.summary}</p>
+              <div className="mt-4 rounded-2xl border border-current/15 bg-ink/55 px-4 py-3">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-current/80">Boundary</p>
+                <p className="mt-2 text-sm leading-6 text-mist/80">{item.detail}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-white/10 bg-panel/45 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-mist/55">Out of Scope</p>
+              <h3 className="mt-2 text-lg font-semibold text-mist">Deferred until after the first bounded pilot</h3>
+            </div>
+            <span className="rounded-full border border-warning/30 bg-warning/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-warning">
+              intentional deferrals
+            </span>
+          </div>
+          <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {phase3FirstPilotOutOfScope.map((item) => (
+              <div key={item} className="rounded-2xl border border-white/10 bg-ink/65 px-4 py-3 text-sm text-mist/80">
+                {item}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export function ExternalValidationChecklistCard({
   report,
   baselineRunsDir = "",
@@ -2879,6 +3021,7 @@ export default function App() {
         <CrashRecoveryPanel crashRecovery={status?.crash_recovery ?? null} />
 
         <SystemHealthPanel frictionIndex={frictionIndex} />
+        <Phase3FirstPilotScopeCard />
         <Phase3CandidatePreflightCard
           repoPath={preflightRepoPath}
           submitting={preflightBusy}
