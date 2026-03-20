@@ -713,6 +713,32 @@ describe("ExternalValidationChecklistCard", () => {
     expect(html).toContain("did not find persisted round metrics with external-validation task identities");
   });
 
+  test("surfaces collected pilot data even when none of the tasks have succeeded yet", () => {
+    const html = renderToStaticMarkup(
+      <ExternalValidationChecklistCard
+        report={{
+          task_count: 2,
+          successful_task_count: 0,
+          checklist: {
+            rounds_per_successful_task: null,
+            human_interventions_per_task: 1.5,
+            average_cost_usd_per_round: 0.21,
+            evaluator_infrastructure_failures: 0,
+            hot_file_growth_lines: 3
+          },
+          tasks: []
+        }}
+      />
+    );
+
+    expect(html).toContain("pilot data present, no successful tasks");
+    expect(html).not.toContain("waiting for pilot data");
+    expect(html).toContain("Tasks analyzed");
+    expect(html).toContain(">2<");
+    expect(html).toContain("Success coverage");
+    expect(html).toContain(">0%<");
+  });
+
   test("renders baseline comparison controls and delta cards when a baseline overlay is available", () => {
     const html = renderToStaticMarkup(
       <ExternalValidationChecklistCard

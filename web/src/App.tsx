@@ -330,6 +330,30 @@ const checklistSignalTone: Record<ChecklistSignalTone, string> = {
   critical: "border-ember/40 bg-ember/10 text-ember"
 };
 
+function resolvePilotEvidenceBadge(report: Pick<ExternalValidationMetricsReport, "task_count" | "successful_task_count">): {
+  label: string;
+  tone: ChecklistSignalTone;
+} {
+  if (report.successful_task_count > 0) {
+    return {
+      label: "pilot evidence present",
+      tone: "good"
+    };
+  }
+
+  if (report.task_count > 0) {
+    return {
+      label: "pilot data present, no successful tasks",
+      tone: "warning"
+    };
+  }
+
+  return {
+    label: "waiting for pilot data",
+    tone: "neutral"
+  };
+}
+
 const preflightStatusTone = {
   eligible: "border-accent/30 bg-accent/10 text-accent",
   blocked: "border-ember/40 bg-ember/10 text-ember"
@@ -1826,6 +1850,7 @@ export function ExternalValidationChecklistCard({
   }
 
   const successRate = report.task_count > 0 ? Math.round((report.successful_task_count / report.task_count) * 100) : 0;
+  const pilotEvidenceBadge = resolvePilotEvidenceBadge(report);
   const showBaselineControls =
     typeof onBaselineRunsDirChange === "function" &&
     typeof onApplyBaselineRunsDir === "function" &&
@@ -1919,11 +1944,9 @@ export function ExternalValidationChecklistCard({
           </p>
         </div>
         <span
-          className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${
-            report.successful_task_count > 0 ? checklistSignalTone.good : checklistSignalTone.neutral
-          }`}
+          className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${checklistSignalTone[pilotEvidenceBadge.tone]}`}
         >
-          {report.successful_task_count > 0 ? "pilot evidence present" : "waiting for pilot data"}
+          {pilotEvidenceBadge.label}
         </span>
       </div>
 
