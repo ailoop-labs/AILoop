@@ -199,6 +199,20 @@ Round 119 already added per-task pilot telemetry drill-down to the existing chec
 - Persistence-schema changes, budget-policy changes, or evaluator-governance changes
 - Broad Web Console redesign beyond the existing checklist and task drill-down
 
+### Summary-First Action-Bloat Reporting
+
+Operators should report action bloat from the persisted evidence bundle in a fixed order so the handoff stays concise and navigable.
+
+1. Start with a single per-`stable_id` summary line for the most action-heavy round that includes the task objective, round number, and persisted `actionsUsed / actions` budget values.
+2. Keep that first line descriptive and summary-first. Do not lead with raw logs, evaluator prose dumps, or cross-round speculation.
+3. Hand off to targeted references from the same round only:
+   - summary artifact
+   - evaluation artifact
+   - state-change artifact
+4. Use the persisted action count versus limit to describe whether the round stayed within budget or breached it.
+5. When the action count stays below the persisted limit, report the evidence as descriptive and non-CCB. Below-threshold cases are not CCB-worthy unless a separate documented escalation trigger is met.
+6. Keep `stable_id` explicit in both the summary line and the targeted artifact handoff so repeated pilot work is reviewed by durable task identity instead of title matching.
+
 ---
 
 ## Runbook: External Validation Execution

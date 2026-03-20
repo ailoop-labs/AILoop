@@ -165,20 +165,21 @@ export function renderExternalValidationMetricsReport(
     }
   }
 
-  lines.push("Action-budget evidence (most action-heavy round):");
+  lines.push("Action-budget summary (most action-heavy round):");
   if (!metrics.action_budget_evidence) {
     lines.push("- none");
   } else {
     const evidence = metrics.action_budget_evidence;
     lines.push(
-      `- ${evidence.objective} | stable_id=${evidence.stable_id} | round=${evidence.round} | actions=${evidence.actions_used} / ${evidence.action_limit}`
+      `- stable_id=${evidence.stable_id} | objective=${evidence.objective} | round=${evidence.round} | actions=${evidence.actions_used} / ${evidence.action_limit}`
     );
     lines.push(`- Assignee: ${evidence.assignee}`);
     lines.push(`- Timestamp: ${evidence.run_timestamp}`);
     lines.push(`- Expected outcome: ${evidence.expected_outcome}`);
     lines.push(
-      `- Interpretation: ${evidence.threshold_breached ? "Exceeded the persisted action budget." : "Within the persisted action budget; descriptive evidence only."}`
+      `- Budget status: ${evidence.threshold_breached ? "Exceeded the persisted action budget." : "Within the persisted action budget; descriptive evidence only."}`
     );
+    lines.push("- Same-round artifact references:");
     lines.push(`- Summary artifact: ${formatArtifactReference(evidence.artifact_references.summary_path)}`);
     lines.push(`- Evaluation artifact: ${formatArtifactReference(evidence.artifact_references.evaluation_path)}`);
     lines.push(`- State-change artifact: ${formatArtifactReference(evidence.artifact_references.state_change_path)}`);

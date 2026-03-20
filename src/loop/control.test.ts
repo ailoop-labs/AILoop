@@ -2824,12 +2824,13 @@ describe("external-validation report CLI", () => {
 
       expect(result.exitCode).toBe(0);
       expect(result.stderr).toBe("");
-      expect(result.stdout).toContain("Action-budget evidence (most action-heavy round):");
+      expect(result.stdout).toContain("Action-budget summary (most action-heavy round):");
       expect(result.stdout).toContain(
-        `- Inspect action-heavy pilot evidence | stable_id=${actionHeavyTask.stable_id} | round=2 | actions=7 / 10`
+        `- stable_id=${actionHeavyTask.stable_id} | objective=Inspect action-heavy pilot evidence | round=2 | actions=7 / 10`
       );
       expect(result.stdout).toContain(`- Timestamp: ${expectedTimestamp}`);
-      expect(result.stdout).toContain("- Interpretation: Within the persisted action budget; descriptive evidence only.");
+      expect(result.stdout).toContain("- Budget status: Within the persisted action budget; descriptive evidence only.");
+      expect(result.stdout).toContain("- Same-round artifact references:");
       expect(result.stdout).toContain(
         `- Summary artifact: ${path.join(resolvedRunsDir, `${expectedTimestamp}.round.summary.md`)}`
       );
