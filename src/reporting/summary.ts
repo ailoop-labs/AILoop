@@ -51,6 +51,23 @@ function formatVerificationEvidence(evaluation: EvaluationResult): string {
     : "- None recorded.";
 }
 
+function formatRoundOutcome(input: Pick<SummaryInput, "evaluation" | "autoReworkAttempts" | "nextRecommendation">): string {
+  if (input.evaluation.decision !== "fail" || input.autoReworkAttempts.length === 0) {
+    return "";
+  }
+
+  const attemptCount = input.autoReworkAttempts.length;
+  const attemptLabel = `${attemptCount} auto rework attempt${attemptCount === 1 ? "" : "s"}`;
+  const lines = [`- Paused for operator review after ${attemptLabel} still ended in evaluator failure.`];
+  const nextAction = input.nextRecommendation.trim();
+
+  if (nextAction) {
+    lines.push(`- Next safe action: ${nextAction}`);
+  }
+
+  return ["## Round Outcome", lines.join("\n"), ""].join("\n");
+}
+
 function summarizeFileList(files: string[]): string {
   if (files.length <= 3) {
     return files.join(", ");
@@ -177,6 +194,7 @@ export async function writeSummaryFile(summaryPath: string, input: SummaryInput)
   const logArtifactPath = input.toolResult.artifacts.log_path || artifactPaths.logPath;
   const stateChangeArtifactPath =
     input.toolResult.artifacts.state_change_path || artifactPaths.stateChangePath;
+  const roundOutcome = formatRoundOutcome(input);
 
   const markdown = [
     "# AILoop Round Summary",
@@ -231,6 +249,7 @@ export async function writeSummaryFile(summaryPath: string, input: SummaryInput)
       ? input.autoReworkAttempts.map((attempt) => `- ${attempt}`).join("\n")
       : "- No auto rework attempts were executed.",
     "",
+    ...(roundOutcome ? [roundOutcome] : []),
     "## Budget Consumed vs Limit",
     `- Cost USD: ${input.metrics.budget_usage.usdUsed} / ${input.metrics.budget_limits.usdPerRound}`,
     `- Time ms: ${input.metrics.budget_usage.elapsedMs} / ${input.metrics.budget_limits.timeMinutes * 60_000}`,

@@ -128,6 +128,28 @@ describe("writeSummaryFile auto rework section", () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
+  test("renders a paused round outcome when repeated auto rework attempts still fail evaluation", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-summary-test-"));
+    const summaryPath = path.join(dir, "round.summary.md");
+    const input = makeSummaryInput([
+      "Attempt 1/2: evaluation=fail",
+      "Attempt 2/2: evaluation=fail"
+    ]);
+    input.evaluation.decision = "fail";
+    input.evaluation.justification = "Evaluator still rejected the paused history path.";
+    input.metrics.evaluator_decision = "fail";
+    input.nextRecommendation = "Inspect the evaluator findings and narrow the next sub-task before resuming.";
+
+    await writeSummaryFile(summaryPath, input);
+    const text = await fs.readFile(summaryPath, "utf8");
+
+    expect(text).toContain("## Round Outcome");
+    expect(text).toContain("Paused for operator review after 2 auto rework attempts still ended in evaluator failure.");
+    expect(text).toContain("Next safe action: Inspect the evaluator findings and narrow the next sub-task before resuming.");
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
   test("renders operational evidence when provided", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-summary-test-"));
     const summaryPath = path.join(dir, "round.summary.md");

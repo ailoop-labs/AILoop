@@ -36,6 +36,7 @@ import type { AppConfig } from "../config/env";
 import { saveRuntimeLoopConfig } from "../config/runtime";
 import { writeActiveRequirementArtifact } from "../product/requirements";
 import { buildRoundSubTaskIdentity } from "../reporting/metrics";
+import { writeSummaryFile } from "../reporting/summary";
 
 function makeTestConfig(homeDir: string): AppConfig {
   return {
@@ -864,6 +865,112 @@ describe("listRuns", () => {
           }
         }
       ]);
+    } finally {
+      await fs.rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps paused auto-rework evidence intact in structured run history summaries", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-list-runs-paused-rework-history-test-"));
+    const paths = buildLoopPaths(homeDir);
+    const timestamp = "2026-03-20T08-00-00-000Z";
+    const summaryPath = path.join(paths.runsDir, `${timestamp}.round.summary.md`);
+
+    await fs.mkdir(paths.runsDir, { recursive: true });
+    await writeSummaryFile(summaryPath, {
+      goal: "Preserve paused rework history",
+      subTask: {
+        assignee: "executor",
+        rationale: "test rationale",
+        objective: "Keep paused rework evidence visible",
+        expected_outcome: "history still shows both rework attempts after pause",
+        impacted_files: [],
+        recommended_tools: ["read_file", "write_file", "run_shell"]
+      },
+      actions: [],
+      toolResult: {
+        status: "success",
+        summary: "Applied the second rework patch",
+        operational_evidence: [],
+        artifacts: {
+          log_path: path.join(paths.runsDir, `${timestamp}.round.log`),
+          state_change_path: path.join(paths.runsDir, `${timestamp}.round.state_change.txt`)
+        },
+        error: undefined,
+        next_state_hint: "continue"
+      },
+      evaluation: {
+        decision: "fail",
+        justification: "Evaluator still rejected the paused history path.",
+        evidence: ["bun test src/loop/engine.test.ts"],
+        recommended_next_action: "Inspect the evaluator findings and narrow the next sub-task before resuming."
+      },
+      metrics: {
+        round: 7,
+        run_timestamp: timestamp.replace(/-/g, ":").replace(/:(\d{3})Z$/, ".$1Z"),
+        duration_ms: 5_000,
+        budget_limits: {
+          usdPerRound: 1,
+          timeMinutes: 1,
+          actions: 10
+        },
+        budget_usage: {
+          usdUsed: 0.4,
+          actionsUsed: 5,
+          elapsedMs: 5_000
+        },
+        evaluator_decision: "fail",
+        tool_status: "success",
+        retries: {
+          evidence_remediation_attempts: 0,
+          auto_rework_attempts: 2,
+          auto_rework_limit: 2
+        },
+        phase_timings_ms: {
+          planning: 100,
+          execution: 1_700,
+          evaluation: 900,
+          operational_followup: 0
+        },
+        failure_mode: "execution_failure"
+      },
+      stateChange: "No state changes detected.\n",
+      risks: [],
+      autoReworkAttempts: [
+        "Attempt 1/2: trigger='Missing rollback coverage for the paused path.' evaluation=fail",
+        "Attempt 2/2: trigger='History still drops the first rework attempt.' evaluation=fail"
+      ],
+      nextRecommendation: "Inspect the evaluator findings and narrow the next sub-task before resuming."
+    });
+    await fs.writeFile(path.join(paths.runsDir, `${timestamp}.round.metrics.json`), '{\n  "round": 7\n}\n', "utf8");
+    await fs.writeFile(path.join(paths.runsDir, `${timestamp}.round.log`), "log\n", "utf8");
+    await fs.writeFile(path.join(paths.runsDir, `${timestamp}.round.state_change.txt`), "diff\n", "utf8");
+    await fs.writeFile(
+      path.join(paths.runsDir, `${timestamp}.round.evaluation.json`),
+      `${JSON.stringify(
+        {
+          decision: "fail",
+          justification: "Evaluator still rejected the paused history path.",
+          evidence: ["bun test src/loop/engine.test.ts"],
+          recommended_next_action: "Inspect the evaluator findings and narrow the next sub-task before resuming."
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    try {
+      const runs = await listRuns(makeTestConfig(homeDir));
+
+      expect(runs).toHaveLength(1);
+      expect(runs[0]?.summary).toContain("## Auto Rework Attempts");
+      expect(runs[0]?.summary).toContain("Attempt 1/2:");
+      expect(runs[0]?.summary).toContain("Attempt 2/2:");
+      expect(runs[0]?.summary).toContain("## Round Outcome");
+      expect(runs[0]?.summary).toContain(
+        "Paused for operator review after 2 auto rework attempts still ended in evaluator failure."
+      );
     } finally {
       await fs.rm(homeDir, { recursive: true, force: true });
     }

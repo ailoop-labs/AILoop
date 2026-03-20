@@ -1955,6 +1955,125 @@ describe("LoopEngine auto rework", () => {
     await fs.rm(homeDir, { recursive: true, force: true });
   });
 
+  test("preserves two auto rework attempts in the summary when repeated evaluator failure pauses the loop", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-rework-pause-summary-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir,
+      AILOOP_EVAL_REWORK_MAX_ATTEMPTS: "2"
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const plan: SubTask = {
+      assignee: "executor",
+      rationale: "test rationale",
+      objective: "Keep failed rework history reviewable",
+      expected_outcome: "summary retains both rework attempts after the loop pauses",
+      impacted_files: [],
+      recommended_tools: ["read_file", "write_file", "run_shell"]
+    };
+
+    let executeCall = 0;
+    const execute = async () => {
+      executeCall += 1;
+      return {
+        actions: [makeAction("write_file"), makeAction("run_shell")],
+        toolResult: makeToolResult(`reworkable change ${executeCall}`)
+      };
+    };
+
+    let evaluationCall = 0;
+    const evaluate = async (): Promise<EvaluationResult> => {
+      evaluationCall += 1;
+      if (evaluationCall === 1) {
+        return makeEvaluation("fail", "Missing rollback coverage for the paused path.");
+      }
+      if (evaluationCall === 2) {
+        return makeEvaluation("fail", "History still drops the first rework attempt.");
+      }
+      return makeEvaluation("fail", "Final paused summary still needs both rework attempts.");
+    };
+
+    let releaseLeader = () => {};
+    const leaderGate = new Promise<void>((resolve) => {
+      releaseLeader = resolve;
+    });
+
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      executor: { execute: typeof execute };
+      evaluator: { evaluate: typeof evaluate };
+      leader: {
+        execute: () => Promise<LeaderDecision>;
+      };
+      collectOperationalEvidence: () => Promise<{
+        summaryNote: string;
+        lines: string[];
+        stateChangeNotes: string[];
+      }>;
+      run: () => Promise<void>;
+    };
+    mutable.planner = { plan: async () => plan };
+    mutable.executor = { execute };
+    mutable.evaluator = { evaluate };
+    mutable.leader = {
+      execute: async () => {
+        await leaderGate;
+        await setFlag(paths.stopFlagPath);
+        return {
+          rationale: "The loop should stay paused until an operator reviews the failed rework history.",
+          action: "stop",
+          diagnosis_type: "implementation_failure",
+          instructions: []
+        };
+      }
+    };
+    mutable.collectOperationalEvidence = async () => {
+      throw new Error("collectOperationalEvidence should not run when evaluation never passes");
+    };
+
+    let runPromise: Promise<void> | null = null;
+    try {
+      runPromise = mutable.run();
+      const pausedState = await waitForPausedState(paths);
+
+      expect(pausedState.state).toBe("paused");
+      expect(executeCall).toBe(3);
+      expect(evaluationCall).toBe(3);
+      expect(pausedState.last_error).toBe("Final paused summary still needs both rework attempts.");
+
+      const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+      const summaryFile = runArtifacts.find((entry) => entry.endsWith(".round.summary.md"));
+      expect(summaryFile).toBeDefined();
+
+      const summaryText = await fs.readFile(path.join(homeDir, "runs", summaryFile as string), "utf8");
+      expect(summaryText).toContain("## Auto Rework Attempts");
+      expect(summaryText).toContain("Attempt 1/2:");
+      expect(summaryText).toContain("trigger='Missing rollback coverage for the paused path.'");
+      expect(summaryText).toContain("Attempt 2/2:");
+      expect(summaryText).toContain("trigger='History still drops the first rework attempt.'");
+      expect(summaryText).toContain("## Round Outcome");
+      expect(summaryText).toContain(
+        "Paused for operator review after 2 auto rework attempts still ended in evaluator failure."
+      );
+
+      releaseLeader();
+    } finally {
+      releaseLeader();
+      await fs.writeFile(paths.stopFlagPath, "1\n", "utf8");
+      if (runPromise) {
+        await Promise.race([
+          runPromise,
+          Bun.sleep(6_000).then(() => {
+            throw new Error("Timed out stopping loop engine.");
+          })
+        ]);
+      }
+      await fs.rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
   test("preserves first successful execution evidence in the summary when later rework execution fails", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-rework-summary-test-"));
     const config = loadConfig({
