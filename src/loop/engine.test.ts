@@ -2005,6 +2005,102 @@ describe("LoopEngine auto rework", () => {
     await fs.rm(homeDir, { recursive: true, force: true });
   });
 
+  test("preserves the latest evaluation artifact and rework history when a late post-evaluation step fails", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-late-failure-evaluation-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir,
+      AILOOP_EVAL_REWORK_MAX_ATTEMPTS: "1"
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const plan: SubTask = {
+      assignee: "executor",
+      rationale: "test rationale",
+      objective: "Keep the evaluated artifact durable through late follow-up failures",
+      expected_outcome: "the final summary keeps rework history and the evaluation artifact keeps the real evaluator result",
+      impacted_files: [],
+      recommended_tools: ["read_file", "write_file", "run_shell"]
+    };
+
+    let executeCall = 0;
+    const execute = async () => {
+      executeCall += 1;
+      return {
+        actions: [makeAction("write_file"), makeAction("run_shell")],
+        toolResult: makeToolResult(executeCall === 1 ? "initial change" : "rework change")
+      };
+    };
+
+    let evaluationCall = 0;
+    const evaluate = async ({ runTimestamp }: RoundEvaluationContext): Promise<EvaluationResult> => {
+      evaluationCall += 1;
+      if (evaluationCall === 1) {
+        return {
+          ...makeEvaluation("fail", "Missing negative tests for edge cases."),
+          evidence: ["test-evidence", `Round evaluation artifact: ${buildCanonicalEvaluationPath(homeDir, runTimestamp)}`]
+        };
+      }
+
+      return {
+        ...makeEvaluation("pass", "All checks satisfied after rework."),
+        evidence: ["test-evidence", `Round evaluation artifact: ${buildCanonicalEvaluationPath(homeDir, runTimestamp)}`]
+      };
+    };
+
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      executor: { execute: typeof execute };
+      evaluator: { evaluate: typeof evaluate };
+      collectOperationalEvidence: () => Promise<{
+        summaryNote: string;
+        lines: string[];
+        stateChangeNotes: string[];
+      }>;
+      runRound: (round: number) => Promise<{ success: boolean; errorMessage?: string }>;
+    };
+    mutable.planner = { plan: async () => plan };
+    mutable.executor = { execute };
+    mutable.evaluator = { evaluate };
+    mutable.collectOperationalEvidence = async () => {
+      throw new Error("prod restart failed after evaluation");
+    };
+
+    const outcome = await mutable.runRound(1);
+
+    expect(outcome.success).toBe(false);
+    expect(outcome.errorMessage).toContain("prod restart failed after evaluation");
+    expect(executeCall).toBe(2);
+    expect(evaluationCall).toBe(2);
+
+    const { evaluationPath, evaluationText, evaluation, summaryText } = await expectCanonicalEvaluationArtifact(homeDir);
+    expect(evaluation.decision).toBe("pass");
+    expect(evaluation.justification).toBe("All checks satisfied after rework.");
+    expect(evaluation.evidence).toContain(`Round evaluation artifact: ${evaluationPath}`);
+    expect(evaluationText).not.toContain("Round summary artifact:");
+    expect(summaryText).toContain("## Auto Rework Attempts");
+    expect(summaryText).toContain("Attempt 1/1:");
+    expect(summaryText).toContain("trigger='Missing negative tests for edge cases.'");
+    expect(summaryText).toContain("evaluation=pass");
+    expect(summaryText).toContain("Latest evaluated execution: rework change");
+    expect(summaryText).toContain("- Decision: pass");
+    expect(summaryText).toContain("Late round failure after evaluation: prod restart failed after evaluation");
+    expect(summaryText).toContain("write_file ok");
+
+    const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+    const metricsFile = runArtifacts.find((entry) => entry.endsWith(".round.metrics.json"));
+    expect(metricsFile).toBeDefined();
+    const metrics = JSON.parse(await fs.readFile(path.join(homeDir, "runs", metricsFile as string), "utf8")) as {
+      evaluator_decision: string;
+      retries: { auto_rework_attempts: number };
+    };
+    expect(metrics.evaluator_decision).toBe("pass");
+    expect(metrics.retries.auto_rework_attempts).toBe(1);
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+  });
+
   test("preserves two auto rework attempts in the summary when repeated evaluator failure pauses the loop", async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-rework-pause-summary-test-"));
     const config = loadConfig({

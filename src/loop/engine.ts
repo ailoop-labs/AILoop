@@ -439,6 +439,44 @@ function withPriorSuccessfulExecution(toolResult: ToolResult, priorSuccessfulSum
   };
 }
 
+function buildPostEvaluationFailureToolResult(input: {
+  latestToolResult: ToolResult;
+  failureMessage: string;
+  errorType: string;
+  nextStateHint: "continue" | "pause";
+  artifacts: {
+    logPath: string;
+    stateChangePath: string;
+    summaryPath: string;
+  };
+}): ToolResult {
+  const latestSummary = input.latestToolResult.summary.trim();
+  const summary = latestSummary
+    ? `Latest evaluated execution: ${latestSummary} | Late round failure after evaluation: ${input.failureMessage}`
+    : `Late round failure after evaluation: ${input.failureMessage}`;
+
+  return {
+    ...input.latestToolResult,
+    status: "failure",
+    summary,
+    artifacts: {
+      ...input.latestToolResult.artifacts,
+      log_path: input.artifacts.logPath,
+      state_change_path: input.artifacts.stateChangePath,
+      bundle_path: input.artifacts.summaryPath
+    },
+    error: {
+      type: input.errorType,
+      message: input.failureMessage
+    },
+    next_state_hint: input.nextStateHint,
+    operational_evidence: [
+      ...(input.latestToolResult.operational_evidence ?? []),
+      `Late round failure after evaluation: ${input.failureMessage}`
+    ]
+  };
+}
+
 function buildPreEvaluationFailureEvaluation(input: {
   failureMessage: string;
   plannerInfrastructureFailure: boolean;
@@ -1038,6 +1076,14 @@ export class LoopEngine {
     let planningCompleted = false;
     let executionStarted = false;
     let latestToolResult: ToolResult | null = null;
+    let latestEvaluation: EvaluationResult | null = null;
+    let latestSummaryActions: ActionRecord[] = [];
+    let autoReworkAttemptCount = 0;
+    const persistRoundEvaluation = async (evaluation: EvaluationResult): Promise<void> => {
+      latestEvaluation = evaluation;
+      await writeEvaluationFile(artifacts.evaluationPath, evaluation);
+      await saveEvaluation(this.paths, round, evaluation);
+    };
 
     try {
       await enforceBudgetBeforeAction("round.bootstrap");
@@ -1116,6 +1162,7 @@ export class LoopEngine {
       let finalToolResult = withConcreteArtifactPaths(execution.toolResult, artifacts);
       latestToolResult = finalToolResult;
       let summaryActions = execution.actions;
+      latestSummaryActions = summaryActions;
       let lastSuccessfulExecution =
         finalToolResult.status === "success"
           ? {
@@ -1142,6 +1189,7 @@ export class LoopEngine {
         })
       );
       phaseTimings.evaluation += Date.now() - evaluationStartedAt;
+      await persistRoundEvaluation(evaluation);
       let autoReworkAttempts = 0;
       const failureRecoveryPath = decideEvaluationFailureRecoveryPath(evaluation, finalToolResult);
 
@@ -1149,6 +1197,7 @@ export class LoopEngine {
       if (evaluation.decision === "fail" && finalToolResult.status === "success" && failureRecoveryPath === "auto_rework") {
         for (let attempt = 1; attempt <= tacticalReworkLimit; attempt++) {
           autoReworkAttempts = attempt;
+          autoReworkAttemptCount = attempt;
           await log(`[GOVERNANCE] Tactical Rework attempt ${attempt}/${tacticalReworkLimit}`);
           const priorJustification = evaluation.justification;
           const reworkExecutionStartedAt = Date.now();
@@ -1177,6 +1226,7 @@ export class LoopEngine {
               toolResult: finalToolResult
             };
             summaryActions = execution.actions;
+            latestSummaryActions = summaryActions;
           }
           stateChange = await workspace.buildStateChange(snapshot);
           const reworkEvaluationStartedAt = Date.now();
@@ -1195,6 +1245,7 @@ export class LoopEngine {
             })
           );
           phaseTimings.evaluation += Date.now() - reworkEvaluationStartedAt;
+          await persistRoundEvaluation(evaluation);
           autoReworkNotes.push(
             `Attempt ${attempt}/${tacticalReworkLimit}: trigger='${priorJustification}' evaluation=${evaluation.decision}`
           );
@@ -1213,6 +1264,8 @@ export class LoopEngine {
           lastSuccessfulExecution.actions,
           finalToolResult.error?.message ?? "rework/governance failure"
         );
+        latestToolResult = finalToolResult;
+        latestSummaryActions = summaryActions;
       }
 
       // --- Finalize Round ---
@@ -1228,6 +1281,7 @@ export class LoopEngine {
         });
         phaseTimings.operational_followup += Date.now() - operationalFollowupStartedAt;
         finalToolResult = withOperationalEvidence(finalToolResult, operationalEvidence);
+        latestToolResult = finalToolResult;
         stateChange = appendOperationalEvidenceToStateChange(stateChange, operationalEvidence.stateChangeNotes);
         if (operationalEvidence.summaryNote.trim()) {
           await log(`Operational follow-up: ${operationalEvidence.summaryNote}`);
@@ -1314,22 +1368,31 @@ export class LoopEngine {
       let failureMessage = message;
       const plannerInfrastructureFailure = error instanceof PlannerInfrastructureError;
       let rollbackRecordedPause = error instanceof BudgetBreachError || plannerInfrastructureFailure;
-      const failureToolResult: ToolResult = {
-        status: "failure",
-        summary: plannerInfrastructureFailure
-          ? "Round aborted before execution because planner infrastructure failed."
-          : "Round failed before evaluation completed.",
-        artifacts: {
-          log_path: artifacts.logPath,
-          state_change_path: artifacts.stateChangePath,
-          bundle_path: artifacts.summaryPath
-        },
-        error: {
-          type: errorType,
-          message: failureMessage
-        },
-        next_state_hint: rollbackRecordedPause ? "pause" : "continue"
-      };
+      const failureToolResult: ToolResult =
+        latestEvaluation && latestToolResult
+          ? buildPostEvaluationFailureToolResult({
+              latestToolResult,
+              failureMessage,
+              errorType,
+              nextStateHint: rollbackRecordedPause ? "pause" : "continue",
+              artifacts
+            })
+          : {
+              status: "failure",
+              summary: plannerInfrastructureFailure
+                ? "Round aborted before execution because planner infrastructure failed."
+                : "Round failed before evaluation completed.",
+              artifacts: {
+                log_path: artifacts.logPath,
+                state_change_path: artifacts.stateChangePath,
+                bundle_path: artifacts.summaryPath
+              },
+              error: {
+                type: errorType,
+                message: failureMessage
+              },
+              next_state_hint: rollbackRecordedPause ? "pause" : "continue"
+            };
 
       if (snapshot) {
         try {
@@ -1357,7 +1420,7 @@ export class LoopEngine {
         duration_ms: Date.now() - startedAt,
         budget_limits: guardrails.limitsSnapshot(),
         budget_usage: usage,
-        evaluator_decision: "fail",
+        evaluator_decision: latestEvaluation?.decision ?? "fail",
         tool_status: "failure",
         failure_mode: resolveRoundFailureMode({
           planningCompleted,
@@ -1367,19 +1430,21 @@ export class LoopEngine {
         }),
         retries: {
           evidence_remediation_attempts: 0,
-          auto_rework_attempts: 0,
+          auto_rework_attempts: autoReworkAttemptCount,
           auto_rework_limit: this.config.evaluatorReworkMaxAttempts
         },
         phase_timings_ms: phaseTimings,
         human_interventions: this.humanInterventions,
-        hot_file_growth_lines: 0,
+        hot_file_growth_lines: latestEvaluation?.hot_file_governance ? 1 : 0,
         ...(subTaskIdentity ? { sub_task_identity: subTaskIdentity } : {})
       };
-      const failureEvaluation = buildPreEvaluationFailureEvaluation({
-        failureMessage,
-        plannerInfrastructureFailure,
-        artifacts
-      });
+      const failureEvaluation =
+        latestEvaluation ??
+        buildPreEvaluationFailureEvaluation({
+          failureMessage,
+          plannerInfrastructureFailure,
+          artifacts
+        });
 
       await writeStateChangeFile(artifacts.stateChangePath, stateChange);
       await log(`Round error: ${message}`);
@@ -1390,13 +1455,13 @@ export class LoopEngine {
       await writeSummaryFile(artifacts.summaryPath, {
         goal,
         subTask,
-        actions: [],
+        actions: latestEvaluation ? latestSummaryActions : [],
         toolResult: failureToolResult,
         evaluation: failureEvaluation,
         metrics,
         stateChange,
         risks: [failureMessage],
-        autoReworkAttempts: [],
+        autoReworkAttempts: latestEvaluation ? autoReworkNotes : [],
         nextRecommendation: rollbackRecordedPause ? "pause" : "continue",
         artifacts: {
           logPath: artifacts.logPath,
@@ -1421,7 +1486,8 @@ export class LoopEngine {
         last_error: failureMessage,
         consecutive_evaluator_failures: current.consecutive_evaluator_failures,
         previous_tool_result: failureToolResult,
-        previous_hot_file_governance: null,
+        previous_evaluation_dimensions: latestEvaluation?.dimensions,
+        previous_hot_file_governance: latestEvaluation?.hot_file_governance ?? null,
         current_budget: {
           limits: guardrails.limitsSnapshot(),
           usage
