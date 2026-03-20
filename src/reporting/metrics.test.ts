@@ -29,7 +29,14 @@ function makeSubTask(objective: string, expectedOutcome: string): SubTask {
   };
 }
 
-function makeMetrics(round: number, timestamp: string, subTask: SubTask, usdUsed = 0.1): RoundMetrics {
+function makeMetrics(
+  round: number,
+  timestamp: string,
+  subTask: SubTask,
+  usdUsed = 0.1,
+  actionsUsed = 1,
+  actionLimit = 5
+): RoundMetrics {
   return {
     round,
     run_timestamp: timestamp,
@@ -37,11 +44,11 @@ function makeMetrics(round: number, timestamp: string, subTask: SubTask, usdUsed
     budget_limits: {
       usdPerRound: 1,
       timeMinutes: 1,
-      actions: 5
+      actions: actionLimit
     },
     budget_usage: {
       usdUsed,
-      actionsUsed: 1,
+      actionsUsed,
       elapsedMs: 1_000
     },
     evaluator_decision: "pass",
@@ -72,10 +79,19 @@ async function writeRoundRecord(
     summary: string;
     stateChange: string;
     usdUsed?: number;
+    actionsUsed?: number;
+    actionLimit?: number;
   }
 ): Promise<void> {
   const artifacts = buildRoundArtifactPaths(runsDir, options.timestamp);
-  const metrics = makeMetrics(options.round, options.timestamp, options.subTask, options.usdUsed);
+  const metrics = makeMetrics(
+    options.round,
+    options.timestamp,
+    options.subTask,
+    options.usdUsed,
+    options.actionsUsed,
+    options.actionLimit
+  );
 
   await Promise.all([
     fs.writeFile(artifacts.summaryPath, `${options.summary}\n`, "utf8"),
@@ -201,6 +217,63 @@ describe("buildExternalValidationMetricsReport", () => {
       expect(siblingTask?.rounds).toBe(1);
       expect(siblingTask?.total_cost_usd).toBe(0.8);
       expect(siblingTask?.average_cost_usd_per_round).toBe(0.8);
+    } finally {
+      await fs.rm(runsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("captures same-round action-budget evidence for the most action-heavy stable task identity", async () => {
+    const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-metrics-action-budget-test-"));
+    const actionHeavyTask = makeSubTask(
+      "Inspect action-budget evidence for the most action-heavy round.",
+      "The report surfaces persisted actionsUsed/actions and same-round artifact references."
+    );
+    const lowerActionTask = makeSubTask(
+      "Keep lower-action rounds from replacing the most action-heavy evidence bundle.",
+      "The report keeps the highest action-budget usage bundle for review."
+    );
+
+    try {
+      const expectedArtifacts = buildRoundArtifactPaths(runsDir, "2026-03-18T14-05-00-000Z");
+
+      await writeRoundRecord(runsDir, {
+        round: 1,
+        timestamp: "2026-03-18T14-00-00-000Z",
+        subTask: lowerActionTask,
+        summary: "Recorded a lower-action round for comparison.",
+        stateChange: "No state changes detected.",
+        actionsUsed: 3,
+        actionLimit: 10
+      });
+
+      await writeRoundRecord(runsDir, {
+        round: 2,
+        timestamp: "2026-03-18T14-05-00-000Z",
+        subTask: actionHeavyTask,
+        summary: "Recorded the most action-heavy round for operator review.",
+        stateChange: "No state changes detected.",
+        actionsUsed: 7,
+        actionLimit: 10
+      });
+
+      const report = await buildExternalValidationMetricsReport(runsDir);
+
+      expect(report.action_budget_evidence).toEqual({
+        stable_id: buildRoundSubTaskIdentity(actionHeavyTask).stable_id,
+        assignee: "executor",
+        objective: actionHeavyTask.objective,
+        expected_outcome: actionHeavyTask.expected_outcome,
+        round: 2,
+        run_timestamp: "2026-03-18T14-05-00-000Z",
+        actions_used: 7,
+        action_limit: 10,
+        threshold_breached: false,
+        artifact_references: {
+          summary_path: expectedArtifacts.summaryPath,
+          evaluation_path: expectedArtifacts.evaluationPath,
+          state_change_path: expectedArtifacts.stateChangePath
+        }
+      });
     } finally {
       await fs.rm(runsDir, { recursive: true, force: true });
     }

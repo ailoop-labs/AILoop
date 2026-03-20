@@ -5,6 +5,7 @@ import type {
   BudgetLimits,
   BudgetUsage,
   EvaluationResult,
+  ExternalValidationActionBudgetEvidence,
   ExternalValidationChecklistMetrics,
   ExternalValidationMetricsReport,
   ExternalValidationTaskMetrics,
@@ -52,6 +53,7 @@ export interface RoundMetrics {
 }
 
 export type {
+  ExternalValidationActionBudgetEvidence,
   ExternalValidationChecklistMetrics,
   ExternalValidationMetricsReport,
   ExternalValidationTaskMetrics
@@ -161,9 +163,60 @@ function isEvaluatorInfrastructureFailure(evaluation: EvaluationResult | null): 
   return /^Evaluator infrastructure failure:/i.test(evaluation.justification);
 }
 
+function compareActionBudgetEvidence(
+  left: ExternalValidationActionBudgetEvidence,
+  right: ExternalValidationActionBudgetEvidence
+): number {
+  const leftRatio = left.action_limit > 0 ? left.actions_used / left.action_limit : Number.POSITIVE_INFINITY;
+  const rightRatio = right.action_limit > 0 ? right.actions_used / right.action_limit : Number.POSITIVE_INFINITY;
+
+  if (leftRatio !== rightRatio) {
+    return leftRatio - rightRatio;
+  }
+  if (left.actions_used !== right.actions_used) {
+    return left.actions_used - right.actions_used;
+  }
+  if (left.run_timestamp !== right.run_timestamp) {
+    return left.run_timestamp.localeCompare(right.run_timestamp);
+  }
+
+  return left.stable_id.localeCompare(right.stable_id);
+}
+
+function buildActionBudgetEvidence(
+  metrics: RoundMetrics,
+  record: Awaited<ReturnType<typeof listRunRecords>>[number]
+): ExternalValidationActionBudgetEvidence | null {
+  const identity = metrics.sub_task_identity;
+  if (!identity?.stable_id) {
+    return null;
+  }
+
+  const actionsUsed = normalizeCounter(metrics.budget_usage?.actionsUsed);
+  const actionLimit = normalizeCounter(metrics.budget_limits?.actions);
+
+  return {
+    stable_id: identity.stable_id,
+    assignee: identity.assignee,
+    objective: identity.objective,
+    expected_outcome: identity.expected_outcome,
+    round: metrics.round,
+    run_timestamp: metrics.run_timestamp,
+    actions_used: actionsUsed,
+    action_limit: actionLimit,
+    threshold_breached: actionLimit > 0 ? actionsUsed > actionLimit : actionsUsed > 0,
+    artifact_references: {
+      summary_path: record.summaryPath ?? null,
+      evaluation_path: record.evaluationPath ?? null,
+      state_change_path: record.stateChangePath ?? null
+    }
+  };
+}
+
 async function summarizeExternalValidationMetricsReport(runsDir: string): Promise<ExternalValidationMetricsReport> {
   const records = await listRunRecords(runsDir, Number.MAX_SAFE_INTEGER);
   const tasksByStableId = new Map<string, ExternalValidationTaskMetrics>();
+  let actionBudgetEvidence: ExternalValidationActionBudgetEvidence | null = null;
 
   for (const record of records.sort((left, right) => left.timestamp.localeCompare(right.timestamp))) {
     const [metrics, evaluation, summaryText, stateChangeText] = await Promise.all([
@@ -176,6 +229,14 @@ async function summarizeExternalValidationMetricsReport(runsDir: string): Promis
 
     if (!identity?.stable_id) {
       continue;
+    }
+
+    const currentActionBudgetEvidence = buildActionBudgetEvidence(metrics, record);
+    if (
+      currentActionBudgetEvidence &&
+      (!actionBudgetEvidence || compareActionBudgetEvidence(currentActionBudgetEvidence, actionBudgetEvidence) > 0)
+    ) {
+      actionBudgetEvidence = currentActionBudgetEvidence;
     }
 
     const latestDecision = evaluation?.decision ?? metrics.evaluator_decision ?? "unknown";
@@ -239,6 +300,7 @@ async function summarizeExternalValidationMetricsReport(runsDir: string): Promis
       evaluator_infrastructure_failures: totalEvaluatorInfrastructureFailures,
       hot_file_growth_lines: totalHotFileGrowthLines
     },
+    action_budget_evidence: actionBudgetEvidence,
     tasks
   };
 }

@@ -280,6 +280,8 @@ function makePersistedRoundMetrics(input: {
   human_interventions: number;
   hot_file_growth_lines: number;
   usdUsed?: number;
+  actionsUsed?: number;
+  actionLimit?: number;
   sub_task_identity?: ReturnType<typeof buildRoundSubTaskIdentity>;
 }): Record<string, unknown> {
   return {
@@ -289,12 +291,12 @@ function makePersistedRoundMetrics(input: {
     budget_limits: {
       usdPerRound: 1,
       timeMinutes: 1,
-      actions: 10
+      actions: input.actionLimit ?? 10
     },
     budget_usage: {
       usdUsed: input.usdUsed ?? 0.1,
       elapsedMs: 500,
-      actionsUsed: 2
+      actionsUsed: input.actionsUsed ?? 2
     },
     evaluator_decision: input.evaluator_decision,
     tool_status: "success",
@@ -2747,6 +2749,98 @@ describe("external-validation report CLI", () => {
       expect(result.stdout).toContain(
         `- Track pilot cost by task identity | stable_id=${separateTask.stable_id} | total_usd=0.8000 | avg_usd_per_round=0.8000`
       );
+    } finally {
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("renders below-threshold action-budget evidence descriptively without governance escalation wording", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-control-external-validation-action-budget-"));
+    const homeDir = path.join(workspaceRoot, ".ailoop");
+    const runsDir = path.join(homeDir, "runs");
+    const actionHeavyTask = buildRoundSubTaskIdentity({
+      rationale: "Operators need the most action-heavy persisted round called out directly in the report.",
+      assignee: "executor",
+      objective: "Inspect action-heavy pilot evidence",
+      expected_outcome: "The report links the same-round evidence bundle for the highest actionsUsed/actions round.",
+      impacted_files: ["/tmp/external-validation.ts"],
+      recommended_tools: ["read_file", "write_file", "run_shell"]
+    });
+    const lowerActionTask = buildRoundSubTaskIdentity({
+      rationale: "A lower-action round should not replace the most action-heavy evidence bundle.",
+      assignee: "executor",
+      objective: "Inspect action-heavy pilot evidence",
+      expected_outcome: "A lower action count stays out of the report evidence section.",
+      impacted_files: ["/tmp/metrics.ts"],
+      recommended_tools: ["read_file", "write_file", "run_shell"]
+    });
+    const expectedTimestamp = "2026-03-18T11-15-00-000Z";
+
+    try {
+      await fs.mkdir(runsDir, { recursive: true });
+
+      await writeRunArtifacts(runsDir, "2026-03-18T11-10-00-000Z", {
+        summary: "# Round Summary\n\nRecorded a lower-action comparison round.\n",
+        metrics: makePersistedRoundMetrics({
+          round: 1,
+          run_timestamp: "2026-03-18T11-10-00-000Z",
+          evaluator_decision: "pass",
+          human_interventions: 0,
+          hot_file_growth_lines: 0,
+          actionsUsed: 4,
+          actionLimit: 10,
+          sub_task_identity: lowerActionTask
+        }),
+        evaluation: {
+          decision: "pass",
+          justification: "Comparison round completed successfully.",
+          evidence: []
+        },
+        stateChange: "No state changes detected."
+      });
+
+      await writeRunArtifacts(runsDir, expectedTimestamp, {
+        summary: "# Round Summary\n\nRecorded the most action-heavy round within the documented budget.\n",
+        metrics: makePersistedRoundMetrics({
+          round: 2,
+          run_timestamp: expectedTimestamp,
+          evaluator_decision: "fail",
+          human_interventions: 1,
+          hot_file_growth_lines: 1,
+          actionsUsed: 7,
+          actionLimit: 10,
+          sub_task_identity: actionHeavyTask
+        }),
+        evaluation: {
+          decision: "fail",
+          justification: "One more bounded retry is available.",
+          evidence: []
+        },
+        stateChange: "No state changes detected."
+      });
+
+      const resolvedRunsDir = await fs.realpath(runsDir);
+      const result = runAiloopCli(["external-validation", "report"], workspaceRoot);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toContain("Action-budget evidence (most action-heavy round):");
+      expect(result.stdout).toContain(
+        `- Inspect action-heavy pilot evidence | stable_id=${actionHeavyTask.stable_id} | round=2 | actions=7 / 10`
+      );
+      expect(result.stdout).toContain(`- Timestamp: ${expectedTimestamp}`);
+      expect(result.stdout).toContain("- Interpretation: Within the persisted action budget; descriptive evidence only.");
+      expect(result.stdout).toContain(
+        `- Summary artifact: ${path.join(resolvedRunsDir, `${expectedTimestamp}.round.summary.md`)}`
+      );
+      expect(result.stdout).toContain(
+        `- Evaluation artifact: ${path.join(resolvedRunsDir, `${expectedTimestamp}.round.evaluation.json`)}`
+      );
+      expect(result.stdout).toContain(
+        `- State-change artifact: ${path.join(resolvedRunsDir, `${expectedTimestamp}.round.state_change.txt`)}`
+      );
+      expect(result.stdout).not.toContain("CCB");
+      expect(result.stdout).not.toContain("escalat");
     } finally {
       await fs.rm(workspaceRoot, { recursive: true, force: true });
     }

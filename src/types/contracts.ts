@@ -233,10 +233,30 @@ export interface ExternalValidationChecklistBaselineComparison {
   };
 }
 
+export interface ExternalValidationActionBudgetArtifactReferences {
+  summary_path: string | null;
+  evaluation_path: string | null;
+  state_change_path: string | null;
+}
+
+export interface ExternalValidationActionBudgetEvidence {
+  stable_id: string;
+  assignee: SubTask["assignee"];
+  objective: string;
+  expected_outcome: string;
+  round: number;
+  run_timestamp: string;
+  actions_used: number;
+  action_limit: number;
+  threshold_breached: boolean;
+  artifact_references: ExternalValidationActionBudgetArtifactReferences;
+}
+
 export interface ExternalValidationMetricsReport {
   task_count: number;
   successful_task_count: number;
   checklist: ExternalValidationChecklistMetrics;
+  action_budget_evidence: ExternalValidationActionBudgetEvidence | null;
   tasks: ExternalValidationTaskMetrics[];
 }
 
