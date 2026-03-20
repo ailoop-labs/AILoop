@@ -123,6 +123,45 @@ function makeRunHistoryItem(overrides: Partial<RunHistoryItem> = {}): RunHistory
   };
 }
 
+function makeExternalValidationTask(
+  overrides: Partial<{
+    stable_id: string;
+    assignee: "executor" | "designer";
+    objective: string;
+    expected_outcome: string;
+    rounds: number;
+    total_cost_usd: number;
+    average_cost_usd_per_round: number;
+    successful: boolean;
+    latest_decision: "pass" | "fail" | "unknown";
+    human_interventions: number;
+    no_op_claim_mismatches: number;
+    evaluator_infrastructure_failures: number;
+    hot_file_growth_lines: number;
+    first_run_timestamp: string;
+    latest_run_timestamp: string;
+  }> = {}
+) {
+  return {
+    stable_id: "task-a",
+    assignee: "designer" as const,
+    objective: "Surface pilot readiness in the Web Console",
+    expected_outcome: "Operators can assess readiness without parsing CLI output.",
+    rounds: 3,
+    total_cost_usd: 0.45,
+    average_cost_usd_per_round: 0.15,
+    successful: true,
+    latest_decision: "pass" as const,
+    human_interventions: 1,
+    no_op_claim_mismatches: 2,
+    evaluator_infrastructure_failures: 1,
+    hot_file_growth_lines: 5,
+    first_run_timestamp: "2026-03-18T01-00-00-000Z",
+    latest_run_timestamp: "2026-03-18T03-00-00-000Z",
+    ...overrides
+  };
+}
+
 describe("RunArtifactEvidenceGrid", () => {
   test("renders populated evidence blocks as compact labeled cards", () => {
     const html = renderToStaticMarkup(<RunArtifactEvidenceGrid report={makeReport()} />);
@@ -692,6 +731,65 @@ describe("ExternalValidationChecklistCard", () => {
     expect(html).toContain("6 lines");
   });
 
+  test("renders a progressive task drill-down when per-task pilot telemetry is present", () => {
+    const html = renderToStaticMarkup(
+      <ExternalValidationChecklistCard
+        report={{
+          task_count: 2,
+          successful_task_count: 1,
+          checklist: {
+            rounds_per_successful_task: 3,
+            human_interventions_per_task: 1,
+            average_cost_usd_per_round: 0.225,
+            evaluator_infrastructure_failures: 1,
+            hot_file_growth_lines: 7
+          },
+          tasks: [
+            makeExternalValidationTask(),
+            makeExternalValidationTask({
+              stable_id: "task-b",
+              assignee: "executor",
+              objective: "Run the external-validation pilot on a fixture repository",
+              expected_outcome: "The pilot completes without evaluator infrastructure faults.",
+              rounds: 1,
+              total_cost_usd: 0.8,
+              average_cost_usd_per_round: 0.8,
+              successful: false,
+              latest_decision: "fail",
+              human_interventions: 0,
+              no_op_claim_mismatches: 1,
+              evaluator_infrastructure_failures: 0,
+              hot_file_growth_lines: 2
+            })
+          ]
+        }}
+      />
+    );
+
+    expect(html).toContain("Task Breakdown");
+    expect(html).toContain("Per-task pilot telemetry");
+    expect(html).toContain("Surface pilot readiness in the Web Console");
+    expect(html).toContain("Run the external-validation pilot on a fixture repository");
+    expect(html).toContain("stable_id=task-a");
+    expect(html).toContain("stable_id=task-b");
+    expect(html).toContain("Latest Pass");
+    expect(html).toContain("Latest Fail");
+    expect(html).toContain("Completed at least once");
+    expect(html).toContain("Still seeking pass");
+    expect(html).toContain("Rounds");
+    expect(html).toContain("Latest decision");
+    expect(html).toContain("Total cost");
+    expect(html).toContain("Human interventions");
+    expect(html).toContain("Infra failures");
+    expect(html).toContain("No-op mismatches");
+    expect(html).toContain("Hot-file growth");
+    expect(html).toContain("$0.4500");
+    expect(html).toContain("$0.1500");
+    expect(html).toContain("$0.8000");
+    expect(html).toContain(">2<");
+    expect(html).toContain("5 lines");
+  });
+
   test("renders an explicit empty state when no pilot-ready task aggregates exist", () => {
     const html = renderToStaticMarkup(
       <ExternalValidationChecklistCard
@@ -713,6 +811,7 @@ describe("ExternalValidationChecklistCard", () => {
     expect(html).toContain("waiting for pilot data");
     expect(html).toContain("No qualifying Phase 3 pilot data yet");
     expect(html).toContain("did not find persisted round metrics with external-validation task identities");
+    expect(html).not.toContain("Per-task pilot telemetry");
   });
 
   test("surfaces collected pilot data even when none of the tasks have succeeded yet", () => {

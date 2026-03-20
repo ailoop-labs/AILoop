@@ -224,7 +224,20 @@ interface ExternalValidationMetricsReport {
   checklist: ExternalValidationChecklistMetrics;
   tasks: Array<{
     stable_id: string;
+    assignee: "executor" | "designer";
     objective: string;
+    expected_outcome: string;
+    rounds: number;
+    total_cost_usd: number;
+    average_cost_usd_per_round: number;
+    successful: boolean;
+    latest_decision: "pass" | "fail" | "unknown";
+    human_interventions: number;
+    no_op_claim_mismatches: number;
+    evaluator_infrastructure_failures: number;
+    hot_file_growth_lines: number;
+    first_run_timestamp: string;
+    latest_run_timestamp: string;
   }>;
   baseline_comparison?: ExternalValidationChecklistBaselineComparison;
 }
@@ -329,6 +342,25 @@ const checklistSignalTone: Record<ChecklistSignalTone, string> = {
   warning: "border-warning/40 bg-warning/10 text-warning",
   critical: "border-ember/40 bg-ember/10 text-ember"
 };
+
+const externalValidationTaskAssigneeTone: Record<"executor" | "designer", string> = {
+  executor: "border-warning/35 bg-warning/10 text-warning",
+  designer: "border-sky-300/25 bg-sky-300/10 text-sky-100"
+};
+
+const externalValidationTaskDecisionTone: Record<"pass" | "fail" | "unknown", string> = {
+  pass: "border-accent/30 bg-accent/10 text-accent",
+  fail: "border-ember/40 bg-ember/10 text-ember",
+  unknown: "border-white/10 bg-ink/70 text-mist/75"
+};
+
+function formatExternalValidationTaskAssignee(assignee: "executor" | "designer"): string {
+  return assignee === "designer" ? "Designer" : "Executor";
+}
+
+function formatExternalValidationTaskDecision(decision: "pass" | "fail" | "unknown"): string {
+  return decision === "pass" ? "Pass" : decision === "fail" ? "Fail" : "Unknown";
+}
 
 function resolvePilotEvidenceBadge(report: Pick<ExternalValidationMetricsReport, "task_count" | "successful_task_count">): {
   label: string;
@@ -2169,6 +2201,7 @@ export function ExternalValidationChecklistCard({
     : [];
   const improvedMetricCount = comparisonCards.filter((card) => card.comparison.delta !== null && card.comparison.delta < 0).length;
   const regressedMetricCount = comparisonCards.filter((card) => card.comparison.delta !== null && card.comparison.delta > 0).length;
+  const latestFailureCount = report.tasks.filter((task) => task.latest_decision === "fail").length;
 
   return (
     <section className="mt-4 rounded-2xl border border-white/10 bg-ink/60 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.04)]">
@@ -2344,6 +2377,164 @@ export function ExternalValidationChecklistCard({
               </div>
             ))}
           </div>
+
+          {report.tasks.length > 0 ? (
+            <div className="mt-4 rounded-2xl border border-white/10 bg-panel/50 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.18em] text-mist/55">Task Breakdown</p>
+                  <h3 className="mt-2 text-lg font-semibold text-mist">Per-task pilot telemetry</h3>
+                  <p className="mt-2 max-w-3xl text-sm leading-6 text-mist/75">
+                    Expand a task to inspect the round burden, latest decision, and failure pressure without opening raw
+                    artifact files.
+                  </p>
+                </div>
+                <div className="grid min-w-[220px] gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-white/10 bg-ink/70 p-4">
+                    <p className="text-[11px] uppercase tracking-[0.18em] text-mist/55">Task cards</p>
+                    <p className="mt-2 text-2xl font-semibold text-mist">{report.tasks.length}</p>
+                  </div>
+                  <div className="rounded-2xl border border-warning/35 bg-warning/10 p-4 text-warning">
+                    <p className="text-[11px] uppercase tracking-[0.18em] text-current/75">Latest failures</p>
+                    <p className="mt-2 text-2xl font-semibold text-mist">{latestFailureCount}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                {report.tasks.map((task) => {
+                  const detailCards = [
+                    {
+                      label: "Rounds",
+                      value: formatChecklistCount(task.rounds),
+                      tone: "border-white/10 bg-panel/70 text-mist/80"
+                    },
+                    {
+                      label: "Latest decision",
+                      value: formatExternalValidationTaskDecision(task.latest_decision),
+                      tone: externalValidationTaskDecisionTone[task.latest_decision]
+                    },
+                    {
+                      label: "Total cost",
+                      value: formatChecklistUsd(task.total_cost_usd),
+                      tone: "border-white/10 bg-panel/70 text-mist/80"
+                    },
+                    {
+                      label: "Average cost / round",
+                      value: formatChecklistUsd(task.average_cost_usd_per_round),
+                      tone: "border-white/10 bg-panel/70 text-mist/80"
+                    },
+                    {
+                      label: "Human interventions",
+                      value: formatChecklistCount(task.human_interventions),
+                      tone: task.human_interventions === 0 ? checklistSignalTone.good : checklistSignalTone.warning
+                    },
+                    {
+                      label: "Infra failures",
+                      value: formatChecklistCount(task.evaluator_infrastructure_failures),
+                      tone:
+                        task.evaluator_infrastructure_failures === 0
+                          ? checklistSignalTone.good
+                          : checklistSignalTone.critical
+                    },
+                    {
+                      label: "No-op mismatches",
+                      value: formatChecklistCount(task.no_op_claim_mismatches),
+                      tone: task.no_op_claim_mismatches === 0 ? checklistSignalTone.good : checklistSignalTone.warning
+                    },
+                    {
+                      label: "Hot-file growth",
+                      value: formatChecklistLines(task.hot_file_growth_lines),
+                      tone: task.hot_file_growth_lines === 0 ? checklistSignalTone.good : checklistSignalTone.warning
+                    }
+                  ] as const;
+
+                  return (
+                    <details
+                      key={task.stable_id}
+                      className="rounded-2xl border border-white/10 bg-ink/55"
+                      open={report.tasks.length === 1}
+                    >
+                      <summary className="cursor-pointer list-none px-4 py-4 [&::-webkit-details-marker]:hidden">
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span
+                                className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${externalValidationTaskAssigneeTone[task.assignee]}`}
+                              >
+                                {formatExternalValidationTaskAssignee(task.assignee)}
+                              </span>
+                              <span
+                                className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${externalValidationTaskDecisionTone[task.latest_decision]}`}
+                              >
+                                Latest {formatExternalValidationTaskDecision(task.latest_decision)}
+                              </span>
+                              <span
+                                className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${task.successful ? checklistSignalTone.good : checklistSignalTone.neutral}`}
+                              >
+                                {task.successful ? "Completed at least once" : "Still seeking pass"}
+                              </span>
+                            </div>
+                            <h4 className="mt-3 text-base font-semibold text-mist">{task.objective}</h4>
+                            <p className="mt-2 max-w-3xl text-sm leading-6 text-mist/70">{task.expected_outcome}</p>
+                            <p className="mt-3 font-mono text-[11px] text-mist/45">stable_id={task.stable_id}</p>
+                          </div>
+
+                          <div className="grid min-w-[240px] gap-3 sm:grid-cols-3">
+                            <div className="rounded-2xl border border-white/10 bg-panel/70 p-3">
+                              <p className="text-[11px] uppercase tracking-[0.18em] text-mist/55">Rounds</p>
+                              <p className="mt-2 text-xl font-semibold text-mist">{formatChecklistCount(task.rounds)}</p>
+                            </div>
+                            <div className="rounded-2xl border border-white/10 bg-panel/70 p-3">
+                              <p className="text-[11px] uppercase tracking-[0.18em] text-mist/55">Avg cost / round</p>
+                              <p className="mt-2 text-xl font-semibold text-mist">
+                                {formatChecklistUsd(task.average_cost_usd_per_round)}
+                              </p>
+                            </div>
+                            <div className="rounded-2xl border border-white/10 bg-panel/70 p-3">
+                              <p className="text-[11px] uppercase tracking-[0.18em] text-mist/55">Interventions</p>
+                              <p className="mt-2 text-xl font-semibold text-mist">
+                                {formatChecklistCount(task.human_interventions)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </summary>
+
+                      <div className="border-t border-white/10 px-4 pb-4 pt-4">
+                        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                          {detailCards.map((card) => (
+                            <div key={card.label} className={`rounded-2xl border p-4 ${card.tone}`}>
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="text-[11px] uppercase tracking-[0.18em] text-current/80">{card.label}</p>
+                                <span className="h-2.5 w-2.5 rounded-full bg-current shadow-[0_0_10px_currentColor]" />
+                              </div>
+                              <p className="mt-3 text-xl font-semibold text-mist">{card.value}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="mt-4 grid gap-3 md:grid-cols-2">
+                          <div className="rounded-2xl border border-white/10 bg-panel/70 p-4">
+                            <p className="text-[11px] uppercase tracking-[0.18em] text-mist/55">First observed</p>
+                            <p className="mt-2 text-sm font-semibold text-mist">
+                              {formatRunTimestamp(task.first_run_timestamp)}
+                            </p>
+                          </div>
+                          <div className="rounded-2xl border border-white/10 bg-panel/70 p-4">
+                            <p className="text-[11px] uppercase tracking-[0.18em] text-mist/55">Latest observed</p>
+                            <p className="mt-2 text-sm font-semibold text-mist">
+                              {formatRunTimestamp(task.latest_run_timestamp)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </details>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
         </>
       )}
     </section>
