@@ -243,16 +243,21 @@ export class DatabaseManager {
     );
   }
 
-  async saveCCBSession(roundId: number, session: any) {
+  async saveCCBSession(roundId: number, session: any, proposedChange: string | null = null) {
     const sessionQuery = this.db.prepare(`
       INSERT INTO ccb_sessions (round_id, proposed_change, final_decision)
       VALUES (?, ?, ?)
     `);
 
+    const normalizedProposedChange =
+      proposedChange ?? session.proposed_change ?? session.proposedChange ?? null;
+    const normalizedFinalDecision =
+      session.final_decision ?? session.finalDecision ?? session.decision ?? null;
+
     const result = sessionQuery.run(
       roundId,
-      session.proposed_change,
-      session.final_decision
+      normalizedProposedChange,
+      normalizedFinalDecision
     );
 
     const sessionId = result.lastInsertRowid;

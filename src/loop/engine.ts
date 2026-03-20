@@ -842,7 +842,12 @@ export class LoopEngine {
               const ccbExecution = this.ccb.run(currentStateData.round, decision, readmeContent);
               const ccbResult = await Promise.race([ccbExecution, ccbStopFlagChecker]);
 
-              await saveCCBSession(this.paths, currentStateData.round, ccbResult);
+              await saveCCBSession(
+                this.paths,
+                currentStateData.round,
+                ccbResult,
+                decision.proposed_readme_change ?? null
+              );
 
               // Check stop flag after CCB execution as it might take time
               if (await hasFlag(this.paths.stopFlagPath)) {

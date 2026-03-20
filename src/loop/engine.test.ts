@@ -19,6 +19,7 @@ import { ensureLoopHome, readLoopState, setFlag, type LoopPaths, writeLoopState 
 import { writeActiveRequirementArtifact } from "../product/requirements";
 import { WorkspaceManager } from "../environment/workspace";
 import { fileExists } from "../utils/fs";
+import { DatabaseManager } from "../utils/db";
 import {
   LoopEngine,
   buildEvaluatorReworkInstructions,
@@ -2131,6 +2132,157 @@ describe("LoopEngine auto rework", () => {
           })
         ]);
       }
+      await fs.rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  test("persists failed-round artifacts with leader and CCB decisions for the same exhausted auto-rework round", async () => {
+    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-engine-governance-bundle-test-"));
+    const config = loadConfig({
+      AILOOP_HOME: homeDir,
+      AILOOP_EVAL_REWORK_MAX_ATTEMPTS: "2"
+    });
+    const engine = new LoopEngine(config);
+    const paths = (engine as unknown as { paths: LoopPaths }).paths;
+    await ensureLoopHome(paths);
+
+    const plan: SubTask = {
+      assignee: "executor",
+      rationale: "test rationale",
+      objective: "Keep paused governance history aligned end to end",
+      expected_outcome: "failed round artifacts and governance records stay attached to the same round",
+      impacted_files: [],
+      recommended_tools: ["read_file", "write_file", "run_shell"]
+    };
+
+    let executeCall = 0;
+    const execute = async () => {
+      executeCall += 1;
+      return {
+        actions: [makeAction("write_file"), makeAction("run_shell")],
+        toolResult: makeToolResult(`governance rework ${executeCall}`)
+      };
+    };
+
+    let evaluationCall = 0;
+    const evaluate = async ({ runTimestamp }: RoundEvaluationContext): Promise<EvaluationResult> => {
+      evaluationCall += 1;
+      if (evaluationCall === 1) {
+        return {
+          ...makeEvaluation("fail", "Missing rollback coverage for the paused path."),
+          evidence: ["test-evidence", `Round evaluation artifact: ${buildCanonicalEvaluationPath(homeDir, runTimestamp)}`]
+        };
+      }
+      if (evaluationCall === 2) {
+        return {
+          ...makeEvaluation("fail", "History still drops the first rework attempt."),
+          evidence: ["test-evidence", `Round evaluation artifact: ${buildCanonicalEvaluationPath(homeDir, runTimestamp)}`]
+        };
+      }
+      return {
+        ...makeEvaluation("fail", "Final paused summary still needs both rework attempts before governance handoff."),
+        evidence: ["test-evidence", `Round evaluation artifact: ${buildCanonicalEvaluationPath(homeDir, runTimestamp)}`]
+      };
+    };
+
+    const leaderDecision: LeaderDecision = {
+      rationale: "The repeated paused failure now requires constitutional review of the governance flow.",
+      action: "escalate_to_ccb",
+      diagnosis_type: "constitutional_conflict",
+      instructions: ["Pause and collect the failed auto-rework evidence bundle for review."],
+      proposed_readme_change: "# Constitution patch\n\nClarify the paused governance handoff.\n"
+    };
+
+    const ccbResult = {
+      decision: "escalate_to_human" as const,
+      rationale: "Human review is required before changing the constitutional workflow.",
+      experts: [
+        {
+          expert_role: "senior_dev" as const,
+          vote: "reject" as const,
+          rationale: "The implementation needs a narrower fix before any README change.",
+          incapacity_flag: false
+        },
+        {
+          expert_role: "qa_lead" as const,
+          vote: "reject" as const,
+          rationale: "Keep the paused artifact trail intact and request human review.",
+          incapacity_flag: false
+        },
+        {
+          expert_role: "product_owner" as const,
+          vote: "reject" as const,
+          rationale: "This policy change needs product approval.",
+          incapacity_flag: false
+        }
+      ]
+    };
+
+    const mutable = engine as unknown as {
+      planner: { plan: () => Promise<SubTask> };
+      executor: { execute: typeof execute };
+      evaluator: { evaluate: typeof evaluate };
+      leader: { execute: () => Promise<LeaderDecision> };
+      ccb: { run: () => Promise<typeof ccbResult> };
+      collectOperationalEvidence: () => Promise<{
+        summaryNote: string;
+        lines: string[];
+        stateChangeNotes: string[];
+      }>;
+      run: () => Promise<void>;
+    };
+    mutable.planner = { plan: async () => plan };
+    mutable.executor = { execute };
+    mutable.evaluator = { evaluate };
+    mutable.leader = { execute: async () => leaderDecision };
+    mutable.ccb = { run: async () => ccbResult };
+    mutable.collectOperationalEvidence = async () => {
+      throw new Error("collectOperationalEvidence should not run when evaluation never passes");
+    };
+
+    try {
+      await mutable.run();
+
+      expect(executeCall).toBe(3);
+      expect(evaluationCall).toBe(3);
+
+      const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+      const stateChangeFile = runArtifacts.find((entry) => entry.endsWith(".round.state_change.txt"));
+      expect(stateChangeFile).toBeDefined();
+      const stateChangeText = await fs.readFile(path.join(homeDir, "runs", stateChangeFile as string), "utf8");
+      expect(stateChangeText.trim().length).toBeGreaterThan(0);
+
+      const { evaluationPath, evaluationText, evaluation, summaryText } = await expectCanonicalEvaluationArtifact(homeDir);
+      expect(evaluationText).toContain("\"decision\": \"fail\"");
+      expect(evaluation.evidence).toContain(`Round evaluation artifact: ${evaluationPath}`);
+      expect(summaryText).toContain("## Auto Rework Attempts");
+      expect(summaryText).toContain("Attempt 1/2:");
+      expect(summaryText).toContain("Attempt 2/2:");
+      expect(summaryText).toContain("## Round Outcome");
+      expect(summaryText).toContain(
+        "Paused for operator review after 2 auto rework attempts still ended in evaluator failure."
+      );
+
+      const db = new DatabaseManager({ dbPath: paths.dbPath });
+      try {
+        expect(await db.getGovernanceDetails(1)).toEqual({
+          hot_file_governance: null,
+          leader: {
+            rationale: leaderDecision.rationale,
+            action: leaderDecision.action,
+            diagnosis_type: leaderDecision.diagnosis_type,
+            instructions: leaderDecision.instructions
+          },
+          ccb: {
+            proposed_change: leaderDecision.proposed_readme_change,
+            final_decision: ccbResult.decision,
+            experts: ccbResult.experts
+          }
+        });
+      } finally {
+        db.close();
+      }
+    } finally {
       await fs.rm(homeDir, { recursive: true, force: true });
     }
   });

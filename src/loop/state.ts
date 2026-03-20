@@ -234,9 +234,14 @@ export async function saveLeaderStrategy(paths: LoopPaths, roundId: number, stra
   db.close();
 }
 
-export async function saveCCBSession(paths: LoopPaths, roundId: number, session: any): Promise<void> {
+export async function saveCCBSession(
+  paths: LoopPaths,
+  roundId: number,
+  session: any,
+  proposedChange: string | null = null
+): Promise<void> {
   const db = new DatabaseManager({ dbPath: paths.dbPath });
-  await db.saveCCBSession(roundId, session);
+  await db.saveCCBSession(roundId, session, proposedChange);
   db.close();
 }
 

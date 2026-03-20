@@ -1667,6 +1667,143 @@ export function RunHistoryCard({
   );
 }
 
+export function GovernanceLifecyclePanel({
+  governance,
+  report
+}: {
+  governance: GovernanceDetails;
+  report: RoundReport | null;
+}) {
+  return (
+    <section>
+      <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">Governance Lifecycle</h4>
+      <div className="rounded-2xl border border-white/10 bg-ink/60 p-6 shadow-inner">
+        <div className="relative flex flex-col gap-6 before:absolute before:bottom-2 before:left-[11px] before:top-2 before:w-[1px] before:bg-white/10">
+          <div className="relative pl-8">
+            <span className="absolute left-0 top-1 flex h-6 w-6 items-center justify-center rounded-full border border-white/20 bg-ink">
+              <span className="h-2 w-2 rounded-full bg-accent" />
+            </span>
+            <p className="text-xs font-bold uppercase tracking-widest text-mist/80">1. Tactical Execution</p>
+            <p className="mt-1 text-xs text-mist/60">Executor attempted the sub-task using specified tools.</p>
+          </div>
+
+          <div className="relative pl-8">
+            <span className="absolute left-0 top-1 flex h-6 w-6 items-center justify-center rounded-full border border-white/20 bg-ink">
+              <span className={`h-2 w-2 rounded-full ${report?.decision === "pass" ? "bg-accent" : "bg-ember"}`} />
+            </span>
+            <p className="text-xs font-bold uppercase tracking-widest text-mist/80">
+              2. Evaluation: {report?.decision.toUpperCase() || "UNKNOWN"}
+            </p>
+            <p className="mt-1 text-xs text-mist/60">{report?.justification}</p>
+            {governance.hot_file_governance ? (
+              <div className="mt-4">
+                <HotFileGovernancePanel signal={governance.hot_file_governance} compact />
+              </div>
+            ) : null}
+          </div>
+
+          {governance.leader ? (
+            <div className="relative pl-8">
+              <span className="absolute left-0 top-1 flex h-6 w-6 items-center justify-center rounded-full border border-white/20 bg-ink">
+                <span className="h-2 w-2 rounded-full bg-warning" />
+              </span>
+              <div className="rounded-xl border border-warning/30 bg-warning/5 p-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold uppercase tracking-widest text-warning/90">
+                    3. Leader Diagnosis: {governance.leader.diagnosis_type.replace("_", " ")}
+                  </p>
+                  <span className="rounded bg-warning/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-tighter text-warning">
+                    Action: {governance.leader.action}
+                  </span>
+                </div>
+                <p className="mt-3 text-sm italic leading-relaxed text-mist/90">"{governance.leader.rationale}"</p>
+                {governance.leader.instructions && governance.leader.instructions.length > 0 ? (
+                  <div className="mt-4 border-t border-warning/20 pt-3">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mist/50">
+                      Strategic Recovery Instructions:
+                    </p>
+                    <ul className="mt-2 space-y-2">
+                      {governance.leader.instructions.map((inst: string, index: number) => (
+                        <li key={index} className="flex items-start gap-2 text-xs text-mist/80">
+                          <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-warning/40" />
+                          {inst}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {governance.ccb ? (
+            <div className="relative pl-8">
+              <span className="absolute left-0 top-1 flex h-6 w-6 items-center justify-center rounded-full border border-white/20 bg-ink">
+                <span className="h-2 w-2 rounded-full bg-sky-400" />
+              </span>
+              <div className="rounded-xl border border-sky-400/30 bg-sky-400/5 p-4 shadow-sm">
+                <p className="text-xs font-bold uppercase tracking-widest text-sky-400/90">4. CCB Expert Consensus</p>
+                <div className="mt-3">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-mist/50">
+                    Proposed Constitutional Modification:
+                  </p>
+                  <div className="mt-2 rounded-lg border border-white/5 bg-ink/40 p-3 font-mono text-xs leading-relaxed text-mist/70">
+                    {governance.ccb.proposed_change}
+                  </div>
+                </div>
+
+                {governance.ccb.experts && governance.ccb.experts.length > 0 ? (
+                  <div className="mt-5 grid gap-4 md:grid-cols-3">
+                    {governance.ccb.experts.map((expert: ExpertOpinion, index: number) => (
+                      <div key={index} className="rounded-xl border border-white/5 bg-ink/60 p-3 shadow-inner">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-mist/40">
+                            {expert.expert_role.replace("_", " ")}
+                          </p>
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[10px] font-black uppercase ${
+                              expert.vote === "approve" ? "bg-accent/20 text-accent" : "bg-ember/20 text-ember"
+                            }`}
+                          >
+                            {expert.vote}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-[11px] italic leading-relaxed text-mist/70" title={expert.rationale}>
+                          "{expert.rationale}"
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                <div className="mt-5 flex items-center justify-between border-t border-sky-400/20 pt-4">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`h-2 w-2 rounded-full ${
+                        governance.ccb.final_decision === "approve" ? "bg-accent" : "bg-ember"
+                      }`}
+                    />
+                    <p className="text-xs uppercase tracking-[0.18em] text-mist/60">Consensus Result</p>
+                  </div>
+                  <span
+                    className={`rounded-lg px-4 py-1 text-xs font-black uppercase tracking-[0.2em] ${
+                      governance.ccb.final_decision === "approve"
+                        ? "bg-accent text-ink shadow-[0_0_12px_rgba(102,255,187,0.4)]"
+                        : "bg-ember text-mist"
+                    }`}
+                  >
+                    {governance.ccb.final_decision}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export function ArtifactCompletenessPanel({
   artifactCompleteness
 }: {
@@ -3990,113 +4127,9 @@ export default function App() {
                   />
                 </section>
 
-                {selectedGovernance && (
-                  <section>
-                    <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-mist/50">Governance Lifecycle</h4>
-                    <div className="rounded-2xl border border-white/10 bg-ink/60 p-6 shadow-inner">
-                      <div className="flex flex-col gap-6 relative before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-[1px] before:bg-white/10">
-                        
-                        {/* Tactical Step */}
-                        <div className="relative pl-8">
-                          <span className="absolute left-0 top-1 h-6 w-6 rounded-full border border-white/20 bg-ink flex items-center justify-center">
-                            <span className="h-2 w-2 rounded-full bg-accent" />
-                          </span>
-                          <p className="text-xs font-bold uppercase tracking-widest text-mist/80">1. Tactical Execution</p>
-                          <p className="mt-1 text-xs text-mist/60">Executor attempted the sub-task using specified tools.</p>
-                        </div>
-
-                        {/* Evaluation Step */}
-                        <div className="relative pl-8">
-                          <span className={`absolute left-0 top-1 h-6 w-6 rounded-full border border-white/20 bg-ink flex items-center justify-center`}>
-                            <span className={`h-2 w-2 rounded-full ${selectedArtifactsReport?.decision === 'pass' ? 'bg-accent' : 'bg-ember'}`} />
-                          </span>
-                          <p className="text-xs font-bold uppercase tracking-widest text-mist/80">2. Evaluation: {selectedArtifactsReport?.decision.toUpperCase() || 'UNKNOWN'}</p>
-                          <p className="mt-1 text-xs text-mist/60">{selectedArtifactsReport?.justification}</p>
-                          {selectedGovernance.hot_file_governance ? (
-                            <div className="mt-4">
-                              <HotFileGovernancePanel signal={selectedGovernance.hot_file_governance} compact />
-                            </div>
-                          ) : null}
-                        </div>
-
-                        {/* Leader Step */}
-                        {selectedGovernance.leader && (
-                          <div className="relative pl-8">
-                            <span className="absolute left-0 top-1 h-6 w-6 rounded-full border border-white/20 bg-ink flex items-center justify-center">
-                              <span className="h-2 w-2 rounded-full bg-warning" />
-                            </span>
-                            <div className="rounded-xl border border-warning/30 bg-warning/5 p-4 shadow-sm">
-                              <div className="flex items-center justify-between">
-                                <p className="text-xs font-bold uppercase tracking-widest text-warning/90">3. Leader Diagnosis: {selectedGovernance.leader.diagnosis_type.replace('_', ' ')}</p>
-                                <span className="rounded bg-warning/20 px-2 py-0.5 text-[10px] text-warning uppercase font-bold tracking-tighter">Action: {selectedGovernance.leader.action}</span>
-                              </div>
-                              <p className="mt-3 text-sm text-mist/90 italic leading-relaxed">"{selectedGovernance.leader.rationale}"</p>
-                              {selectedGovernance.leader.instructions && selectedGovernance.leader.instructions.length > 0 && (
-                                <div className="mt-4 pt-3 border-t border-warning/20">
-                                  <p className="text-[10px] uppercase tracking-widest text-mist/50 font-bold">Strategic Recovery Instructions:</p>
-                                  <ul className="mt-2 space-y-2">
-                                    {selectedGovernance.leader.instructions.map((inst: string, i: number) => (
-                                      <li key={i} className="flex items-start gap-2 text-xs text-mist/80">
-                                        <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-warning/40" />
-                                        {inst}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              )}
-                              </div>
-                              </div>
-                              )}
-
-                              {/* CCB Step */}
-                              {selectedGovernance.ccb && (
-                              <div className="relative pl-8">
-                              <span className="absolute left-0 top-1 h-6 w-6 rounded-full border border-white/20 bg-ink flex items-center justify-center">
-                              <span className="h-2 w-2 rounded-full bg-sky-400" />
-                              </span>
-                              <div className="rounded-xl border border-sky-400/30 bg-sky-400/5 p-4 shadow-sm">
-                              <p className="text-xs font-bold uppercase tracking-widest text-sky-400/90">4. CCB Expert Consensus</p>
-                              <div className="mt-3">
-                                <p className="text-[10px] uppercase tracking-widest text-mist/50 font-bold">Proposed Constitutional Modification:</p>
-                                <div className="mt-2 rounded-lg border border-white/5 bg-ink/40 p-3 text-xs text-mist/70 font-mono leading-relaxed">
-                                  {selectedGovernance.ccb.proposed_change}
-                                </div>
-                              </div>
-
-                              {selectedGovernance.ccb.experts && selectedGovernance.ccb.experts.length > 0 && (
-                                <div className="mt-5 grid gap-4 md:grid-cols-3">
-                                  {selectedGovernance.ccb.experts.map((expert: ExpertOpinion, i: number) => (
-                                    <div key={i} className="rounded-xl border border-white/5 bg-ink/60 p-3 shadow-inner">
-                                      <div className="flex items-center justify-between">
-                                        <p className="text-[10px] uppercase tracking-widest text-mist/40 font-bold">{expert.expert_role.replace('_', ' ')}</p>
-                                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-black uppercase ${expert.vote === 'approve' ? 'bg-accent/20 text-accent' : 'bg-ember/20 text-ember'}`}>
-                                          {expert.vote}
-                                        </span>
-                                      </div>
-                                      <p className="mt-2 text-[11px] text-mist/70 leading-relaxed italic" title={expert.rationale}>
-                                        "{expert.rationale}"
-                                      </p>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                              <div className="mt-5 flex items-center justify-between border-t border-sky-400/20 pt-4">
-                                <div className="flex items-center gap-2">
-                                  <span className={`h-2 w-2 rounded-full ${selectedGovernance.ccb.final_decision === 'approve' ? 'bg-accent' : 'bg-ember'}`} />
-                                  <p className="text-xs font-bold text-mist/90 uppercase tracking-widest">Final Decision:</p>
-                                </div>
-                                <span className={`rounded-lg px-4 py-1 text-xs font-black uppercase tracking-[0.2em] ${selectedGovernance.ccb.final_decision === 'approve' ? 'bg-accent text-ink shadow-[0_0_12px_rgba(102,255,187,0.4)]' : 'bg-ember text-mist'}`}>
-                                  {selectedGovernance.ccb.final_decision}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-
-                      </div>
-                    </div>
-                  </section>
-                )}
+                {selectedGovernance ? (
+                  <GovernanceLifecyclePanel governance={selectedGovernance} report={selectedArtifactsReport} />
+                ) : null}
 
                 <div className="grid gap-6 lg:grid-cols-2">
                   <section>

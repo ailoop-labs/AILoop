@@ -11,6 +11,7 @@ import {
   Phase3CandidatePreflightCard,
   Phase3PreRunVerificationCard,
   FailureDiagnosticsPanel,
+  GovernanceLifecyclePanel,
   HotFileGovernancePanel,
   LifecycleStatusGrid,
   OperatorReasonPanel,
@@ -598,6 +599,73 @@ describe("RunHistoryCard", () => {
     expect(html).toContain("Round Outcome");
     expect(html).toContain("Paused for operator review after 2 auto rework attempts still ended in evaluator failure.");
     expect(html).toContain("Next safe action: Split the next change into a bounded follow-up.");
+  });
+
+  test("renders leader and CCB routing details without losing the paused run history context", () => {
+    const governanceHtml = renderToStaticMarkup(
+      <GovernanceLifecyclePanel
+        report={makeReport({
+          decision: "fail",
+          justification: "The evaluator exhausted tactical rework and routed the round into governance."
+        })}
+        governance={{
+          hot_file_governance: null,
+          leader: {
+            rationale: "Escalate to CCB because the paused governance handoff needs constitutional review.",
+            action: "escalate_to_ccb",
+            diagnosis_type: "constitutional_conflict",
+            instructions: ["Keep the failed round artifacts attached to the paused governance review."]
+          },
+          ccb: {
+            proposed_change: "# Constitution patch\n\nClarify paused governance history handling.\n",
+            final_decision: "escalate_to_human",
+            experts: [
+              {
+                expert_role: "senior_dev",
+                vote: "reject",
+                rationale: "Implementation evidence should land before policy changes.",
+                incapacity_flag: false
+              },
+              {
+                expert_role: "qa_lead",
+                vote: "reject",
+                rationale: "Keep the failed round history intact and request human review.",
+                incapacity_flag: false
+              }
+            ]
+          }
+        }}
+      />
+    );
+
+    const historyHtml = renderToStaticMarkup(
+      <RunHistoryCard
+        run={makeRunHistoryItem({
+          hot_file_governance: null,
+          evaluation: {
+            decision: "fail",
+            justification: "The evaluator exhausted tactical rework and routed the round into governance.",
+            root_cause: "paused governance handoff",
+            evidence: ["bun test src/loop/engine.test.ts", "bun test src/server.test.ts"],
+            aggregate_score: 68,
+            recommended_next_action: "Open the evidence bundle before resuming."
+          }
+        })}
+        index={0}
+        startIndex={0}
+        onOpenArtifacts={() => {}}
+      />
+    );
+
+    expect(historyHtml).toContain("Governance History");
+    expect(historyHtml).toContain("Attempt 1/2: trigger=&#x27;Missing rollback coverage for the paused path.&#x27; evaluation=fail");
+    expect(historyHtml).toContain("Paused for operator review after 2 auto rework attempts still ended in evaluator failure.");
+    expect(governanceHtml).toContain("Governance Lifecycle");
+    expect(governanceHtml).toContain("3. Leader Diagnosis: constitutional conflict");
+    expect(governanceHtml).toContain("Action: escalate_to_ccb");
+    expect(governanceHtml).toContain("4. CCB Expert Consensus");
+    expect(governanceHtml).toContain("Clarify paused governance history handling.");
+    expect(governanceHtml).toContain("escalate_to_human");
   });
 });
 

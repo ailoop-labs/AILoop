@@ -2728,6 +2728,134 @@ describe("console server API contract", () => {
     });
   });
 
+  test("returns persisted leader and CCB routing from real governance writes on the failed round artifact bundle", async () => {
+    const token = "test-token";
+    const { config, fetchHandler, paths } = await createFixture({
+      consoleAdminToken: token
+    });
+
+    const timestamp = "2026-03-10T11-15-00-000Z";
+    const summary = [
+      "# AILoop Round Summary",
+      "",
+      "## Auto Rework Attempts",
+      "- Attempt 1/2: trigger='Missing rollback coverage for the paused path.' evaluation=fail",
+      "- Attempt 2/2: trigger='History still drops the first rework attempt.' evaluation=fail",
+      "",
+      "## Round Outcome",
+      "- Paused for operator review after 2 auto rework attempts still ended in evaluator failure."
+    ].join("\n");
+
+    await writeRunArtifacts(paths.runsDir, timestamp, {
+      summary,
+      metrics: { round: 4, status: "failure" },
+      evaluation: {
+        decision: "fail",
+        justification: "The evaluator exhausted tactical rework and handed off to governance.",
+        evidence: ["bun test src/server.test.ts"],
+        aggregate_score: 68
+      },
+      log: "governance handoff log\n",
+      stateChange: "No state changes detected.\n"
+    });
+    await seedRoundHistory(config.homeDir, {
+      round: 4,
+      timestamp,
+      state: "paused",
+      decision: "fail",
+      justification: "The evaluator exhausted tactical rework and handed off to governance."
+    });
+
+    const leaderDecision = {
+      rationale: "Escalate to CCB because the governance handoff contract needs constitutional review.",
+      action: "escalate_to_ccb",
+      diagnosis_type: "constitutional_conflict",
+      instructions: ["Keep the paused artifact bundle attached to the failed round."],
+      proposed_readme_change: "# Constitution patch\n\nClarify paused governance history handling.\n"
+    };
+    const ccbResult = {
+      decision: "escalate_to_human",
+      rationale: "Human review is required before changing the constitutional workflow.",
+      experts: [
+        {
+          expert_role: "senior_dev",
+          vote: "reject",
+          rationale: "Implementation evidence should land before policy changes.",
+          incapacity_flag: false
+        },
+        {
+          expert_role: "qa_lead",
+          vote: "reject",
+          rationale: "Keep the failed round history intact and request human review.",
+          incapacity_flag: false
+        }
+      ]
+    };
+
+    const db = new DatabaseManager({ dbPath: path.join(config.homeDir, "ailoop.db") });
+    try {
+      await db.saveLeaderStrategy(4, leaderDecision);
+      await db.saveCCBSession(4, ccbResult, leaderDecision.proposed_readme_change);
+    } finally {
+      db.close();
+    }
+
+    const response = await fetchHandler(
+      createAuthorizedRequest(`http://console.test/api/runs/${timestamp}/artifacts`, token)
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      timestamp,
+      summary,
+      metrics: {
+        round: 4,
+        status: "failure"
+      },
+      evaluation: {
+        decision: "fail",
+        justification: "The evaluator exhausted tactical rework and handed off to governance.",
+        evidence: ["bun test src/server.test.ts"],
+        aggregate_score: 68
+      },
+      hot_file_governance: null,
+      log: "governance handoff log\n",
+      state_change: "No state changes detected.\n",
+      artifacts: {
+        kind: "full_bundle",
+        label: "Full evidence bundle",
+        present: ["log", "summary", "metrics", "state_change", "evaluation"],
+        missing: []
+      },
+      active_requirement: {
+        path: paths.activeRequirementPath,
+        exists: false,
+        artifact_status: "missing",
+        lifecycle_status: "active",
+        title: null,
+        summary: null,
+        acceptance_criteria_total: 0,
+        acceptance_criteria_completed: 0,
+        markdown: null,
+        updated_at: null
+      },
+      governance: {
+        hot_file_governance: null,
+        leader: {
+          rationale: leaderDecision.rationale,
+          action: leaderDecision.action,
+          diagnosis_type: leaderDecision.diagnosis_type,
+          instructions: leaderDecision.instructions
+        },
+        ccb: {
+          proposed_change: leaderDecision.proposed_readme_change,
+          final_decision: ccbResult.decision,
+          experts: ccbResult.experts
+        }
+      }
+    });
+  });
+
   test("returns hot-file governance in both artifact and governance payloads for selected runs", async () => {
     const token = "test-token";
     const { config, fetchHandler, paths } = await createFixture({
