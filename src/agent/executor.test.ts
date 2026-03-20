@@ -111,6 +111,26 @@ describe("buildExecutorPrompt", () => {
     expect(prompt).toContain("If you run local verifications or test commands, capture the concrete evidence in both `summary` and `actions`.");
   });
 
+  test("requires an explicit round plan and reserves action budget for final verification", () => {
+    const prompt = buildExecutorPrompt(
+      {
+        round: 1,
+        goal: "Ship feature",
+        instructions: ["Keep scope minimal"],
+        subTask: sampleSubTask,
+        ailoopHome: "/tmp/.ailoop",
+        workspaceRoot: "/tmp/workspace",
+        availableTools: [{ name: "run_shell", description: "Execute shell command" }],
+        availableSkills: []
+      },
+      "# Executor Role\n\nProject-specific executor instructions."
+    );
+
+    expect(prompt).toContain("Start each round with a short explicit plan covering the minimal read/write/verification steps you intend to take.");
+    expect(prompt).toContain("Reserve enough remaining action budget for final verification; do not spend the last action-budget unit before running validation.");
+    expect(prompt).toContain("If you cannot both complete the change and still run final verification within the remaining action budget, fail explicitly instead of guessing or skipping validation.");
+  });
+
   test("requires operational evidence in the output contract", () => {
     const prompt = buildExecutorPrompt(
       {
