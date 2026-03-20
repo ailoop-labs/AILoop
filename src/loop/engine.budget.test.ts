@@ -223,6 +223,13 @@ describe("LoopEngine budget guard", () => {
     });
     expect(state.previous_tool_result?.next_state_hint).toBe("pause");
 
+    const runArtifacts = await fs.readdir(path.join(homeDir, "runs"));
+    const logFile = runArtifacts.find((entry) => entry.endsWith(".round.log"));
+    expect(logFile).toBeDefined();
+
+    const logText = await fs.readFile(path.join(homeDir, "runs", logFile as string), "utf8");
+    expect(logText).toContain("Round error: BudgetBreach: action budget exceeded");
+
     await fs.rm(homeDir, { recursive: true, force: true });
   });
 
