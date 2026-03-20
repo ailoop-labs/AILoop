@@ -356,6 +356,52 @@ describe("writeSummaryFile auto rework section", () => {
     });
   });
 
+  test("redacts secret-bearing auto rework history and paused round next steps in persisted artifacts", async () => {
+    await withSecretEnv(async () => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-summary-test-"));
+      const summaryPath = path.join(dir, "round.summary.md");
+      const evaluationPath = path.join(dir, "round.evaluation.json");
+      const input = makeSummaryInput([
+        "Attempt 1/2: evaluator=fail after OPENAI_API_KEY=sk-test-secret appeared in the artifact trace",
+        'Attempt 2/2: evaluator=fail after const sessionSecret = "super-secret-value" leaked into the summary'
+      ]);
+
+      input.evaluation.decision = "fail";
+      input.evaluation.justification = "Repeated auto rework still leaked secrets into persisted governance history.";
+      input.evaluation.recommended_next_action =
+        'Rotate OPENAI_API_KEY=sk-test-secret and const sessionSecret = "super-secret-value" before resuming.';
+      input.metrics.evaluator_decision = "fail";
+      input.nextRecommendation = input.evaluation.recommended_next_action;
+
+      await writeSummaryFile(summaryPath, input);
+      await writeEvaluationFile(evaluationPath, input.evaluation);
+
+      const summaryText = await fs.readFile(summaryPath, "utf8");
+      const evaluationRaw = await fs.readFile(evaluationPath, "utf8");
+      const evaluationJson = JSON.parse(evaluationRaw) as {
+        recommended_next_action?: string;
+      };
+
+      expect(summaryText).not.toContain("sk-test-secret");
+      expect(summaryText).not.toContain("super-secret-value");
+      expect(summaryText).toContain("## Auto Rework Attempts");
+      expect(summaryText).toContain("Attempt 1/2: evaluator=fail after OPENAI_API_KEY=[REDACTED] appeared in the artifact trace");
+      expect(summaryText).toContain('Attempt 2/2: evaluator=fail after const sessionSecret = "[REDACTED]" leaked into the summary');
+      expect(summaryText).toContain("## Round Outcome");
+      expect(summaryText).toContain(
+        'Next safe action: Rotate OPENAI_API_KEY=[REDACTED] and const sessionSecret = "[REDACTED]" before resuming.'
+      );
+
+      expect(evaluationRaw).not.toContain("sk-test-secret");
+      expect(evaluationRaw).not.toContain("super-secret-value");
+      expect(evaluationJson.recommended_next_action).toBe(
+        'Rotate OPENAI_API_KEY=[REDACTED] and const sessionSecret = "[REDACTED]" before resuming.'
+      );
+
+      await fs.rm(dir, { recursive: true, force: true });
+    });
+  });
+
   test("keeps evaluation artifacts as valid JSON after redaction", async () => {
     await withSecretEnv(async () => {
       const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ailoop-summary-test-"));
