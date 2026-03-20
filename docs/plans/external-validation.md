@@ -219,6 +219,72 @@ For `2026-03-20T01-40-18-087Z`, the persisted summary, log, metrics, and state-c
 
 The same evidence bundle also explains the action-budget overrun: after `Evaluator completed LLM dimension checks (decision=fail)`, the log shows `[GOVERNANCE] Tactical Rework attempt 1/3`, and the metrics file ends at `budget_usage.actionsUsed: 11` against `budget_limits.actions: 10` (`11 / 10`). The round therefore terminated with `BudgetBreach: action budget exceeded` before another evaluation package could be persisted. When action-budget evidence stays below the persisted limit it remains descriptive and non-CCB, unless the already documented escalation triggers in `Decision Branch B` or `Decision Branch C` apply; Round 121 crossed the limit, so this note records a budget-breach workflow failure without inventing a new action-count rule.
 
+### Remediation Proposal: External-Validation Evidence Reporting Slice
+
+This remediation proposal stays inside the current external-validation evidence-reporting slice and converts the Round 121 failure mode into smaller future rounds. Each round below is limited to one documentation or evidence outcome so executor work, evaluator-packaging review, and UI follow-up do not compete for the same action budget.
+
+#### Round Boundary 1: Persisted Evidence Recheck Only
+
+**Objective**
+- Reconfirm the Round 121 workflow-first failure from the already persisted run artifacts before any additional slice work is attempted.
+
+**Allowed Work**
+- Read the Round 121 log, metrics, summary, and state-change artifacts.
+- Record one short note naming the executor-complete line, the missing evaluation artifact, and the `11 / 10` action-budget breach.
+
+**Acceptance Checks**
+- `rg -n "Executor Codex execution finished \(ok=true\)|BudgetBreach: action budget exceeded" /Users/yinjames/projects/AILoop/.ailoop/runs/2026-03-20T01-40-18-087Z.round.log` returns both lines from the same round.
+- `rg -n '"actions"|"actionsUsed"' /Users/yinjames/projects/AILoop/.ailoop/runs/2026-03-20T01-40-18-087Z.round.metrics.json` returns `actions: 10` and `actionsUsed: 11`.
+- `test ! -f /Users/yinjames/projects/AILoop/.ailoop/runs/2026-03-20T01-40-18-087Z.round.evaluation.json` succeeds, confirming the packaging gap is still observable from persisted artifacts alone.
+
+**Round Scope Cap**
+- Maximum 4 shell actions.
+- No code changes.
+- No edits outside the active plan or a single handoff note.
+
+#### Round Boundary 2: Summary-First Evidence Contract Only
+
+**Objective**
+- Define the exact evidence-reporting contract for the `Most action-heavy round` external-validation handoff without changing runtime behavior.
+
+**Allowed Work**
+- Update only the planning or requirement text that governs the summary-first panel payload and field order.
+- Keep the contract limited to `stable_id`, round number, task objective, `actionsUsed / actions`, and same-round artifact references.
+
+**Acceptance Checks**
+- `rg -n "Most action-heavy round|stable_id|actionsUsed / actions|same-round artifact" /Users/yinjames/projects/AILoop/docs/plans/external-validation.md /Users/yinjames/projects/AILoop/.ailoop/product-requirements/current.md` returns the contract language in the targeted documentation surface.
+- `git -C /Users/yinjames/projects/AILoop diff --name-only` lists only the documentation file intentionally updated for that round.
+
+**Round Scope Cap**
+- Maximum 5 actions.
+- One documentation file change at most.
+- No server, reporting, evaluator, or UI code edits.
+
+#### Round Boundary 3: Single-Surface Implementation Hand-off Only
+
+**Objective**
+- Hand one implementation-ready external-validation task to a later round after the evidence contract is frozen.
+
+**Allowed Work**
+- Limit the follow-up to one surface only: reporting payload wiring, API exposure, or the Web Console checklist panel.
+- Carry forward the already documented acceptance criteria instead of expanding the slice.
+
+**Acceptance Checks**
+- The round task statement names exactly one implementation surface and explicitly marks the other two as out of scope.
+- `rg -n "Out of Scope|reporting payload|API exposure|Web Console checklist panel" /Users/yinjames/projects/AILoop/docs/plans/external-validation.md` shows the single-surface boundary before implementation begins.
+
+**Round Scope Cap**
+- Maximum 6 actions.
+- One implementation surface per round.
+- Stop the round if additional evidence, packaging, or multi-surface remediation is required.
+
+#### Out of Scope for This Remediation Sequence
+
+- Reopening repository-selection, baseline-overlay, or task-level comparison slices
+- Runtime-code fixes for evaluator packaging in the same round as evidence-contract work
+- Budget-policy, governance-policy, telemetry, or persistence-schema changes
+- Multi-surface implementation rounds that combine reporting, API, and Web Console edits
+
 ### Web Console Implication
 
 - Mirror the same summary-first contract inside the `External Validation Checklist` as a single `Most action-heavy round` panel.
